@@ -154,7 +154,6 @@ def get_player_id(name):
     return None
 
 def get_handedness(name):
-def get_handedness(name):
     try:
         # Normalize name: remove accents, trim spaces, capitalize
         name = ' '.join(strip_accents(name).split())
