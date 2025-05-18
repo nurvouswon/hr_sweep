@@ -356,7 +356,7 @@ show_cols = [
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
         'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14'
     ]
-    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
+show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
     top5 = df_leaderboard.head(5)
     st.dataframe(top5[show_cols])
