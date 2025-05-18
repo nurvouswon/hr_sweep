@@ -3,7 +3,12 @@ import pandas as pd
 import requests
 from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
 from datetime import datetime, timedelta
+import unicodedata
 
+def strip_accents(text):
+    """Remove accents from a string for consistent MLB lookup."""
+    return ''.join(c for c in unicodedata.normalize('NFD', text)
+                   if unicodedata.category(c) != 'Mn')
 API_KEY = "11ac3c31fb664ba8971102152251805"
 
 ballpark_orientations = {
@@ -66,7 +71,7 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
         temp = weather_hour.get('temp_f', None)
         wind = weather_hour.get('wind_mph', None)
-        # --- Robust wind_dir extraction and mapping ---
+        # --- Improved wind_dir extraction and mapping ---
         raw_dir = weather_hour.get('wind_dir', '').upper().replace("-", "")
         mapping = {
             "N": "N", "NNE": "NE", "NE": "NE", "ENE": "NE",
@@ -76,6 +81,9 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         }
         wind_dir = None
         for key in mapping:
+            if key == raw_dir:
+                wind_dir = mapping[key]
+                break
             if key in raw_dir:
                 wind_dir = mapping[key]
                 break
@@ -136,15 +144,15 @@ def get_player_id(name):
 
 def get_handedness(name):
     try:
+        name = strip_accents(name)
         first, last = name.split(" ", 1)
         lookup = playerid_lookup(last, first)
         if lookup.empty:
-            # Try capitalizing or fixing weird cases
             first, last = first.capitalize(), last.capitalize()
             lookup = playerid_lookup(last, first)
         if not lookup.empty:
-            throws = lookup.iloc[0]['throws']
-            bats = lookup.iloc[0]['bats']
+            throws = lookup.iloc[0]['throws'] if 'throws' in lookup.columns else None
+            bats = lookup.iloc[0]['bats'] if 'bats' in lookup.columns else None
             st.write(f"DEBUG HANDEDNESS: {name} => Bats:{bats} Throws:{throws}")
             return bats, throws
         else:
