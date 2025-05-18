@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 st.title("⚾️ Today's MLB HR Probability Leaderboard")
 
-# -- 1. Get today's lineups from MLB.com --
+# -- 1. Get today's lineups from MLB.com (NO name filter) --
 def get_todays_mlb_lineups():
     today = datetime.now().strftime("%Y-%m-%d")
     schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
@@ -29,8 +29,7 @@ def get_todays_mlb_lineups():
                     # Only take batters in starting lineup (battingOrder present)
                     if "battingOrder" in pdata and "person" in pdata:
                         full_name = pdata["person"]["fullName"]
-                        if len(full_name.split(" ")) == 2:
-                            batters.add(full_name)
+                        batters.add(full_name)  # <-- No name length restriction
             except Exception:
                 continue
     return list(batters)
@@ -40,6 +39,7 @@ def load_todays_batters():
     return get_todays_mlb_lineups()
 
 todays_batters = load_todays_batters()
+
 if not todays_batters:
     st.warning("Couldn't load today's MLB lineups from MLB.com. Try reloading or check your connection.")
 else:
@@ -121,7 +121,7 @@ existing_score_cols = [col for col in score_cols if col in df.columns]
 
 # Pick the first available HR_Score column to sort by, prefer most recent
 sort_window = None
-for col in score_cols[1:]:  # skip season for sorting, prefer recent (14,7,5,3)
+for col in score_cols[1:]:
     if col in df.columns and df[col].sum() > 0:
         sort_window = col
         break
