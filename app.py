@@ -269,11 +269,54 @@ if uploaded_file and xhr_file:
     park_df = pd.DataFrame(park_factor_rows)
     df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-    df_final = df_final.merge(
-        xhr_df[['player', 'hr_total', 'xhr', 'xhr_diff']],
-        left_on='Batter', right_on='player', how='left'
-    )
-    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+# --- Robust Handedness and Merge ---
+def first_last_to_comma(name):
+    if pd.isna(name): return ""
+    parts = name.strip().split()
+    if len(parts) >= 2:
+        return f"{parts[-1]}, {' '.join(parts[:-1])}"
+    return name.strip()
+
+def get_handedness(name):
+    try:
+        first, last = name.split(" ", 1)
+        lookup = playerid_lookup(last, first)
+        if lookup.empty:
+            # Try switching case if initial lookup fails
+            first, last = first.capitalize(), last.capitalize()
+            lookup = playerid_lookup(last, first)
+        if not lookup.empty:
+            throws = lookup.iloc[0]['throws']
+            bats = lookup.iloc[0]['bats']
+            return bats, throws
+    except Exception:
+        return None, None
+    return None, None
+
+# Add standardized merge name
+df_final['batter_comma'] = df_final['Batter'].apply(first_last_to_comma)
+
+# Assign handedness robustly
+batter_handedness = []
+pitcher_handedness = []
+for idx, row in df_final.iterrows():
+    b_bats, _ = get_handedness(row['Batter'])
+    _, p_throws = get_handedness(row['Pitcher'])
+    batter_handedness.append(b_bats)
+    pitcher_handedness.append(p_throws)
+df_final['BatterHandedness'] = batter_handedness
+df_final['PitcherHandedness'] = pitcher_handedness
+
+# Merge xHR data (use your uploaded xhr_df or reload it)
+xhr = pd.read_csv(xhr_file)  # You can use xhr_df if already loaded!
+df_final = df_final.merge(
+    xhr[['player', 'hr_total', 'xhr', 'xhr_diff']],
+    left_on='batter_comma', right_on='player', how='left'
+)
+df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+
+# Drop helper columns
+df_final = df_final.drop(columns=['batter_comma', 'player'])
     def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
