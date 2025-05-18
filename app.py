@@ -270,11 +270,10 @@ if uploaded_file and xhr_file:
     df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
     df_final = df_final.merge(
-        xhr_df[['player_name','hr','xhr']],
-        left_on='Batter', right_on='player_name', how='left'
+        xhr_df[['player', 'hr_total', 'xhr', 'xhr_diff']],
+        left_on='Batter', right_on='player', how='left'
     )
-    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr']
-
+    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
     def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
