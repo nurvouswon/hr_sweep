@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 API_KEY = "11ac3c31fb664ba8971102152251805"
 
-# Park orientation for wind effect
 ballpark_orientations = {
     "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
     "Camden Yards": "NE", "Rogers Centre": "NE", "Comerica Park": "N",
@@ -20,7 +19,6 @@ ballpark_orientations = {
     "Nationals Park": "NE", "Petco Park": "N", "Citizens Bank Park": "NE"
 }
 
-# Park HR factors (normalized, e.g. 1.00 = league avg, >1.00 = HR friendly)
 park_factors = {
     "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
     "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.82,
@@ -40,6 +38,7 @@ def get_compass_idx(dir_str):
     dir_str = dir_str.upper()
     try: return compass.index(dir_str)
     except: return -1
+
 def is_wind_out(wind_dir, park_orientation):
     wi = get_compass_idx(wind_dir)
     pi = get_compass_idx(park_orientation)
@@ -80,6 +79,18 @@ def get_player_id(name):
         return None
     return None
 
+def get_handedness(name):
+    try:
+        first, last = name.split(" ", 1)
+        lookup = playerid_lookup(last, first)
+        if not lookup.empty:
+            throws = lookup.iloc[0]['throws']
+            bats = lookup.iloc[0]['bats']
+            return bats, throws
+    except Exception:
+        return None, None
+    return None, None
+
 def get_batter_stats_multi(batter_name, windows):
     pid = get_player_id(batter_name)
     out = {}
@@ -113,10 +124,14 @@ def get_batter_stats_multi(batter_name, windows):
 def get_pitcher_stats_multi(pitcher_name, windows):
     pid = get_player_id(pitcher_name)
     out = {}
+    stats_list = [
+        "BarrelRateAllowed", "EVAllowed", "HRAllowed", "BIP", "HardHitRate",
+        "FlyBallRate", "KRate", "BBRate", "HR9"
+    ]
     if not pid:
         for w in windows:
-            out[f"P_BarrelRateAllowed_{w}"] = None
-            out[f"P_EVAllowed_{w}"] = None
+            for stat in stats_list:
+                out[f"P_{stat}_{w}"] = None
         return out
     for w in windows:
         start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
@@ -124,19 +139,33 @@ def get_pitcher_stats_multi(pitcher_name, windows):
         try:
             df = statcast_pitcher(start, end, pid)
             if df.empty:
-                out[f"P_BarrelRateAllowed_{w}"] = None
-                out[f"P_EVAllowed_{w}"] = None
+                for stat in stats_list:
+                    out[f"P_{stat}_{w}"] = None
                 continue
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
-            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
             total = len(df)
-            barrel_rate = barrels / total if total > 0 else 0
+            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
             ev_allowed = df['launch_speed'].mean() if total > 0 else None
-            out[f"P_BarrelRateAllowed_{w}"] = round(barrel_rate, 3)
+            hrs = df[df['events'] == "home_run"].shape[0]
+            hard_hit = df[df['launch_speed'] > 95].shape[0]
+            fly_balls = df[df['bb_type'] == 'fly_ball'].shape[0]
+            k = df[df['events'] == 'strikeout'].shape[0]
+            bb = df[df['events'] == 'walk'].shape[0]
+            outs = df['outs_when_up'].sum() if 'outs_when_up' in df.columns else 0
+            innings = outs / 3 if outs else 0
+            hr9 = (hrs / innings * 9) if innings > 0 else None
+            out[f"P_BarrelRateAllowed_{w}"] = round(barrels / total, 3) if total > 0 else None
             out[f"P_EVAllowed_{w}"] = round(ev_allowed, 1) if ev_allowed else None
+            out[f"P_HRAllowed_{w}"] = hrs
+            out[f"P_BIP_{w}"] = total
+            out[f"P_HardHitRate_{w}"] = round(hard_hit / total, 3) if total > 0 else None
+            out[f"P_FlyBallRate_{w}"] = round(fly_balls / total, 3) if total > 0 else None
+            out[f"P_KRate_{w}"] = round(k / total, 3) if total > 0 else None
+            out[f"P_BBRate_{w}"] = round(bb / total, 3) if total > 0 else None
+            out[f"P_HR9_{w}"] = round(hr9, 2) if hr9 else None
         except Exception:
-            out[f"P_BarrelRateAllowed_{w}"] = None
-            out[f"P_EVAllowed_{w}"] = None
+            for stat in stats_list:
+                out[f"P_{stat}_{w}"] = None
     return out
 
 def norm_barrel(x):   return min(x / 0.15, 1) if pd.notnull(x) else 0
@@ -152,11 +181,12 @@ def norm_weather(temp, wind, wind_effect):
 
 windows = [3, 5, 7, 14]
 
-st.title("⚾️ MLB HR Matchup Leaderboard (All Data, Positive Regression)")
+st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, All Features)")
 
 st.markdown("""
 **Upload your daily matchup CSV:**  
 `Batter,Pitcher,City,Park,Date`  
+(You can also add `BatterTeam,PitcherTeam` for your own use.)  
 And a **Baseball Savant xHR/HR CSV** (with columns `player_name`, `hr`, `xhr`)
 """)
 
@@ -172,8 +202,19 @@ if uploaded_file and xhr_file:
     xhr_df = pd.read_csv(xhr_file)
     xhr_df = xhr_df.rename(columns={c: c.lower() for c in xhr_df.columns})
 
+    # Auto-fill handedness columns
+    batter_handedness = []
+    pitcher_handedness = []
+    for idx, row in df_upload.iterrows():
+        b_bats, _ = get_handedness(row['Batter'])
+        _, p_throws = get_handedness(row['Pitcher'])
+        batter_handedness.append(b_bats)
+        pitcher_handedness.append(p_throws)
+    df_upload['BatterHandedness'] = batter_handedness
+    df_upload['PitcherHandedness'] = pitcher_handedness
+
     weather_rows, stat_rows, park_factor_rows = [], [], []
-    st.write("Fetching Statcast, weather, park factor, and merging xHR (this may take a few minutes)...")
+    st.write("Fetching Statcast, weather, park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
     for idx, row in df_upload.iterrows():
         city = row['City']
@@ -206,7 +247,6 @@ if uploaded_file and xhr_file:
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr']
 
     def calc_hr_score(row):
-        # Example: weighting recent (7/14d) more. Adjust as you wish!
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
             norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
@@ -226,6 +266,7 @@ if uploaded_file and xhr_file:
             norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
             norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
             norm_ev(row.get('P_EVAllowed_3')) * 0.01
+            # You can add more pitcher stats to scoring as desired!
         )
         park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
         weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
@@ -238,27 +279,33 @@ if uploaded_file and xhr_file:
 
     st.success("All done! Top matchups below:")
 
+    # Show a wide array of pitcher stats for your review!
     show_cols = [
-        'Batter','Pitcher','Park','HR_Score','Reg_xHR',
-        'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect'
+        'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','HR_Score','Reg_xHR',
+        'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
+        'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
+        'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14'
     ]
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
     top5 = df_leaderboard.head(5)
     st.dataframe(top5[show_cols])
 
-    st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']] if 'Reg_xHR' in top5.columns else top5.set_index('Batter')[['HR_Score']])
+    # Bar chart for top 5 (HR_Score and Reg_xHR)
+    if 'Reg_xHR' in top5.columns:
+        st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
+    else:
+        st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
-    # Show all data and download
+    # Show all data and allow download
     st.dataframe(df_leaderboard[show_cols])
     csv_out = df_leaderboard.to_csv(index=False).encode()
-    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_with_regression.csv")
-
+    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
 else:
     st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
-- All stats (barrel%, EV) are fetched for 3, 5, 7, 14 days, weather/park/wind included.
-- **Reg_xHR** is positive regression: xHR - HR (from Savant).
-- Top 5 chart and full leaderboard with all key stats included.
+- **All rolling batter and pitcher stats (3, 5, 7, 14 days) and all advanced pitcher stats per window (Barrel%, EV, HR, BIP, HardHit%, FlyBall%, K%, BB%, HR/9) are included.**
+- Weather, wind, park factor, handedness, and xHR regression are all automated.
+- CSV download and top-5 leaderboard chart included.
 """)
