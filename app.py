@@ -1,49 +1,36 @@
 import streamlit as st
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 from pybaseball import statcast_batter, playerid_lookup
 from datetime import datetime, timedelta
 
-st.title("⚾️ Today's MLB HR Probability Leaderboard")
+st.title("⚾️ Today's MLB HR Probability Leaderboard (Rotowire)")
 
-# -- 1. Get today's lineups from MLB.com (NO name filter) --
-def get_todays_mlb_lineups():
-    today = datetime.now().strftime("%Y-%m-%d")
-    schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
-    resp = requests.get(schedule_url)
-    if resp.status_code != 200:
-        return []
-    games = resp.json().get("dates", [{}])[0].get("games", [])
+# -- 1. Scrape Rotowire for today's confirmed lineups --
+@st.cache_data(ttl=900)
+def get_rotowire_batters():
+    url = "https://www.rotowire.com/baseball/daily-lineups.php"
+    resp = requests.get(url)
+    soup = BeautifulSoup(resp.text, "html.parser")
     batters = set()
-    for game in games:
-        game_pk = game.get("gamePk")
-        box_url = f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
-        box = requests.get(box_url)
-        if box.status_code != 200:
+    for lineup in soup.select("div.lineup.is-mlb"):
+        # Only use CONFIRMED lineups (has green 'Confirmed' checkmark)
+        if not lineup.select_one(".confirmed"):
             continue
-        box_data = box.json()
-        for team_side in ["home", "away"]:
-            try:
-                lineup = box_data["liveData"]["boxscore"]["teams"][team_side]["players"]
-                for player_id, pdata in lineup.items():
-                    # Only take batters in starting lineup (battingOrder present)
-                    if "battingOrder" in pdata and "person" in pdata:
-                        full_name = pdata["person"]["fullName"]
-                        batters.add(full_name)  # <-- No name length restriction
-            except Exception:
-                continue
+        for player_cell in lineup.select("div.lineup__batters .lineup__player"):
+            name_tag = player_cell.select_one(".lineup__player__text")
+            if name_tag:
+                name = name_tag.text.strip()
+                if name and not name.startswith("P:"):  # Skip pitcher label
+                    batters.add(name)
     return list(batters)
 
-@st.cache_data(ttl=900)
-def load_todays_batters():
-    return get_todays_mlb_lineups()
-
-todays_batters = load_todays_batters()
-
+todays_batters = get_rotowire_batters()
 if not todays_batters:
-    st.warning("Couldn't load today's MLB lineups from MLB.com. Try reloading or check your connection.")
+    st.warning("Couldn't load today's MLB lineups from Rotowire. Try reloading or check your connection.")
 else:
-    st.write(f"Found {len(todays_batters)} batters in today's MLB starting lineups.")
+    st.write(f"Found {len(todays_batters)} confirmed batters in today's lineups.")
 
 # -- 2. Rolling windows in days: season, 14, 7, 5, 3 --
 windows = [162, 14, 7, 5, 3]
@@ -119,7 +106,6 @@ if not df.empty:
 score_cols = [f"HR_Score_{w}" for w in windows]
 existing_score_cols = [col for col in score_cols if col in df.columns]
 
-# Pick the first available HR_Score column to sort by, prefer most recent
 sort_window = None
 for col in score_cols[1:]:
     if col in df.columns and df[col].sum() > 0:
