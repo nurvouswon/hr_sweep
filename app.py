@@ -154,26 +154,51 @@ def get_player_id(name):
     return None
 
 def get_handedness(name):
+    import unicodedata
     try:
-        # Normalize name: remove accents, trim spaces, capitalize
-        name = ' '.join(strip_accents(name).split())
+        # Normalize: strip accents, remove extra spaces, capitalize
+        def normalize(n):
+            n = ''.join(
+                c for c in unicodedata.normalize('NFD', n)
+                if unicodedata.category(c) != 'Mn'
+            )
+            return ' '.join(n.strip().split()).title()
+
+        name = normalize(name)
         first, last = name.split(" ", 1)
-        lookup = playerid_lookup(last, first)
-        # Fallback: try last name only, filter to first name
-        if lookup.empty:
-            lookup = playerid_lookup(last, None)
+
+        # Try all reasonable variants
+        tries = [
+            (last, first),
+            (last.upper(), first.upper()),
+            (last.lower(), first.lower()),
+            (last.capitalize(), first.capitalize()),
+            (last.split(" ")[0], first)  # just in case multi-part last
+        ]
+
+        for l, f in tries:
+            lookup = playerid_lookup(l, f)
             if not lookup.empty:
-                lookup = lookup[lookup['name_first'].str.lower().str.contains(first.lower())]
-        if not lookup.empty:
-            throws = lookup.iloc[0]['throws'] if 'throws' in lookup.columns else None
-            bats = lookup.iloc[0]['bats'] if 'bats' in lookup.columns else None
-            st.write(f"DEBUG HANDEDNESS: {name} => Bats:{bats} Throws:{throws}")
-            return bats, throws
-        else:
-            st.write(f"DEBUG HANDEDNESS: {name} => Not found in lookup")
+                throws = lookup.iloc[0]['throws'] if 'throws' in lookup.columns else None
+                bats = lookup.iloc[0]['bats'] if 'bats' in lookup.columns else None
+                if pd.notnull(bats) and pd.notnull(throws):
+                    st.write(f"DEBUG HANDEDNESS: {name} => Bats:{bats} Throws:{throws}")
+                    return bats, throws
+
+        # Final fallback: try last name only, filter for first name substring (as before)
+        lookup = playerid_lookup(last, None)
+        if not lookup.empty and 'name_first' in lookup.columns:
+            match = lookup[lookup['name_first'].str.lower().str.contains(first.lower(), na=False)]
+            if not match.empty:
+                throws = match.iloc[0]['throws'] if 'throws' in match.columns else None
+                bats = match.iloc[0]['bats'] if 'bats' in match.columns else None
+                if pd.notnull(bats) and pd.notnull(throws):
+                    st.write(f"DEBUG HANDEDNESS (fuzzy): {name} => Bats:{bats} Throws:{throws}")
+                    return bats, throws
+
+        st.write(f"DEBUG HANDEDNESS: {name} => Not found in lookup")
     except Exception as ex:
         st.write(f"DEBUG HANDEDNESS ERROR: {name} => {ex}")
-        return None, None
     return None, None
     try:
         first, last = name.split(" ", 1)
