@@ -34,8 +34,6 @@ def get_recent_data(player_id, days_back):
 if 'type' in data.columns:
     data = data[data['type'] == "X"]
 data = data[data['launch_speed'].notnull() & data['launch_angle'].notnull()]
-if st.button("Predict HR"):
-    player_id = get_player_id(player_name)
 if player_id:
     data = get_recent_data(player_id, days_back)
     st.write(f"Player ID: {player_id}")
@@ -72,27 +70,5 @@ if player_id:
             st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
     else:
         st.write("No batted ball events found for this player/date range or missing columns.")
-            else:
-            # --- HR calculation logic goes here ---
-            ev = data['launch_speed'].dropna().mean()
-            barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
-            total = len(data)
-            barrel_rate = barrels / total if total > 0 else 0
-
-            if ev is None or pd.isna(ev):
-                ev = 0
-            # MLB typical exit velo: 80-105, barrel rate: 0-15%
-            ev_norm = (ev - 80) / (105 - 80)
-            ev_norm = max(0, min(ev_norm, 1))
-            br_norm = min(barrel_rate / 0.15, 1)
-            probability = (ev_norm * 0.6 + br_norm * 0.4) * 100
-
-            if len(data) < 3:
-                st.warning("Warning: Very little recent Statcast data for this player. Probability may be unreliable.")
-
-            st.success(f"HR Probability: {probability:.2f}%")
-            st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
-    else:
-        st.write("No batted ball events found for this player/date range.")
 else:
     st.error("Player not found. Please check the spelling.")
