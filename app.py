@@ -72,7 +72,7 @@ if player_id:
             st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
     else:
         st.write("No batted ball events found for this player/date range or missing columns.")
-        else:
+            else:
             # --- HR calculation logic goes here ---
             ev = data['launch_speed'].dropna().mean()
             barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
