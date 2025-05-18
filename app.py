@@ -15,9 +15,14 @@ def get_player_id(name):
     return player_info.iloc[0]['key_mlbam'] if not player_info.empty else None
 
 def get_recent_data(player_id, days_back):
-    end = datetime.now()
-    start = end - timedelta(days=days_back)
-    return statcast(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'), player_id=player_id)
+    try:
+        end = datetime.now() - timedelta(days=1)
+        start = end - timedelta(days=days_back)
+        df = statcast(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'), player_id=player_id)
+        return df
+    except Exception as e:
+        st.error(f"Data retrieval issue: {e}")
+        return pd.DataFrame()
 
 if st.button("Predict HR"):
     player_id = get_player_id(player_name)
@@ -25,11 +30,11 @@ if st.button("Predict HR"):
     if player_id:
         data = get_recent_data(player_id, days_back)
         if data.empty:
-            st.warning("No recent data.")
+            st.warning("No recent data or retrieval error.")
         else:
             ev = data['launch_speed'].mean()
             barrels = data[(data['launch_angle'] > 20) & (data['launch_speed'] > 95)].shape[0]
-            barrel_rate = barrels / len(data)
+            barrel_rate = barrels / len(data) if len(data) > 0 else 0
 
             score = MinMaxScaler().fit_transform([[ev, barrel_rate]])[0]
             probability = (score[0]*0.6 + score[1]*0.4)*100
