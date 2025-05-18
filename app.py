@@ -21,9 +21,18 @@ def get_player_id(name):
         return None
 
 def get_recent_data(player_id, days_back):
-    days = int(days_back) if days_back is not None else 14
-    end_date = datetime.today() - timedelta(days=1)
-    start_date = end_date - timedelta(days=days)
+    try:
+        # Force int and fallback
+        days = int(days_back) if days_back is not None else 14
+    except Exception:
+        days = 14
+    try:
+        # Use fixed values to guarantee this block runs
+        end_date = datetime.now() - timedelta(days=1)
+        start_date = end_date - timedelta(days=days)
+    except Exception as e:
+        st.error(f"Date calculation error: {e}")
+        return pd.DataFrame()
     try:
         df = statcast(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), player_id=player_id)
         return df
