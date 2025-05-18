@@ -31,7 +31,7 @@ def get_recent_data(player_id, days_back):
     except Exception as e:
         st.error(f"Data fetch error: {e}")
         return pd.DataFrame()
-        if 'type' in data.columns:
+if 'type' in data.columns:
     data = data[data['type'] == "X"]
 data = data[data['launch_speed'].notnull() & data['launch_angle'].notnull()]
 if st.button("Predict HR"):
