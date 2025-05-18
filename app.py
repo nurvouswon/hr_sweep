@@ -71,22 +71,33 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
         temp = weather_hour.get('temp_f', None)
         wind = weather_hour.get('wind_mph', None)
-        # --- Improved wind_dir extraction and mapping ---
+        # --- Improved wind_dir extraction and mapping, including full words ---
         raw_dir = weather_hour.get('wind_dir', '').upper().replace("-", "")
-        mapping = {
-            "N": "N", "NNE": "NE", "NE": "NE", "ENE": "NE",
-            "E": "E", "ESE": "SE", "SE": "SE", "SSE": "SE",
-            "S": "S", "SSW": "SW", "SW": "SW", "WSW": "SW",
-            "W": "W", "WNW": "NW", "NW": "NW", "NNW": "NW"
+        word_mapping = {
+            "NORTH": "N", "NORTHEAST": "NE", "EAST": "E", "SOUTHEAST": "SE",
+            "SOUTH": "S", "SOUTHWEST": "SW", "WEST": "W", "NORTHWEST": "NW"
         }
         wind_dir = None
-        for key in mapping:
-            if key == raw_dir:
-                wind_dir = mapping[key]
+        # First handle full-word wind directions
+        for word, short in word_mapping.items():
+            if word in raw_dir:
+                wind_dir = short
                 break
-            if key in raw_dir:
-                wind_dir = mapping[key]
-                break
+        # If not found, handle abbreviations
+        if not wind_dir:
+            mapping = {
+                "N": "N", "NNE": "NE", "NE": "NE", "ENE": "NE",
+                "E": "E", "ESE": "SE", "SE": "SE", "SSE": "SE",
+                "S": "S", "SSW": "SW", "SW": "SW", "WSW": "SW",
+                "W": "W", "WNW": "NW", "NW": "NW", "NNW": "NW"
+            }
+            for key in mapping:
+                if key == raw_dir:
+                    wind_dir = mapping[key]
+                    break
+                if key in raw_dir:
+                    wind_dir = mapping[key]
+                    break
         if not wind_dir:
             wind_dir = "N"  # Default fallback
 
