@@ -22,14 +22,14 @@ ballpark_orientations = {
 # Updated 2025 park factors (adjusted where applicable)
 park_factors = {
     "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
-    "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.96, # Upgraded for 2025
+    "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.96,
     "Progressive Field": 1.01, "Target Field": 1.04, "Kauffman Stadium": 0.98,
     "Guaranteed Rate Field": 1.18, "Angel Stadium": 1.05, "Minute Maid Park": 1.06,
     "Oakland Coliseum": 0.82, "T-Mobile Park": 0.86, "Globe Life Field": 1.00,
     "Dodger Stadium": 1.10, "Chase Field": 1.06, "Coors Field": 1.30,
     "Oracle Park": 0.82, "Wrigley Field": 1.12, "Great American Ball Park": 1.26,
     "American Family Field": 1.17, "PNC Park": 0.87, "Busch Stadium": 0.87,
-    "Truist Park": 1.06, "LoanDepot Park": 0.86, "Citi Field": 1.05, # Upgraded for 2025
+    "Truist Park": 1.06, "LoanDepot Park": 0.86, "Citi Field": 1.05,
     "Nationals Park": 1.05, "Petco Park": 0.85, "Citizens Bank Park": 1.19
 }
 
@@ -48,17 +48,22 @@ def is_wind_out(wind_dir, park_orientation):
     elif abs(wi - pi) == 4: return "in"
     else: return "side"
 
-def get_weather(city, date, park_orientation, api_key=API_KEY):
+def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
         url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date}"
         resp = requests.get(url)
         data = resp.json()
-        day = data['forecast']['forecastday'][0]['day']
-        wind_dir = day.get('maxwind_dir', '')[:2].upper()
-        wind = day.get('maxwind_mph', None)
-        temp = day.get('avgtemp_f', None)
-        humidity = day.get('avghumidity', None)
-        condition = day.get('condition', {}).get('text', None)
+        if game_time:
+            game_hour = int(game_time.split(":")[0])
+        else:
+            game_hour = 14  # Default to 2pm
+        hours = data['forecast']['forecastday'][0]['hour']
+        weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
+        temp = weather_hour.get('temp_f', None)
+        wind = weather_hour.get('wind_mph', None)
+        wind_dir = weather_hour.get('wind_dir', '')[:2].upper()
+        humidity = weather_hour.get('humidity', None)
+        condition = weather_hour.get('condition', {}).get('text', None)
         wind_effect = is_wind_out(wind_dir, park_orientation)
         return {
             "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
@@ -202,19 +207,29 @@ def custom_2025_boost(row):
         "Yankee Stadium","Great American Ball Park","Guaranteed Rate Field"]: bonus += 0.012
     # G. High humidity, east/south park
     if row.get('Humidity') and row.get('Humidity') > 65 and row.get('Park') in ["Truist Park","LoanDepot Park"]: bonus += 0.01
-    # H. West coast (marine layer dampening)
-    if row.get('Park') in ["Dodger Stadium","Petco Park","Oracle Park"]: bonus -= 0.01
+    # H. West coast (marine layer dampening), use time of day
+    if row.get('Park') in ["Dodger Stadium","Petco Park","Oracle Park"]:
+        game_time = row.get('Time')
+        if game_time:
+            try:
+                hour = int(str(game_time).split(":")[0])
+                if hour < 17:   # Before 5 PM local
+                    bonus -= 0.01
+            except Exception:
+                bonus -= 0.01
+        else:
+            bonus -= 0.01
     # J. Pitcher is LH
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
 windows = [3, 5, 7, 14]
 
-st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, 2025 Micro-Trends)")
+st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, 2025 Micro-Trends, Game Time Weather)")
 
 st.markdown("""
 **Upload your daily matchup CSV:**  
-`Batter,Pitcher,City,Park,Date`  
+`Batter,Pitcher,City,Park,Date,Time`  
 And a **Baseball Savant xHR/HR CSV** (with columns `player_name`, `hr`, `xhr`)
 """)
 
@@ -223,7 +238,7 @@ xhr_file = st.file_uploader("Upload Baseball Savant xHR/HR CSV:", type=["csv"])
 
 if uploaded_file and xhr_file:
     df_upload = pd.read_csv(uploaded_file)
-    for col in ['Batter','Pitcher','City','Park','Date']:
+    for col in ['Batter','Pitcher','City','Park','Date','Time']:
         if col not in df_upload.columns:
             st.error(f"Missing required column: {col}")
             st.stop()
@@ -242,7 +257,7 @@ if uploaded_file and xhr_file:
     df_upload['PitcherHandedness'] = pitcher_handedness
 
     weather_rows, stat_rows, park_factor_rows = [], [], []
-    st.write("Fetching Statcast, weather, park factor, and merging xHR (may take a few minutes)...")
+    st.write("Fetching Statcast, weather (game time), park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
     for idx, row in df_upload.iterrows():
         city = row['City']
@@ -250,9 +265,10 @@ if uploaded_file and xhr_file:
         park = row['Park']
         batter = row['Batter']
         pitcher = row['Pitcher']
+        game_time = row['Time']
         park_orientation = ballpark_orientations.get(park, "N")
         park_factor = park_factors.get(park, 1.0)
-        weather = get_weather(city, date, park_orientation)
+        weather = get_weather(city, date, park_orientation, game_time)
         batter_stats = get_batter_stats_multi(batter, windows)
         pitcher_stats = get_pitcher_stats_multi(pitcher, windows)
         weather_rows.append(weather)
@@ -287,17 +303,18 @@ if uploaded_file and xhr_file:
         )
         pitcher_score = (
             norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
-            norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
+            norm_barrel(row.get('P_B
+        norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
             norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
             norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
             norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
-        norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
+            norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
             norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
             norm_ev(row.get('P_EVAllowed_3')) * 0.01
         )
         park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
         weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
-        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap the boost
+        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap boost
 
         # ----- MICRO-TRENDS 2025 BOOST -----
         total = batter_score + pitcher_score + park_score + weather_score + regression_score
@@ -310,7 +327,7 @@ if uploaded_file and xhr_file:
     st.success("All done! Top matchups below:")
 
     show_cols = [
-        'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','HR_Score','Reg_xHR',
+        'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
         'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14'
@@ -335,7 +352,7 @@ else:
 
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days) and all advanced pitcher stats per window (Barrel%, EV, HR, BIP, HardHit%, FlyBall%, K%, BB%, HR/9) are included.**
-- Weather, wind, park factor, handedness, and xHR regression are all automated.
+- Weather, wind (at game time!), park factor, handedness, and xHR regression are all automated.
 - Latest 2025 micro-trends: park upgrades, humidity, wind, warm weather, pitcher/batter splits, and more.
 - CSV download and top-5 leaderboard chart included.
 """)
