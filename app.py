@@ -35,8 +35,7 @@ if st.button("Predict HR"):
     player_id = get_player_id(player_name)
     if player_id:
         data = get_recent_data(player_id, days_back)
-        st.write(f"Player ID: 
-    {player_id}")
+        st.write(f"Player ID: {player_id}")
         st.write("First 5 data rows:")
         st.dataframe(data.head())
         if data.empty:
