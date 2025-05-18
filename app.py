@@ -19,7 +19,6 @@ ballpark_orientations = {
     "Nationals Park": "NE", "Petco Park": "N", "Citizens Bank Park": "NE"
 }
 
-# Updated 2025 park factors (adjusted where applicable)
 park_factors = {
     "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
     "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.96,
@@ -185,29 +184,18 @@ def norm_weather(temp, wind, wind_effect):
         elif wind_effect == "in": score -= 0.07
     return max(0.8, min(score, 1.2))
 
-# -------- 2025 MICRO-TRENDS INTEGRATION --------
 def custom_2025_boost(row):
     bonus = 0
-    # A. League-wide: More barrels = more HRs
     bonus += norm_barrel(row.get('B_BarrelRate_14')) * 0.01
-    # B. Citi Field up
     if row.get('Park') == 'Citi Field': bonus += 0.025
-    # B. Comerica up
     if row.get('Park') == 'Comerica Park': bonus += 0.02
-    # C. Wrigley wind-out super-boost
     if row.get('Park') == 'Wrigley Field' and row.get('WindEffect') == 'out': bonus += 0.03
-    # D. Milwaukee/Philly wind-out bonus
     if row.get('Park') in ['American Family Field','Citizens Bank Park'] and row.get('WindEffect') == 'out': bonus += 0.015
-    # C. Dodger RHB pull HR bonus
     if row.get('Park') == 'Dodger Stadium' and row.get('BatterHandedness') == 'R': bonus += 0.01
-    # D. Extra warm weather HR boost
     if row.get('Temp') and row.get('Temp') > 80: bonus += 0.01
-    # F. Pull-side RHB HR-friendly parks
     if row.get('BatterHandedness') == 'R' and row.get('Park') in [
         "Yankee Stadium","Great American Ball Park","Guaranteed Rate Field"]: bonus += 0.012
-    # G. High humidity, east/south park
     if row.get('Humidity') and row.get('Humidity') > 65 and row.get('Park') in ["Truist Park","LoanDepot Park"]: bonus += 0.01
-    # H. West coast (marine layer dampening), use time of day
     if row.get('Park') in ["Dodger Stadium","Petco Park","Oracle Park"]:
         game_time = row.get('Time')
         if game_time:
@@ -219,7 +207,6 @@ def custom_2025_boost(row):
                 bonus -= 0.01
         else:
             bonus -= 0.01
-    # J. Pitcher is LH
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
@@ -245,7 +232,6 @@ if uploaded_file and xhr_file:
     xhr_df = pd.read_csv(xhr_file)
     xhr_df = xhr_df.rename(columns={c: c.lower() for c in xhr_df.columns})
 
-    # Auto-fill handedness columns
     batter_handedness = []
     pitcher_handedness = []
     for idx, row in df_upload.iterrows():
@@ -283,7 +269,6 @@ if uploaded_file and xhr_file:
     park_df = pd.DataFrame(park_factor_rows)
     df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-    # Merge in xHR/HR regression from Savant leaderboard
     df_final = df_final.merge(
         xhr_df[['player_name','hr','xhr']],
         left_on='Batter', right_on='player_name', how='left'
@@ -303,8 +288,7 @@ if uploaded_file and xhr_file:
         )
         pitcher_score = (
             norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
-            norm_barrel(row.get('P_B
-        norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
+            norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
             norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
             norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
             norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
@@ -314,9 +298,7 @@ if uploaded_file and xhr_file:
         )
         park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
         weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
-        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap boost
-
-        # ----- MICRO-TRENDS 2025 BOOST -----
+        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap at 0.15
         total = batter_score + pitcher_score + park_score + weather_score + regression_score
         total += custom_2025_boost(row)
         return round(total, 3)
