@@ -22,8 +22,9 @@ def get_player_id(name):
 
 def get_recent_data(player_id, days_back):
     try:
+        days = int(days_back) if days_back is not None else 14
         end_date = datetime.today() - timedelta(days=1)
-        start_date = end_date - timedelta(days=days_back)
+        start_date = end_date - timedelta(days=days)
         df = statcast(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), player_id=player_id)
         return df
     except Exception as e:
@@ -45,7 +46,7 @@ if st.button("Predict HR"):
                 total = len(data)
                 barrel_rate = barrels / total if total > 0 else 0
 
-                # Avoid errors if ev or barrel_rate are NaN or None
+                # Safe transformation
                 if ev is None or pd.isna(ev):
                     ev = 0
                 score = MinMaxScaler().fit_transform([[ev, barrel_rate]])[0]
