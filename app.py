@@ -107,6 +107,13 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         st.write(f"DEBUG WEATHER: city={city}, park_orientation={park_orientation}, wind_dir(raw)={weather_hour.get('wind_dir','')}, wind_dir(norm)={wind_dir}")
 
         wind_effect = is_wind_out(wind_dir, park_orientation)
+        st.write(
+            f"DEBUG WEATHER: city={city}, park_orientation={park_orientation}, "
+            f"date={date}, game_time={game_time}, temp={temp}, wind={wind}, "
+            f"wind_dir(raw)={weather_hour.get('wind_dir', '')}, wind_dir(norm)={wind_dir}, "
+            f"humidity={humidity}, condition={condition}, pressure={weather_hour.get('pressure_in', None)}, "
+            f"precip={weather_hour.get('precip_mm', None)}, uv={weather_hour.get('uv', None)}, wind_effect={wind_effect}"
+        )
         return {
             "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
             "Humidity": humidity, "Condition": condition
