@@ -36,25 +36,22 @@ if 'type' in data.columns:
 data = data[data['launch_speed'].notnull() & data['launch_angle'].notnull()]
 if st.button("Predict HR"):
     player_id = get_player_id(player_name)
-    if player_id:
-        data = get_recent_data(player_id, days_back)
-        st.write(f"Player ID: {player_id}")
+if player_id:
+    data = get_recent_data(player_id, days_back)
+    st.write(f"Player ID: {player_id}")
     st.write("First 5 data rows (before filtering):")
     st.dataframe(data.head())
 
-    # Only filter if data is not empty and 'type' is a column
     if not data.empty and 'type' in data.columns:
-        # Keep only events where the ball was put in play
         data = data[data['type'] == "X"]
-        # Also remove any rows missing launch speed or angle
         data = data[data['launch_speed'].notnull() & data['launch_angle'].notnull()]
         st.write("First 5 data rows (after filtering for batted balls):")
         st.dataframe(data.head())
-    else:
-        st.write("No batted ball events found for this player/date range.")
-        elif 'launch_speed' in data.columns and 'launch_angle' in data.columns:
-            st.write(f"Events found: {len(data)}")
-            st.dataframe(data[['game_date', 'launch_speed', 'launch_angle', 'events']].head(10))
+
+        if data.empty:
+            st.warning("No batted ball events found after filtering.")
+        else:
+            # --- HR calculation logic goes here ---
             ev = data['launch_speed'].dropna().mean()
             barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
             total = len(data)
@@ -73,7 +70,7 @@ if st.button("Predict HR"):
 
             st.success(f"HR Probability: {probability:.2f}%")
             st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
-        else:
-            st.warning("Incomplete Statcast data for this player.")
     else:
-        st.error("Player not found. Please check the spelling.")
+        st.write("No batted ball events found for this player/date range.")
+else:
+    st.error("Player not found. Please check the spelling.")
