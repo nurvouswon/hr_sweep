@@ -21,10 +21,10 @@ def get_player_id(name):
         return None
 
 def get_recent_data(player_id, days_back):
+    days = int(days_back) if days_back is not None else 14
+    end_date = datetime.today() - timedelta(days=1)
+    start_date = end_date - timedelta(days=days)
     try:
-        days = int(days_back) if days_back is not None else 14
-        end_date = datetime.today() - timedelta(days=1)
-        start_date = end_date - timedelta(days=days)
         df = statcast(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), player_id=player_id)
         return df
     except Exception as e:
@@ -40,7 +40,7 @@ if st.button("Predict HR"):
         if data.empty:
             st.warning("No recent data found.")
         else:
-            if 'launch_speed' in data and 'launch_angle' in data:
+            if 'launch_speed' in data.columns and 'launch_angle' in data.columns:
                 ev = data['launch_speed'].dropna().mean()
                 barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
                 total = len(data)
