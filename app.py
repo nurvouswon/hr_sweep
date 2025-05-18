@@ -66,6 +66,50 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
         temp = weather_hour.get('temp_f', None)
         wind = weather_hour.get('wind_mph', None)
+        # --- Robust wind_dir extraction and mapping ---
+        raw_dir = weather_hour.get('wind_dir', '').upper().replace("-", "")
+        mapping = {
+            "N": "N", "NNE": "NE", "NE": "NE", "ENE": "NE",
+            "E": "E", "ESE": "SE", "SE": "SE", "SSE": "SE",
+            "S": "S", "SSW": "SW", "SW": "SW", "WSW": "SW",
+            "W": "W", "WNW": "NW", "NW": "NW", "NNW": "NW"
+        }
+        wind_dir = None
+        for key in mapping:
+            if key in raw_dir:
+                wind_dir = mapping[key]
+                break
+        if not wind_dir:
+            wind_dir = "N"  # Default fallback
+
+        humidity = weather_hour.get('humidity', None)
+        condition = weather_hour.get('condition', {}).get('text', None)
+        # --- Debug output ---
+        st.write(f"DEBUG WEATHER: city={city}, park_orientation={park_orientation}, wind_dir(raw)={weather_hour.get('wind_dir','')}, wind_dir(norm)={wind_dir}")
+
+        wind_effect = is_wind_out(wind_dir, park_orientation)
+        return {
+            "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
+            "Humidity": humidity, "Condition": condition
+        }
+    except Exception as ex:
+        st.write(f"DEBUG WEATHER ERROR: {ex}")
+        return {
+            "Temp": None, "Wind": None, "WindDir": None, "WindEffect": None,
+            "Humidity": None, "Condition": None
+        }
+    try:
+        url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date}"
+        resp = requests.get(url)
+        data = resp.json()
+        if game_time:
+            game_hour = int(game_time.split(":")[0])
+        else:
+            game_hour = 14  # Default to 2pm
+        hours = data['forecast']['forecastday'][0]['hour']
+        weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
+        temp = weather_hour.get('temp_f', None)
+        wind = weather_hour.get('wind_mph', None)
         wind_dir = weather_hour.get('wind_dir', '')[:2].upper()
         humidity = weather_hour.get('humidity', None)
         condition = weather_hour.get('condition', {}).get('text', None)
@@ -91,6 +135,24 @@ def get_player_id(name):
     return None
 
 def get_handedness(name):
+    try:
+        first, last = name.split(" ", 1)
+        lookup = playerid_lookup(last, first)
+        if lookup.empty:
+            # Try capitalizing or fixing weird cases
+            first, last = first.capitalize(), last.capitalize()
+            lookup = playerid_lookup(last, first)
+        if not lookup.empty:
+            throws = lookup.iloc[0]['throws']
+            bats = lookup.iloc[0]['bats']
+            st.write(f"DEBUG HANDEDNESS: {name} => Bats:{bats} Throws:{throws}")
+            return bats, throws
+        else:
+            st.write(f"DEBUG HANDEDNESS: {name} => Not found in lookup")
+    except Exception as ex:
+        st.write(f"DEBUG HANDEDNESS ERROR: {name} => {ex}")
+        return None, None
+    return None, None
     try:
         first, last = name.split(" ", 1)
         lookup = playerid_lookup(last, first)
