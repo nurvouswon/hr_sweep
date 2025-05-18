@@ -35,6 +35,10 @@ if st.button("Predict HR"):
     player_id = get_player_id(player_name)
     if player_id:
         data = get_recent_data(player_id, days_back)
+        st.write(f"Player ID: 
+    {player_id}")
+        st.write("First 5 data rows:")
+        st.dataframe(data.head())
         if data.empty:
             st.warning("No recent data found.")
         elif 'launch_speed' in data.columns and 'launch_angle' in data.columns:
