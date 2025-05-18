@@ -317,7 +317,7 @@ df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
 # Drop helper columns
 df_final = df_final.drop(columns=['batter_comma', 'player'])
-    def calc_hr_score(row):
+def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
             norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
