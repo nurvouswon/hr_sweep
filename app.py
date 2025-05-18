@@ -154,13 +154,17 @@ def get_player_id(name):
     return None
 
 def get_handedness(name):
+def get_handedness(name):
     try:
-        name = strip_accents(name)
+        # Normalize name: remove accents, trim spaces, capitalize
+        name = ' '.join(strip_accents(name).split())
         first, last = name.split(" ", 1)
         lookup = playerid_lookup(last, first)
+        # Fallback: try last name only, filter to first name
         if lookup.empty:
-            first, last = first.capitalize(), last.capitalize()
-            lookup = playerid_lookup(last, first)
+            lookup = playerid_lookup(last, None)
+            if not lookup.empty:
+                lookup = lookup[lookup['name_first'].str.lower().str.contains(first.lower())]
         if not lookup.empty:
             throws = lookup.iloc[0]['throws'] if 'throws' in lookup.columns else None
             bats = lookup.iloc[0]['bats'] if 'bats' in lookup.columns else None
