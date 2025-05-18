@@ -36,16 +36,22 @@ compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 
 def get_compass_idx(dir_str):
     dir_str = dir_str.upper()
-    try: return compass.index(dir_str)
-    except: return -1
+    try:
+        return compass.index(dir_str)
+    except:
+        return -1
 
 def is_wind_out(wind_dir, park_orientation):
     wi = get_compass_idx(wind_dir)
     pi = get_compass_idx(park_orientation)
-    if wi == -1 or pi == -1: return "unknown"
-    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7: return "out"
-    elif abs(wi - pi) == 4: return "in"
-    else: return "side"
+    if wi == -1 or pi == -1:
+        return "unknown"
+    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7:
+        return "out"
+    elif abs(wi - pi) == 4:
+        return "in"
+    else:
+        return "side"
 
 def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
@@ -88,6 +94,10 @@ def get_handedness(name):
     try:
         first, last = name.split(" ", 1)
         lookup = playerid_lookup(last, first)
+        if lookup.empty:
+            # Try capitalizing if first lookup fails
+            first, last = first.capitalize(), last.capitalize()
+            lookup = playerid_lookup(last, first)
         if not lookup.empty:
             throws = lookup.iloc[0]['throws']
             bats = lookup.iloc[0]['bats']
@@ -217,7 +227,7 @@ st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, 2025
 st.markdown("""
 **Upload your daily matchup CSV:**  
 `Batter,Pitcher,City,Park,Date,Time`  
-And a **Baseball Savant xHR/HR CSV** (with columns `player_name`, `hr`, `xhr`)
+And a **Baseball Savant xHR/HR CSV** (with columns `player`, `hr_total`, `xhr`, `xhr_diff`)
 """)
 
 uploaded_file = st.file_uploader("Upload your daily CSV:", type=["csv"])
@@ -230,18 +240,8 @@ if uploaded_file and xhr_file:
             st.error(f"Missing required column: {col}")
             st.stop()
     xhr_df = pd.read_csv(xhr_file)
-    xhr_df = xhr_df.rename(columns={c: c.lower() for c in xhr_df.columns})
 
-    batter_handedness = []
-    pitcher_handedness = []
-    for idx, row in df_upload.iterrows():
-        b_bats, _ = get_handedness(row['Batter'])
-        _, p_throws = get_handedness(row['Pitcher'])
-        batter_handedness.append(b_bats)
-        pitcher_handedness.append(p_throws)
-    df_upload['BatterHandedness'] = batter_handedness
-    df_upload['PitcherHandedness'] = pitcher_handedness
-
+    # Weather, park factor, statcast per matchup
     weather_rows, stat_rows, park_factor_rows = [], [], []
     st.write("Fetching Statcast, weather (game time), park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
@@ -269,55 +269,37 @@ if uploaded_file and xhr_file:
     park_df = pd.DataFrame(park_factor_rows)
     df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-# --- Robust Handedness and Merge ---
-def first_last_to_comma(name):
-    if pd.isna(name): return ""
-    parts = name.strip().split()
-    if len(parts) >= 2:
-        return f"{parts[-1]}, {' '.join(parts[:-1])}"
-    return name.strip()
+    # --- Robust Handedness and Merge ---
+    def first_last_to_comma(name):
+        if pd.isna(name): return ""
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            return f"{parts[-1]}, {' '.join(parts[:-1])}"
+        return name.strip()
 
-def get_handedness(name):
-    try:
-        first, last = name.split(" ", 1)
-        lookup = playerid_lookup(last, first)
-        if lookup.empty:
-            # Try switching case if initial lookup fails
-            first, last = first.capitalize(), last.capitalize()
-            lookup = playerid_lookup(last, first)
-        if not lookup.empty:
-            throws = lookup.iloc[0]['throws']
-            bats = lookup.iloc[0]['bats']
-            return bats, throws
-    except Exception:
-        return None, None
-    return None, None
+    df_final['batter_comma'] = df_final['Batter'].apply(first_last_to_comma)
 
-# Add standardized merge name
-df_final['batter_comma'] = df_final['Batter'].apply(first_last_to_comma)
+    batter_handedness = []
+    pitcher_handedness = []
+    for idx, row in df_final.iterrows():
+        b_bats, _ = get_handedness(row['Batter'])
+        _, p_throws = get_handedness(row['Pitcher'])
+        batter_handedness.append(b_bats)
+        pitcher_handedness.append(p_throws)
+    df_final['BatterHandedness'] = batter_handedness
+    df_final['PitcherHandedness'] = pitcher_handedness
 
-# Assign handedness robustly
-batter_handedness = []
-pitcher_handedness = []
-for idx, row in df_final.iterrows():
-    b_bats, _ = get_handedness(row['Batter'])
-    _, p_throws = get_handedness(row['Pitcher'])
-    batter_handedness.append(b_bats)
-    pitcher_handedness.append(p_throws)
-df_final['BatterHandedness'] = batter_handedness
-df_final['PitcherHandedness'] = pitcher_handedness
+    # Merge xHR data (robust!)
+    df_final = df_final.merge(
+        xhr_df[['player', 'hr_total', 'xhr', 'xhr_diff']],
+        left_on='batter_comma', right_on='player', how='left'
+    )
+    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
-# Merge xHR data (use your uploaded xhr_df or reload it)
-xhr = pd.read_csv(xhr_file)  # You can use xhr_df if already loaded!
-df_final = df_final.merge(
-    xhr[['player', 'hr_total', 'xhr', 'xhr_diff']],
-    left_on='batter_comma', right_on='player', how='left'
-)
-df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+    # Clean up helper columns
+    df_final = df_final.drop(columns=['batter_comma', 'player'])
 
-# Drop helper columns
-df_final = df_final.drop(columns=['batter_comma', 'player'])
-def calc_hr_score(row):
+    def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
             norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
@@ -345,34 +327,34 @@ def calc_hr_score(row):
         total += custom_2025_boost(row)
         return round(total, 3)
 
-df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
+    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+    df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
-st.success("All done! Top matchups below:")
+    st.success("All done! Top matchups below:")
 
-show_cols = [
+    show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
         'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14'
     ]
-show_cols = [c for c in show_cols if c in df_leaderboard.columns]
+    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
-top5 = df_leaderboard.head(5)
-st.dataframe(top5[show_cols])
+    top5 = df_leaderboard.head(5)
+    st.dataframe(top5[show_cols])
 
     # Bar chart for top 5 (HR_Score and Reg_xHR)
-if 'Reg_xHR' in top5.columns:
-st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
-else:
-st.bar_chart(top5.set_index('Batter')[['HR_Score']])
+    if 'Reg_xHR' in top5.columns:
+        st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
+    else:
+        st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
     # Show all data and allow download
-st.dataframe(df_leaderboard[show_cols])
+    st.dataframe(df_leaderboard[show_cols])
     csv_out = df_leaderboard.to_csv(index=False).encode()
-st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
+    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
 else:
-st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
+    st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days) and all advanced pitcher stats per window (Barrel%, EV, HR, BIP, HardHit%, FlyBall%, K%, BB%, HR/9) are included.**
