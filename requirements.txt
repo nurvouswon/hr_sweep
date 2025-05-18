@@ -2,3 +2,4 @@ streamlit
 pandas
 pybaseball
 scikit-learn
+beautifulsoup4
