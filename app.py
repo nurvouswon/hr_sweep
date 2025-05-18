@@ -38,44 +38,43 @@ if player_id:
     data = get_recent_data(player_id, days_back)
     st.write(f"Player ID: {player_id}")
 
+    # Check if data is a DataFrame and not empty
     if isinstance(data, pd.DataFrame) and not data.empty:
         st.write("First 5 data rows (before filtering):")
         st.dataframe(data.head())
 
-        try:
-            # Only filter if 'type' column exists
-            if 'type' in data.columns:
-                data = data[data['type'] == "X"]
-                data = data[data['launch_speed'].notnull() & data['launch_angle'].notnull()]
-                st.write("First 5 data rows (after filtering for batted balls):")
-                st.dataframe(data.head())
+        # Safe check: only proceed if 'type' column exists
+        if 'type' in data.columns:
+            # Filter for batted ball events only
+            data = data[data['type'] == "X"]
+            data = data[data['launch_speed'].notnull() & data['launch_angle'].notnull()]
+            st.write("First 5 data rows (after filtering):")
+            st.dataframe(data.head())
 
-                if data.empty:
-                    st.warning("No batted ball events found after filtering.")
-                else:
-                    # Home run probability calculation
-                    ev = data['launch_speed'].mean()
-                    barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
-                    total = len(data)
-                    barrel_rate = barrels / total if total > 0 else 0
-
-                    if ev is None or pd.isna(ev):
-                        ev = 0
-                    ev_norm = (ev - 80) / (105 - 80)
-                    ev_norm = max(0, min(ev_norm, 1))
-                    br_norm = min(barrel_rate / 0.15, 1)
-                    probability = (ev_norm * 0.6 + br_norm * 0.4) * 100
-
-                    if total < 3:
-                        st.warning("Warning: Very little recent Statcast data for this player. Probability may be unreliable.")
-
-                    st.success(f"HR Probability: {probability:.2f}%")
-                    st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
+            if data.empty:
+                st.warning("No batted ball events found after filtering.")
             else:
-                st.warning("The data is missing the 'type' column needed for filtering.")
-        except Exception as e:
-            st.error(f"Something went wrong during data filtering: {e}")
+                # HR probability calculation
+                ev = data['launch_speed'].mean()
+                barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
+                total = len(data)
+                barrel_rate = barrels / total if total > 0 else 0
+
+                if ev is None or pd.isna(ev):
+                    ev = 0
+                ev_norm = (ev - 80) / (105 - 80)
+                ev_norm = max(0, min(ev_norm, 1))
+                br_norm = min(barrel_rate / 0.15, 1)
+                probability = (ev_norm * 0.6 + br_norm * 0.4) * 100
+
+                if total < 3:
+                    st.warning("Very little data — result may not be reliable.")
+
+                st.success(f"HR Probability: {probability:.2f}%")
+                st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
+        else:
+            st.warning("Statcast data does not contain 'type' column — can't filter for batted balls.")
     else:
-        st.warning("No Statcast data returned for this player/date range.")
+        st.warning("No Statcast data found for this player/date range.")
 else:
     st.error("Player not found. Please check the spelling.")
