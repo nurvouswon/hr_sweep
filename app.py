@@ -34,7 +34,7 @@ def get_recent_data(player_id, days_back):
 
 if st.button("Predict HR"):
     player_id = get_player_id(player_name)
-    if player_id:
+if player_id:
     data = get_recent_data(player_id, days_back)
     if data.empty:
         st.warning("No recent data found.")
