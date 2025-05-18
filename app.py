@@ -15,23 +15,16 @@ def get_player_id(name):
         player_info = playerid_lookup(last, first)
         if not player_info.empty:
             return int(player_info.iloc[0]['key_mlbam'])
+        else:
+            return None
     except Exception:
-        pass
-    return None
+        return None
 
 def get_recent_data(player_id, days_back):
-    # Make sure days_back is an integer
     try:
         days = int(days_back)
-    except Exception:
-        days = 14
-    try:
         end_date = datetime.now() - timedelta(days=1)
         start_date = end_date - timedelta(days=days)
-    except Exception as e:
-        st.error(f"Date calculation error: {e}")
-        return pd.DataFrame()
-    try:
         df = statcast(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), player_id=player_id)
         return df
     except Exception as e:
@@ -51,7 +44,7 @@ if st.button("Predict HR"):
             total = len(data)
             barrel_rate = barrels / total if total > 0 else 0
 
-            # Safe transformation
+            # Prevent MinMaxScaler errors with constant array
             if ev is None or pd.isna(ev):
                 ev = 0
             score = MinMaxScaler().fit_transform([[ev, barrel_rate]])[0]
