@@ -27,17 +27,19 @@ def get_todays_mlb_lineups():
                 lineup = box_data["liveData"]["boxscore"]["teams"][team_side]["players"]
                 for player_id, pdata in lineup.items():
                     # Only take batters in starting lineup (battingOrder present)
-                    stats = pdata.get("stats", {})
-                    if "batting" in stats and "battingOrder" in pdata:
+                    if "battingOrder" in pdata and "person" in pdata:
                         full_name = pdata["person"]["fullName"]
-                        # Filter for just First Last format (skip Jr./III etc for best ID match)
                         if len(full_name.split(" ")) == 2:
                             batters.add(full_name)
             except Exception:
                 continue
     return list(batters)
 
-todays_batters = get_todays_mlb_lineups()
+@st.cache_data(ttl=900)
+def load_todays_batters():
+    return get_todays_mlb_lineups()
+
+todays_batters = load_todays_batters()
 if not todays_batters:
     st.warning("Couldn't load today's MLB lineups from MLB.com. Try reloading or check your connection.")
 else:
@@ -114,11 +116,24 @@ if not df.empty:
     for window in windows:
         df[f"HR_Score_{window}"] = df.apply(lambda row: get_score(row, window), axis=1)
 
-sort_window = "HR_Score_7"
-if df[sort_window].sum() == 0:
-    sort_window = "HR_Score_14"
-st.subheader(f"Top HR Probability Batters (Sorted by {sort_window.replace('_', ' ')})")
-show_cols = ["Batter"] + [f"HR_Score_{w}" for w in windows] + [f"EV_{w}" for w in windows] + [f"BarrelRate_{w}" for w in windows] + [f"PA_{w}" for w in windows]
-st.dataframe(df.sort_values(sort_window, ascending=False).reset_index(drop=True)[show_cols])
+score_cols = [f"HR_Score_{w}" for w in windows]
+existing_score_cols = [col for col in score_cols if col in df.columns]
+
+# Pick the first available HR_Score column to sort by, prefer most recent
+sort_window = None
+for col in score_cols[1:]:  # skip season for sorting, prefer recent (14,7,5,3)
+    if col in df.columns and df[col].sum() > 0:
+        sort_window = col
+        break
+if sort_window is None and existing_score_cols:
+    sort_window = existing_score_cols[0]
+
+if sort_window is not None:
+    st.subheader(f"Top HR Probability Batters (Sorted by {sort_window.replace('_', ' ')})")
+    show_cols = ["Batter"] + score_cols + [f"EV_{w}" for w in windows] + [f"BarrelRate_{w}" for w in windows] + [f"PA_{w}" for w in windows]
+    show_cols = [col for col in show_cols if col in df.columns]
+    st.dataframe(df.sort_values(sort_window, ascending=False).reset_index(drop=True)[show_cols])
+else:
+    st.warning("No HR probability data found for today's lineups. This may be due to missing Statcast data for recent days.")
 
 st.caption("Columns ending in _162 = Season, _14 = last 14d, _7 = last 7d, _5 = last 5d, _3 = last 3d. HR_Score columns use normalized EV (60%) and barrel rate (40%).")
