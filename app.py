@@ -5,34 +5,34 @@ from bs4 import BeautifulSoup
 from pybaseball import statcast_batter, playerid_lookup
 from datetime import datetime, timedelta
 
-st.title("⚾️ Today's MLB HR Probability Leaderboard (Rotowire)")
+st.title("⚾️ Today's MLB HR Probability Leaderboard (FantasyAlarm)")
 
-# -- 1. Scrape Rotowire for today's confirmed lineups --
 @st.cache_data(ttl=900)
-def get_rotowire_batters():
-    url = "https://www.rotowire.com/baseball/daily-lineups.php"
-    resp = requests.get(url)
+def get_fantasyalarm_batters():
+    url = "https://www.fantasyalarm.com/mlb/lineups"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    }
+    resp = requests.get(url, headers=headers)
     soup = BeautifulSoup(resp.text, "html.parser")
     batters = set()
-    for lineup in soup.select("div.lineup.is-mlb"):
-        # Only use CONFIRMED lineups (has green 'Confirmed' checkmark)
-        if not lineup.select_one(".confirmed"):
+    # Only confirmed lineups (data-status='confirmed' or 'Confirmed')
+    for lineup in soup.select(".starting-lineups__team"):
+        if "Confirmed" not in lineup.text:
             continue
-        for player_cell in lineup.select("div.lineup__batters .lineup__player"):
-            name_tag = player_cell.select_one(".lineup__player__text")
-            if name_tag:
-                name = name_tag.text.strip()
-                if name and not name.startswith("P:"):  # Skip pitcher label
-                    batters.add(name)
+        for player_tag in lineup.select(".starting-lineups__player--starter .starting-lineups__player__name"):
+            name = player_tag.get_text(strip=True)
+            if name and name != "Pitcher":
+                batters.add(name)
     return list(batters)
 
-todays_batters = get_rotowire_batters()
+todays_batters = get_fantasyalarm_batters()
+
 if not todays_batters:
-    st.warning("Couldn't load today's MLB lineups from Rotowire. Try reloading or check your connection.")
+    st.warning("Couldn't load today's MLB lineups from FantasyAlarm. Try reloading or check your connection.")
 else:
     st.write(f"Found {len(todays_batters)} confirmed batters in today's lineups.")
 
-# -- 2. Rolling windows in days: season, 14, 7, 5, 3 --
 windows = [162, 14, 7, 5, 3]
 results = []
 
