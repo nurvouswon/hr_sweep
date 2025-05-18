@@ -13,8 +13,11 @@ def get_player_id(name):
     try:
         first, last = name.split(" ", 1)
         player_info = playerid_lookup(last, first)
-        return int(player_info.iloc[0]['key_mlbam']) if not player_info.empty else None
-    except:
+        if not player_info.empty:
+            return int(player_info.iloc[0]['key_mlbam'])
+        else:
+            return None
+    except Exception:
         return None
 
 def get_recent_data(player_id, days_back):
@@ -42,6 +45,9 @@ if st.button("Predict HR"):
                 total = len(data)
                 barrel_rate = barrels / total if total > 0 else 0
 
+                # Avoid errors if ev or barrel_rate are NaN or None
+                if ev is None or pd.isna(ev):
+                    ev = 0
                 score = MinMaxScaler().fit_transform([[ev, barrel_rate]])[0]
                 probability = (score[0] * 0.6 + score[1] * 0.4) * 100
 
