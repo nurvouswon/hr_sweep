@@ -1,125 +1,264 @@
 import streamlit as st
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
-from pybaseball import statcast_batter, playerid_lookup
+from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
 from datetime import datetime, timedelta
 
-st.title("⚾️ Today's MLB HR Probability Leaderboard (FantasyAlarm)")
+API_KEY = "11ac3c31fb664ba8971102152251805"
 
-@st.cache_data(ttl=900)
-def get_fantasyalarm_batters():
-    url = "https://www.fantasyalarm.com/mlb/lineups"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-    }
-    resp = requests.get(url, headers=headers)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    batters = set()
-    # Only confirmed lineups (data-status='confirmed' or 'Confirmed')
-    for lineup in soup.select(".starting-lineups__team"):
-        if "Confirmed" not in lineup.text:
-            continue
-        for player_tag in lineup.select(".starting-lineups__player--starter .starting-lineups__player__name"):
-            name = player_tag.get_text(strip=True)
-            if name and name != "Pitcher":
-                batters.add(name)
-    return list(batters)
+# Park orientation for wind effect
+ballpark_orientations = {
+    "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
+    "Camden Yards": "NE", "Rogers Centre": "NE", "Comerica Park": "N",
+    "Progressive Field": "NE", "Target Field": "N", "Kauffman Stadium": "NE",
+    "Guaranteed Rate Field": "NE", "Angel Stadium": "NE", "Minute Maid Park": "N",
+    "Oakland Coliseum": "N", "T-Mobile Park": "N", "Globe Life Field": "NE",
+    "Dodger Stadium": "NE", "Chase Field": "N", "Coors Field": "N",
+    "Oracle Park": "E", "Wrigley Field": "NE", "Great American Ball Park": "N",
+    "American Family Field": "NE", "PNC Park": "NE", "Busch Stadium": "NE",
+    "Truist Park": "N", "LoanDepot Park": "N", "Citi Field": "N",
+    "Nationals Park": "NE", "Petco Park": "N", "Citizens Bank Park": "NE"
+}
 
-todays_batters = get_fantasyalarm_batters()
+# Park HR factors (normalized, e.g. 1.00 = league avg, >1.00 = HR friendly)
+park_factors = {
+    "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
+    "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.82,
+    "Progressive Field": 1.01, "Target Field": 1.04, "Kauffman Stadium": 0.98,
+    "Guaranteed Rate Field": 1.18, "Angel Stadium": 1.05, "Minute Maid Park": 1.06,
+    "Oakland Coliseum": 0.82, "T-Mobile Park": 0.86, "Globe Life Field": 1.00,
+    "Dodger Stadium": 1.10, "Chase Field": 1.06, "Coors Field": 1.30,
+    "Oracle Park": 0.82, "Wrigley Field": 1.12, "Great American Ball Park": 1.26,
+    "American Family Field": 1.17, "PNC Park": 0.87, "Busch Stadium": 0.87,
+    "Truist Park": 1.06, "LoanDepot Park": 0.86, "Citi Field": 0.94,
+    "Nationals Park": 1.05, "Petco Park": 0.85, "Citizens Bank Park": 1.19
+}
 
-if not todays_batters:
-    st.warning("Couldn't load today's MLB lineups from FantasyAlarm. Try reloading or check your connection.")
-else:
-    st.write(f"Found {len(todays_batters)} confirmed batters in today's lineups.")
+compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 
-windows = [162, 14, 7, 5, 3]
-results = []
+def get_compass_idx(dir_str):
+    dir_str = dir_str.upper()
+    try: return compass.index(dir_str)
+    except: return -1
+def is_wind_out(wind_dir, park_orientation):
+    wi = get_compass_idx(wind_dir)
+    pi = get_compass_idx(park_orientation)
+    if wi == -1 or pi == -1: return "unknown"
+    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7: return "out"
+    elif abs(wi - pi) == 4: return "in"
+    else: return "side"
+
+def get_weather(city, date, park_orientation, api_key=API_KEY):
+    try:
+        url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date}"
+        resp = requests.get(url)
+        data = resp.json()
+        day = data['forecast']['forecastday'][0]['day']
+        wind_dir = day.get('maxwind_dir', '')[:2].upper()
+        wind = day.get('maxwind_mph', None)
+        temp = day.get('avgtemp_f', None)
+        humidity = day.get('avghumidity', None)
+        condition = day.get('condition', {}).get('text', None)
+        wind_effect = is_wind_out(wind_dir, park_orientation)
+        return {
+            "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
+            "Humidity": humidity, "Condition": condition
+        }
+    except Exception:
+        return {
+            "Temp": None, "Wind": None, "WindDir": None, "WindEffect": None,
+            "Humidity": None, "Condition": None
+        }
 
 def get_player_id(name):
     try:
         first, last = name.split(" ", 1)
-        player_info = playerid_lookup(last, first)
-        if not player_info.empty:
-            return int(player_info.iloc[0]['key_mlbam'])
+        info = playerid_lookup(last, first)
+        if not info.empty:
+            return int(info.iloc[0]['key_mlbam'])
     except Exception:
         return None
     return None
 
-def get_statcast(player_id, days_back):
-    try:
-        if player_id is None:
-            return pd.DataFrame()
-        if days_back == 162:
-            start_date = datetime(datetime.now().year, 3, 28)
-        else:
-            start_date = datetime.now() - timedelta(days=days_back)
-        end_date = datetime.now() - timedelta(days=1)
-        df = statcast_batter(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), player_id)
-        return df
-    except Exception:
-        return pd.DataFrame()
-
-progress = st.progress(0)
-for idx, batter in enumerate(todays_batters):
-    player_id = get_player_id(batter)
-    player_stats = {'Batter': batter}
-    for window in windows:
-        data = get_statcast(player_id, window)
-        if not data.empty and 'type' in data.columns:
-            data = data[data['type'] == "X"]
-            data = data[data['launch_speed'].notnull() & data['launch_angle'].notnull()]
-            ev = data['launch_speed'].mean()
-            barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
-            total = len(data)
+def get_batter_stats_multi(batter_name, windows):
+    pid = get_player_id(batter_name)
+    out = {}
+    if not pid:
+        for w in windows:
+            out[f"B_BarrelRate_{w}"] = None
+            out[f"B_EV_{w}"] = None
+        return out
+    for w in windows:
+        start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
+        end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        try:
+            df = statcast_batter(start, end, pid)
+            if df.empty:
+                out[f"B_BarrelRate_{w}"] = None
+                out[f"B_EV_{w}"] = None
+                continue
+            df = df[df['type'] == 'X']
+            df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
+            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
+            total = len(df)
             barrel_rate = barrels / total if total > 0 else 0
-            player_stats[f"EV_{window}"] = round(ev, 1) if ev is not None else 0
-            player_stats[f"BarrelRate_{window}"] = round(barrel_rate, 3)
-            player_stats[f"PA_{window}"] = total
-        else:
-            player_stats[f"EV_{window}"] = None
-            player_stats[f"BarrelRate_{window}"] = None
-            player_stats[f"PA_{window}"] = 0
-    results.append(player_stats)
-    progress.progress((idx + 1) / len(todays_batters))
+            ev = df['launch_speed'].mean() if total > 0 else None
+            out[f"B_BarrelRate_{w}"] = round(barrel_rate,3)
+            out[f"B_EV_{w}"] = round(ev,1) if ev else None
+        except Exception:
+            out[f"B_BarrelRate_{w}"] = None
+            out[f"B_EV_{w}"] = None
+    return out
 
-df = pd.DataFrame(results)
+def get_pitcher_stats_multi(pitcher_name, windows):
+    pid = get_player_id(pitcher_name)
+    out = {}
+    if not pid:
+        for w in windows:
+            out[f"P_BarrelRateAllowed_{w}"] = None
+            out[f"P_EVAllowed_{w}"] = None
+        return out
+    for w in windows:
+        start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
+        end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        try:
+            df = statcast_pitcher(start, end, pid)
+            if df.empty:
+                out[f"P_BarrelRateAllowed_{w}"] = None
+                out[f"P_EVAllowed_{w}"] = None
+                continue
+            df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
+            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
+            total = len(df)
+            barrel_rate = barrels / total if total > 0 else 0
+            ev_allowed = df['launch_speed'].mean() if total > 0 else None
+            out[f"P_BarrelRateAllowed_{w}"] = round(barrel_rate, 3)
+            out[f"P_EVAllowed_{w}"] = round(ev_allowed, 1) if ev_allowed else None
+        except Exception:
+            out[f"P_BarrelRateAllowed_{w}"] = None
+            out[f"P_EVAllowed_{w}"] = None
+    return out
 
-def get_score(row, window):
-    ev_col = f"EV_{window}"
-    br_col = f"BarrelRate_{window}"
-    if ev_col not in row or br_col not in row:
-        return 0
-    ev = row[ev_col]
-    br = row[br_col]
-    if ev is None or br is None:
-        return 0
-    ev_norm = (ev - 80) / (105 - 80)
-    ev_norm = max(0, min(ev_norm, 1))
-    br_norm = min(br / 0.15, 1)
-    return round((ev_norm * 0.6 + br_norm * 0.4) * 100, 1)
+def norm_barrel(x):   return min(x / 0.15, 1) if pd.notnull(x) else 0
+def norm_ev(x):       return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
+def norm_park(x):     return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+def norm_weather(temp, wind, wind_effect):
+    score = 1
+    if temp and temp > 80: score += 0.05
+    if wind and wind > 10:
+        if wind_effect == "out": score += 0.07
+        elif wind_effect == "in": score -= 0.07
+    return max(0.8, min(score, 1.2))
 
-if not df.empty:
-    for window in windows:
-        df[f"HR_Score_{window}"] = df.apply(lambda row: get_score(row, window), axis=1)
+windows = [3, 5, 7, 14]
 
-score_cols = [f"HR_Score_{w}" for w in windows]
-existing_score_cols = [col for col in score_cols if col in df.columns]
+st.title("⚾️ MLB HR Matchup Leaderboard (All Data, Positive Regression)")
 
-sort_window = None
-for col in score_cols[1:]:
-    if col in df.columns and df[col].sum() > 0:
-        sort_window = col
-        break
-if sort_window is None and existing_score_cols:
-    sort_window = existing_score_cols[0]
+st.markdown("""
+**Upload your daily matchup CSV:**  
+`Batter,Pitcher,City,Park,Date`  
+And a **Baseball Savant xHR/HR CSV** (with columns `player_name`, `hr`, `xhr`)
+""")
 
-if sort_window is not None:
-    st.subheader(f"Top HR Probability Batters (Sorted by {sort_window.replace('_', ' ')})")
-    show_cols = ["Batter"] + score_cols + [f"EV_{w}" for w in windows] + [f"BarrelRate_{w}" for w in windows] + [f"PA_{w}" for w in windows]
-    show_cols = [col for col in show_cols if col in df.columns]
-    st.dataframe(df.sort_values(sort_window, ascending=False).reset_index(drop=True)[show_cols])
+uploaded_file = st.file_uploader("Upload your daily CSV:", type=["csv"])
+xhr_file = st.file_uploader("Upload Baseball Savant xHR/HR CSV:", type=["csv"])
+
+if uploaded_file and xhr_file:
+    df_upload = pd.read_csv(uploaded_file)
+    for col in ['Batter','Pitcher','City','Park','Date']:
+        if col not in df_upload.columns:
+            st.error(f"Missing required column: {col}")
+            st.stop()
+    xhr_df = pd.read_csv(xhr_file)
+    xhr_df = xhr_df.rename(columns={c: c.lower() for c in xhr_df.columns})
+
+    weather_rows, stat_rows, park_factor_rows = [], [], []
+    st.write("Fetching Statcast, weather, park factor, and merging xHR (this may take a few minutes)...")
+    progress = st.progress(0)
+    for idx, row in df_upload.iterrows():
+        city = row['City']
+        date = row['Date']
+        park = row['Park']
+        batter = row['Batter']
+        pitcher = row['Pitcher']
+        park_orientation = ballpark_orientations.get(park, "N")
+        park_factor = park_factors.get(park, 1.0)
+        weather = get_weather(city, date, park_orientation)
+        batter_stats = get_batter_stats_multi(batter, windows)
+        pitcher_stats = get_pitcher_stats_multi(pitcher, windows)
+        weather_rows.append(weather)
+        stat_row = {}
+        stat_row.update(batter_stats)
+        stat_row.update(pitcher_stats)
+        stat_rows.append(stat_row)
+        park_factor_rows.append({"ParkFactor": park_factor})
+        progress.progress((idx+1)/len(df_upload))
+    weather_df = pd.DataFrame(weather_rows)
+    stat_df = pd.DataFrame(stat_rows)
+    park_df = pd.DataFrame(park_factor_rows)
+    df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
+
+    # Merge in xHR/HR regression from Savant leaderboard
+    df_final = df_final.merge(
+        xhr_df[['player_name','hr','xhr']],
+        left_on='Batter', right_on='player_name', how='left'
+    )
+    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr']
+
+    def calc_hr_score(row):
+        # Example: weighting recent (7/14d) more. Adjust as you wish!
+        batter_score = (
+            norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
+            norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
+            norm_barrel(row.get('B_BarrelRate_5')) * 0.08 +
+            norm_barrel(row.get('B_BarrelRate_3')) * 0.05 +
+            norm_ev(row.get('B_EV_14')) * 0.10 +
+            norm_ev(row.get('B_EV_7')) * 0.07 +
+            norm_ev(row.get('B_EV_5')) * 0.05 +
+            norm_ev(row.get('B_EV_3')) * 0.03
+        )
+        pitcher_score = (
+            norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
+            norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
+            norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
+            norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
+            norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
+            norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
+            norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
+            norm_ev(row.get('P_EVAllowed_3')) * 0.01
+        )
+        park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
+        weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
+        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap the boost
+        total = batter_score + pitcher_score + park_score + weather_score + regression_score
+        return round(total, 3)
+
+    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+    df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
+
+    st.success("All done! Top matchups below:")
+
+    show_cols = [
+        'Batter','Pitcher','Park','HR_Score','Reg_xHR',
+        'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect'
+    ]
+    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
+
+    top5 = df_leaderboard.head(5)
+    st.dataframe(top5[show_cols])
+
+    st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']] if 'Reg_xHR' in top5.columns else top5.set_index('Batter')[['HR_Score']])
+
+    # Show all data and download
+    st.dataframe(df_leaderboard[show_cols])
+    csv_out = df_leaderboard.to_csv(index=False).encode()
+    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_with_regression.csv")
+
 else:
-    st.warning("No HR probability data found for today's lineups. This may be due to missing Statcast data for recent days.")
+    st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
-st.caption("Columns ending in _162 = Season, _14 = last 14d, _7 = last 7d, _5 = last 5d, _3 = last 3d. HR_Score columns use normalized EV (60%) and barrel rate (40%).")
+st.caption("""
+- All stats (barrel%, EV) are fetched for 3, 5, 7, 14 days, weather/park/wind included.
+- **Reg_xHR** is positive regression: xHR - HR (from Savant).
+- Top 5 chart and full leaderboard with all key stats included.
+""")
