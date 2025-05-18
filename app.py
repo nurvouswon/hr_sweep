@@ -31,7 +31,6 @@ def get_recent_data(player_id, days_back):
     except Exception as e:
         st.error(f"Data fetch error: {e}")
         return pd.DataFrame()
-
 if st.button("Predict HR"):
     player_id = get_player_id(player_name)
 if player_id:
@@ -61,5 +60,5 @@ if player_id:
         st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
     else:
         st.warning("Incomplete Statcast data for this player.")
-else:
+    else:
     st.error("Player not found. Please check the spelling.")
