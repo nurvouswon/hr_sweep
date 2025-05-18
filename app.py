@@ -350,7 +350,7 @@ df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
 st.success("All done! Top matchups below:")
 
-    show_cols = [
+show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
