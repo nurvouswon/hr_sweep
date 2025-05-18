@@ -19,16 +19,17 @@ ballpark_orientations = {
     "Nationals Park": "NE", "Petco Park": "N", "Citizens Bank Park": "NE"
 }
 
+# Updated 2025 park factors (adjusted where applicable)
 park_factors = {
     "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
-    "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.82,
+    "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.96, # Upgraded for 2025
     "Progressive Field": 1.01, "Target Field": 1.04, "Kauffman Stadium": 0.98,
     "Guaranteed Rate Field": 1.18, "Angel Stadium": 1.05, "Minute Maid Park": 1.06,
     "Oakland Coliseum": 0.82, "T-Mobile Park": 0.86, "Globe Life Field": 1.00,
     "Dodger Stadium": 1.10, "Chase Field": 1.06, "Coors Field": 1.30,
     "Oracle Park": 0.82, "Wrigley Field": 1.12, "Great American Ball Park": 1.26,
     "American Family Field": 1.17, "PNC Park": 0.87, "Busch Stadium": 0.87,
-    "Truist Park": 1.06, "LoanDepot Park": 0.86, "Citi Field": 0.94,
+    "Truist Park": 1.06, "LoanDepot Park": 0.86, "Citi Field": 1.05, # Upgraded for 2025
     "Nationals Park": 1.05, "Petco Park": 0.85, "Citizens Bank Park": 1.19
 }
 
@@ -179,14 +180,41 @@ def norm_weather(temp, wind, wind_effect):
         elif wind_effect == "in": score -= 0.07
     return max(0.8, min(score, 1.2))
 
+# -------- 2025 MICRO-TRENDS INTEGRATION --------
+def custom_2025_boost(row):
+    bonus = 0
+    # A. League-wide: More barrels = more HRs
+    bonus += norm_barrel(row.get('B_BarrelRate_14')) * 0.01
+    # B. Citi Field up
+    if row.get('Park') == 'Citi Field': bonus += 0.025
+    # B. Comerica up
+    if row.get('Park') == 'Comerica Park': bonus += 0.02
+    # C. Wrigley wind-out super-boost
+    if row.get('Park') == 'Wrigley Field' and row.get('WindEffect') == 'out': bonus += 0.03
+    # D. Milwaukee/Philly wind-out bonus
+    if row.get('Park') in ['American Family Field','Citizens Bank Park'] and row.get('WindEffect') == 'out': bonus += 0.015
+    # C. Dodger RHB pull HR bonus
+    if row.get('Park') == 'Dodger Stadium' and row.get('BatterHandedness') == 'R': bonus += 0.01
+    # D. Extra warm weather HR boost
+    if row.get('Temp') and row.get('Temp') > 80: bonus += 0.01
+    # F. Pull-side RHB HR-friendly parks
+    if row.get('BatterHandedness') == 'R' and row.get('Park') in [
+        "Yankee Stadium","Great American Ball Park","Guaranteed Rate Field"]: bonus += 0.012
+    # G. High humidity, east/south park
+    if row.get('Humidity') and row.get('Humidity') > 65 and row.get('Park') in ["Truist Park","LoanDepot Park"]: bonus += 0.01
+    # H. West coast (marine layer dampening)
+    if row.get('Park') in ["Dodger Stadium","Petco Park","Oracle Park"]: bonus -= 0.01
+    # J. Pitcher is LH
+    if row.get('PitcherHandedness') == 'L': bonus += 0.01
+    return bonus
+
 windows = [3, 5, 7, 14]
 
-st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, All Features)")
+st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, 2025 Micro-Trends)")
 
 st.markdown("""
 **Upload your daily matchup CSV:**  
 `Batter,Pitcher,City,Park,Date`  
-(You can also add `BatterTeam,PitcherTeam` for your own use.)  
 And a **Baseball Savant xHR/HR CSV** (with columns `player_name`, `hr`, `xhr`)
 """)
 
@@ -263,15 +291,17 @@ if uploaded_file and xhr_file:
             norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
             norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
             norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
-            norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
+        norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
             norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
             norm_ev(row.get('P_EVAllowed_3')) * 0.01
-            # You can add more pitcher stats to scoring as desired!
         )
         park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
         weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
         regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap the boost
+
+        # ----- MICRO-TRENDS 2025 BOOST -----
         total = batter_score + pitcher_score + park_score + weather_score + regression_score
+        total += custom_2025_boost(row)
         return round(total, 3)
 
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
@@ -279,7 +309,6 @@ if uploaded_file and xhr_file:
 
     st.success("All done! Top matchups below:")
 
-    # Show a wide array of pitcher stats for your review!
     show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
@@ -307,5 +336,6 @@ else:
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days) and all advanced pitcher stats per window (Barrel%, EV, HR, BIP, HardHit%, FlyBall%, K%, BB%, HR/9) are included.**
 - Weather, wind, park factor, handedness, and xHR regression are all automated.
+- Latest 2025 micro-trends: park upgrades, humidity, wind, warm weather, pitcher/batter splits, and more.
 - CSV download and top-5 leaderboard chart included.
 """)
