@@ -39,10 +39,19 @@ if st.button("Predict HR"):
     if player_id:
         data = get_recent_data(player_id, days_back)
         st.write(f"Player ID: {player_id}")
-        st.write("First 5 data rows:")
+    st.write("First 5 data rows (before filtering):")
+    st.dataframe(data.head())
+
+    # Only filter if data is not empty and 'type' is a column
+    if not data.empty and 'type' in data.columns:
+        # Keep only events where the ball was put in play
+        data = data[data['type'] == "X"]
+        # Also remove any rows missing launch speed or angle
+        data = data[data['launch_speed'].notnull() & data['launch_angle'].notnull()]
+        st.write("First 5 data rows (after filtering for batted balls):")
         st.dataframe(data.head())
-        if data.empty:
-            st.warning("No recent data found.")
+    else:
+        st.write("No batted ball events found for this player/date range.")
         elif 'launch_speed' in data.columns and 'launch_angle' in data.columns:
             st.write(f"Events found: {len(data)}")
             st.dataframe(data[['game_date', 'launch_speed', 'launch_angle', 'events']].head(10))
