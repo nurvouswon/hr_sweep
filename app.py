@@ -6,26 +6,40 @@ from datetime import datetime, timedelta
 
 st.title("⚾️ Today's MLB HR Probability Leaderboard")
 
-# -- 1. Get today's starting lineups (free public source) --
-@st.cache_data(ttl=900)
-def get_todays_lineup_names():
-    url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
-    resp = requests.get(url)
-    games = resp.json()["events"]
+# -- 1. Get today's lineups from MLB.com --
+def get_todays_mlb_lineups():
+    today = datetime.now().strftime("%Y-%m-%d")
+    schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
+    resp = requests.get(schedule_url)
+    if resp.status_code != 200:
+        return []
+    games = resp.json().get("dates", [{}])[0].get("games", [])
     batters = set()
     for game in games:
-        for competitor in game["competitions"][0]["competitors"]:
-            if "lineup" in competitor:
-                for player in competitor["lineup"]:
-                    if player.get("battingOrder") and player.get("athlete"):
-                        name = player["athlete"]["displayName"]
-                        if len(name.split(" ")) == 2:  # skip Jr./Sr./III etc for simplicity
-                            batters.add(name)
+        game_pk = game.get("gamePk")
+        box_url = f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
+        box = requests.get(box_url)
+        if box.status_code != 200:
+            continue
+        box_data = box.json()
+        for team_side in ["home", "away"]:
+            try:
+                lineup = box_data["liveData"]["boxscore"]["teams"][team_side]["players"]
+                for player_id, pdata in lineup.items():
+                    # Only take batters in starting lineup (battingOrder present)
+                    stats = pdata.get("stats", {})
+                    if "batting" in stats and "battingOrder" in pdata:
+                        full_name = pdata["person"]["fullName"]
+                        # Filter for just First Last format (skip Jr./III etc for best ID match)
+                        if len(full_name.split(" ")) == 2:
+                            batters.add(full_name)
+            except Exception:
+                continue
     return list(batters)
 
-todays_batters = get_todays_lineup_names()
+todays_batters = get_todays_mlb_lineups()
 if not todays_batters:
-    st.warning("Couldn't load today's MLB lineups from ESPN. Try reloading or check your connection.")
+    st.warning("Couldn't load today's MLB lineups from MLB.com. Try reloading or check your connection.")
 else:
     st.write(f"Found {len(todays_batters)} batters in today's MLB starting lineups.")
 
@@ -45,6 +59,8 @@ def get_player_id(name):
 
 def get_statcast(player_id, days_back):
     try:
+        if player_id is None:
+            return pd.DataFrame()
         if days_back == 162:
             start_date = datetime(datetime.now().year, 3, 28)
         else:
@@ -55,7 +71,6 @@ def get_statcast(player_id, days_back):
     except Exception:
         return pd.DataFrame()
 
-# -- 3. Scan all batters --
 progress = st.progress(0)
 for idx, batter in enumerate(todays_batters):
     player_id = get_player_id(batter)
@@ -81,10 +96,13 @@ for idx, batter in enumerate(todays_batters):
 
 df = pd.DataFrame(results)
 
-# -- 4. Calculate HR Probability Score (last 7 days, or fallback to next most recent) --
 def get_score(row, window):
-    ev = row[f"EV_{window}"]
-    br = row[f"BarrelRate_{window}"]
+    ev_col = f"EV_{window}"
+    br_col = f"BarrelRate_{window}"
+    if ev_col not in row or br_col not in row:
+        return 0
+    ev = row[ev_col]
+    br = row[br_col]
     if ev is None or br is None:
         return 0
     ev_norm = (ev - 80) / (105 - 80)
@@ -92,10 +110,10 @@ def get_score(row, window):
     br_norm = min(br / 0.15, 1)
     return round((ev_norm * 0.6 + br_norm * 0.4) * 100, 1)
 
-for window in windows:
-    df[f"HR_Score_{window}"] = df.apply(lambda row: get_score(row, window), axis=1)
+if not df.empty:
+    for window in windows:
+        df[f"HR_Score_{window}"] = df.apply(lambda row: get_score(row, window), axis=1)
 
-# -- 5. Display the Leaderboard: HR Probability (last 7 days) --
 sort_window = "HR_Score_7"
 if df[sort_window].sum() == 0:
     sort_window = "HR_Score_14"
