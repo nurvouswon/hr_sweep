@@ -25,7 +25,8 @@ def get_recent_data(player_id, days_back):
         days = int(days_back)
         end_date = datetime.now() - timedelta(days=1)
         start_date = end_date - timedelta(days=days)
-        df = statcast(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), player_id=player_id)
+        from pybaseball import statcast_batter
+        df = statcast_batter(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), player_id)
         return df
     except Exception as e:
         st.error(f"Data fetch error: {e}")
