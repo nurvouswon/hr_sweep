@@ -15,19 +15,17 @@ def get_player_id(name):
         player_info = playerid_lookup(last, first)
         if not player_info.empty:
             return int(player_info.iloc[0]['key_mlbam'])
-        else:
-            return None
     except Exception:
-        return None
+        pass
+    return None
 
 def get_recent_data(player_id, days_back):
+    # Make sure days_back is an integer
     try:
-        # Force int and fallback
-        days = int(days_back) if days_back is not None else 14
+        days = int(days_back)
     except Exception:
         days = 14
     try:
-        # Use fixed values to guarantee this block runs
         end_date = datetime.now() - timedelta(days=1)
         start_date = end_date - timedelta(days=days)
     except Exception as e:
@@ -45,25 +43,23 @@ if st.button("Predict HR"):
 
     if player_id:
         data = get_recent_data(player_id, days_back)
-
         if data.empty:
             st.warning("No recent data found.")
+        elif 'launch_speed' in data.columns and 'launch_angle' in data.columns:
+            ev = data['launch_speed'].dropna().mean()
+            barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
+            total = len(data)
+            barrel_rate = barrels / total if total > 0 else 0
+
+            # Safe transformation
+            if ev is None or pd.isna(ev):
+                ev = 0
+            score = MinMaxScaler().fit_transform([[ev, barrel_rate]])[0]
+            probability = (score[0] * 0.6 + score[1] * 0.4) * 100
+
+            st.success(f"HR Probability: {probability:.2f}%")
+            st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
         else:
-            if 'launch_speed' in data.columns and 'launch_angle' in data.columns:
-                ev = data['launch_speed'].dropna().mean()
-                barrels = data[(data['launch_speed'] > 95) & (data['launch_angle'].between(20, 35))].shape[0]
-                total = len(data)
-                barrel_rate = barrels / total if total > 0 else 0
-
-                # Safe transformation
-                if ev is None or pd.isna(ev):
-                    ev = 0
-                score = MinMaxScaler().fit_transform([[ev, barrel_rate]])[0]
-                probability = (score[0] * 0.6 + score[1] * 0.4) * 100
-
-                st.success(f"HR Probability: {probability:.2f}%")
-                st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
-            else:
-                st.warning("Incomplete Statcast data for this player.")
+            st.warning("Incomplete Statcast data for this player.")
     else:
         st.error("Player not found. Please check the spelling.")
