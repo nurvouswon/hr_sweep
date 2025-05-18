@@ -58,7 +58,7 @@ if st.button("Predict HR"):
 
             st.success(f"HR Probability: {probability:.2f}%")
             st.write(f"Avg Exit Velo: {ev:.1f} mph | Barrel Rate: {barrel_rate:.2%}")
-            else:
+        else:
             st.warning("Incomplete Statcast data for this player.")
-            else:
-            st.error("Player not found. Please check the spelling.")
+    else:
+        st.error("Player not found. Please check the spelling.")
