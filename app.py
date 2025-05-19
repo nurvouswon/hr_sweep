@@ -92,21 +92,29 @@ def get_player_id(name):
         return None
     return None
 
-def get_handedness(name):
-    import difflib
+import difflib
+import requests
+from bs4 import BeautifulSoup
+from pybaseball import playerid_lookup
+from pybaseball.lahman import people
+import pandas as pd
 
-# Add manual overrides for known "UNK" or new MLB players
+# ---- Manual overrides for new/missing players ----
 MANUAL_HANDEDNESS = {
-    # 'normalized name': ('Bats', 'Throws')
     'alexander canario': ('R', 'R'),
     'liam hicks': ('L', 'R'),
-    'carlos narvaez': ('R', 'R'),
     'patrick bailey': ('B', 'R'),
-    # Add more as needed...
+    # Add more as needed
 }
-
-# This will log all unknowns encountered for later
 UNKNOWNS_LOG = set()
+
+# ---- Load Fangraphs player info once (for all lookups) ----
+try:
+    from pybaseball.fangraphs import fg_player_info
+    FG_INFO = fg_player_info()
+    FG_INFO['norm_name'] = FG_INFO['Name'].map(lambda x: x.lower().replace('.', '').replace('-', ' ').replace("’", "'").strip())
+except Exception:
+    FG_INFO = pd.DataFrame()
 
 def get_handedness(name):
     clean_name = normalize_name(name)
@@ -116,11 +124,11 @@ def get_handedness(name):
     else:
         first, last = clean_name, ""
 
-    # 1. Try manual override dictionary
+    # 1. Manual override
     if clean_name in MANUAL_HANDEDNESS:
         return MANUAL_HANDEDNESS[clean_name]
 
-    # 2. Try pybaseball lookup
+    # 2. Pybaseball playerid_lookup
     try:
         lookup = playerid_lookup(last.capitalize(), first.capitalize())
         if not lookup.empty:
@@ -131,20 +139,53 @@ def get_handedness(name):
     except Exception:
         pass
 
-    # 3. Try Lahman (exact match)
+    # 3. Fangraphs player info table
+    try:
+        if not FG_INFO.empty:
+            fg_row = FG_INFO[FG_INFO['norm_name'] == clean_name]
+            if not fg_row.empty:
+                bats = fg_row.iloc[0].get('bats')
+                throws = fg_row.iloc[0].get('throws')
+                if pd.notnull(bats) and pd.notnull(throws):
+                    return bats, throws
+            # Try by last name if no exact match
+            fg_row = FG_INFO[FG_INFO['norm_name'].str.endswith(' ' + last)]
+            if not fg_row.empty:
+                bats = fg_row.iloc[0].get('bats')
+                throws = fg_row.iloc[0].get('throws')
+                if pd.notnull(bats) and pd.notnull(throws):
+                    return bats, throws
+    except Exception:
+        pass
+
+    # 4. Fangraphs page scrape (if playerid_lookup has FG ID)
+    try:
+        lookup = playerid_lookup(last.capitalize(), first.capitalize())
+        if not lookup.empty and 'key_fangraphs' in lookup.columns:
+            fg_id = lookup.iloc[0]['key_fangraphs']
+            if pd.notnull(fg_id):
+                url = f"https://www.fangraphs.com/players/id/{int(fg_id)}/stats?position=all"
+                resp = requests.get(url, timeout=5)
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    info_div = soup.find('div', class_='player-info__bio')
+                    if info_div:
+                        import re
+                        text = info_div.get_text()
+                        bats = re.search(r"Bats:\s*([LSR])", text)
+                        throws = re.search(r"Throws:\s*([LSR])", text)
+                        return (bats.group(1) if bats else None, throws.group(1) if throws else None)
+    except Exception:
+        pass
+
+    # 5. Lahman exact match
     try:
         df = people()
         df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
         match = df[df['nname'] == clean_name]
         if not match.empty:
             return match.iloc[0].get('bats'), match.iloc[0].get('throws')
-    except Exception:
-        pass
-
-    # 4. Try Lahman (fuzzy match)
-    try:
-        df = people()
-        df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
+        # Fuzzy match
         close = difflib.get_close_matches(clean_name, df['nname'].tolist(), n=1, cutoff=0.85)
         if close:
             row = df[df['nname'] == close[0]].iloc[0]
@@ -152,7 +193,7 @@ def get_handedness(name):
     except Exception:
         pass
 
-    # 5. Log and return "UNK"
+    # 6. Log and return "UNK"
     UNKNOWNS_LOG.add(clean_name)
     return None, None
 
