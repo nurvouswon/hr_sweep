@@ -384,7 +384,7 @@ else:
 
     # Show all data and allow download
 st.dataframe(df_leaderboard[show_cols])
-    csv_out = df_leaderboard.to_csv(index=False).encode()
+csv_out = df_leaderboard.to_csv(index=False).encode()
 st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
 else:
 st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
