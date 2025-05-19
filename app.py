@@ -71,55 +71,16 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
         temp = weather_hour.get('temp_f', None)
         wind = weather_hour.get('wind_mph', None)
-        # --- Improved wind_dir extraction and mapping, including full words ---
-        raw_dir = weather_hour.get('wind_dir', '').upper().replace("-", "")
-        word_mapping = {
-            "NORTH": "N", "NORTHEAST": "NE", "EAST": "E", "SOUTHEAST": "SE",
-            "SOUTH": "S", "SOUTHWEST": "SW", "WEST": "W", "NORTHWEST": "NW"
-        }
-        wind_dir = None
-        # First handle full-word wind directions
-        for word, short in word_mapping.items():
-            if word in raw_dir:
-                wind_dir = short
-                break
-        # If not found, handle abbreviations
-        if not wind_dir:
-            mapping = {
-                "N": "N", "NNE": "NE", "NE": "NE", "ENE": "NE",
-                "E": "E", "ESE": "SE", "SE": "SE", "SSE": "SE",
-                "S": "S", "SSW": "SW", "SW": "SW", "WSW": "SW",
-                "W": "W", "WNW": "NW", "NW": "NW", "NNW": "NW"
-            }
-            for key in mapping:
-                if key == raw_dir:
-                    wind_dir = mapping[key]
-                    break
-                if key in raw_dir:
-                    wind_dir = mapping[key]
-                    break
-        if not wind_dir:
-            wind_dir = "N"  # Default fallback
-
+        wind_dir = weather_hour.get('wind_dir', '')[:2].upper()
         humidity = weather_hour.get('humidity', None)
         condition = weather_hour.get('condition', {}).get('text', None)
-        # --- Debug output ---
-        st.write(f"DEBUG WEATHER: city={city}, park_orientation={park_orientation}, wind_dir(raw)={weather_hour.get('wind_dir','')}, wind_dir(norm)={wind_dir}")
-
         wind_effect = is_wind_out(wind_dir, park_orientation)
-        st.write(
-            f"DEBUG WEATHER: city={city}, park_orientation={park_orientation}, "
-            f"date={date}, game_time={game_time}, temp={temp}, wind={wind}, "
-            f"wind_dir(raw)={weather_hour.get('wind_dir', '')}, wind_dir(norm)={wind_dir}, "
-            f"humidity={humidity}, condition={condition}, pressure={weather_hour.get('pressure_in', None)}, "
-            f"precip={weather_hour.get('precip_mm', None)}, uv={weather_hour.get('uv', None)}, wind_effect={wind_effect}"
-        )
+        # No debug output!
         return {
             "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
             "Humidity": humidity, "Condition": condition
         }
-    except Exception as ex:
-        st.write(f"DEBUG WEATHER ERROR: {ex}")
+    except Exception:
         return {
             "Temp": None, "Wind": None, "WindDir": None, "WindEffect": None,
             "Humidity": None, "Condition": None
