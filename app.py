@@ -5,10 +5,6 @@ from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
 from datetime import datetime, timedelta
 import unicodedata
 
-def strip_accents(text):
-    """Remove accents from a string for consistent MLB lookup."""
-    return ''.join(c for c in unicodedata.normalize('NFD', text)
-                   if unicodedata.category(c) != 'Mn')
 API_KEY = "11ac3c31fb664ba8971102152251805"
 
 ballpark_orientations = {
@@ -75,32 +71,6 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         humidity = weather_hour.get('humidity', None)
         condition = weather_hour.get('condition', {}).get('text', None)
         wind_effect = is_wind_out(wind_dir, park_orientation)
-        # No debug output!
-        return {
-            "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
-            "Humidity": humidity, "Condition": condition
-        }
-    except Exception:
-        return {
-            "Temp": None, "Wind": None, "WindDir": None, "WindEffect": None,
-            "Humidity": None, "Condition": None
-        }
-    try:
-        url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date}"
-        resp = requests.get(url)
-        data = resp.json()
-        if game_time:
-            game_hour = int(game_time.split(":")[0])
-        else:
-            game_hour = 14  # Default to 2pm
-        hours = data['forecast']['forecastday'][0]['hour']
-        weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
-        temp = weather_hour.get('temp_f', None)
-        wind = weather_hour.get('wind_mph', None)
-        wind_dir = weather_hour.get('wind_dir', '')[:2].upper()
-        humidity = weather_hour.get('humidity', None)
-        condition = weather_hour.get('condition', {}).get('text', None)
-        wind_effect = is_wind_out(wind_dir, park_orientation)
         return {
             "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
             "Humidity": humidity, "Condition": condition
@@ -121,12 +91,9 @@ def get_player_id(name):
         return None
     return None
 
-import unicodedata
-
-# Utility: normalize names for better matching
+# Utility: normalize names for better matching (keep for future enhancements)
 def normalize_name(name):
     try:
-        # Remove accents, lowercase, strip spaces
         return ''.join(
             c for c in unicodedata.normalize('NFD', name)
             if unicodedata.category(c) != 'Mn'
@@ -134,91 +101,6 @@ def normalize_name(name):
     except Exception:
         return name.lower().strip()
 
-def get_handedness(name):
-    import time
-    from pybaseball.lahman import people
-    first, last = None, None
-    orig = name
-    if ',' in name:
-        last, first = [x.strip() for x in name.split(',', 1)]
-    elif ' ' in name:
-        parts = name.strip().split()
-        if len(parts) >= 2:
-            first, last = parts[0], parts[-1]
-    else:
-        first, last = name.strip(), ""
-    # Try regular lookup
-    try:
-        lookup = playerid_lookup(last, first)
-        if not lookup.empty:
-            bats = lookup.iloc[0].get('bats', None)
-            throws = lookup.iloc[0].get('throws', None)
-            st.write(f"DEBUG HANDEDNESS: {orig} => Bats:{bats} Throws:{throws}")
-            return bats, throws
-    except Exception as e:
-        pass
-    # Try lahman fallback
-    try:
-        df = people()
-        nname = normalize_name(orig)
-        df['nname'] = df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')
-        df['nname'] = df['nname'].map(normalize_name)
-        match = df[df['nname'] == nname]
-        if not match.empty:
-            bats = match.iloc[0].get('bats', None)
-            throws = match.iloc[0].get('throws', None)
-            st.write(f"DEBUG HANDEDNESS: {orig} => LAHMAN Fallback Bats:{bats} Throws:{throws}")
-            return bats, throws
-        # Try partial match (just last name)
-        last = normalize_name(last or orig)
-        match = df[df['name_last'].map(normalize_name) == last]
-        if not match.empty:
-            bats = match.iloc[0].get('bats', None)
-            throws = made
-    import time
-    from pybaseball.lahman import people
-    first, last = None, None
-    orig = name
-    if ',' in name:
-        last, first = [x.strip() for x in name.split(',', 1)]
-    elif ' ' in name:
-        parts = name.strip().split()
-        if len(parts) >= 2:
-            first, last = parts[0], parts[-1]
-    else:
-        first, last = name.strip(), ""
-    # Try regular lookup
-    try:
-        lookup = playerid_lookup(last, first)
-        if not lookup.empty:
-            bats = lookup.iloc[0].get('bats', None)
-            throws = lookup.iloc[0].get('throws', None)
-            st.write(f"DEBUG HANDEDNESS: {orig} => Bats:{bats} Throws:{throws}")
-            return bats, throws
-    except Exception as e:
-        pass
-    # Try lahman fallback
-    try:
-        df = people()
-        nname = normalize_name(orig)
-        df['nname'] = df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')
-        df['nname'] = df['nname'].map(normalize_name)
-        match = df[df['nname'] == nname]
-        if not match.empty:
-            bats = match.iloc[0].get('bats', None)
-            throws = match.iloc[0].get('throws', None)
-            st.write(f"DEBUG HANDEDNESS: {orig} => LAHMAN Fallback Bats:{bats} Throws:{throws}")
-            return bats, throws
-        # Try partial match (just last name)
-        last = normalize_name(last or orig)
-        match = df[df['name_last'].map(normalize_name) == last]
-        if not match.empty:
-            bats = match.iloc[0].get('bats', None)
-            throws = match.iloc[0].get('throws', None)
-            st.write(f"DEBUG HANDEDNESS: {orig} => PARTIAL Fallback Bats:{bats} Throws:{throws}")
-            return bats, throws
-    except Exception as e:
-        st.write(f"DEBUG HANDEDNESS ERROR: {orig} => {e}")
 def get_handedness(name):
     try:
         first, last = name.split(" ", 1)
@@ -233,20 +115,6 @@ def get_handedness(name):
     except Exception as e:
         st.write(f"DEBUG HANDEDNESS ERROR: {name} => {e}")
         return None, None
-    try:
-        first, last = name.split(" ", 1)
-        lookup = playerid_lookup(last, first)
-        if lookup.empty:
-            # Try capitalizing if first lookup fails
-            first, last = first.capitalize(), last.capitalize()
-            lookup = playerid_lookup(last, first)
-        if not lookup.empty:
-            throws = lookup.iloc[0]['throws']
-            bats = lookup.iloc[0]['bats']
-            return bats, throws
-    except Exception:
-        return None, None
-    return None, None
 
 def get_batter_stats_multi(batter_name, windows):
     pid = get_player_id(batter_name)
@@ -411,44 +279,30 @@ if uploaded_file and xhr_file:
     park_df = pd.DataFrame(park_factor_rows)
     df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-    # --- Robust Handedness and Merge ---
-    def first_last_to_comma(name):
-        if pd.isna(name): return ""
-        parts = name.strip().split()
-        if len(parts) >= 2:
-            return f"{parts[-1]}, {' '.join(parts[:-1])}"
-        return name.strip()
-
-    df_final['batter_comma'] = df_final['Batter'].apply(first_last_to_comma)
-
+    # Handedness population
     batter_handedness = []
-pitcher_handedness = []
-for idx, row in df_upload.iterrows():
-    batter = row['Batter']
-    pitcher = row['Pitcher']
-    try:
-        b_bats, _ = get_handedness(batter)
-        _, p_throws = get_handedness(pitcher)
-        st.write(f"DEBUG HANDEDNESS: {batter} => Bats:{b_bats}")
-        st.write(f"DEBUG HANDEDNESS: {pitcher} => Throws:{p_throws}")
-        batter_handedness.append(b_bats)
-        pitcher_handedness.append(p_throws)
-    except Exception as e:
-        st.write(f"DEBUG HANDEDNESS ERROR: {batter} vs {pitcher} => {e}")
-        batter_handedness.append(None)
-        pitcher_handedness.append(None)
-df_upload['BatterHandedness'] = batter_handedness
-df_upload['PitcherHandedness'] = pitcher_handedness
+    pitcher_handedness = []
+    for idx, row in df_final.iterrows():
+        batter = row['Batter']
+        pitcher = row['Pitcher']
+        try:
+            b_bats, _ = get_handedness(batter)
+            _, p_throws = get_handedness(pitcher)
+            batter_handedness.append(b_bats)
+            pitcher_handedness.append(p_throws)
+        except Exception as e:
+            st.write(f"DEBUG HANDEDNESS ERROR: {batter} vs {pitcher} => {e}")
+            batter_handedness.append(None)
+            pitcher_handedness.append(None)
+    df_final['BatterHandedness'] = batter_handedness
+    df_final['PitcherHandedness'] = pitcher_handedness
 
-    # Merge xHR data (robust!)
+    # Merge xHR data
     df_final = df_final.merge(
         xhr_df[['player', 'hr_total', 'xhr', 'xhr_diff']],
-        left_on='batter_comma', right_on='player', how='left'
+        left_on='Batter', right_on='player', how='left'
     )
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
-
-    # Clean up helper columns
-    df_final = df_final.drop(columns=['batter_comma', 'player'])
 
     def calc_hr_score(row):
         batter_score = (
