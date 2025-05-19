@@ -2,68 +2,44 @@ import streamlit as st
 import pandas as pd
 import requests
 from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
-from pybaseball.lahman import people
 from datetime import datetime, timedelta
 import unicodedata
 
 API_KEY = "11ac3c31fb664ba8971102152251805"
 
-ballpark_orientations = {
-    "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
-    "Camden Yards": "NE", "Rogers Centre": "NE", "Comerica Park": "N",
-    "Progressive Field": "NE", "Target Field": "N", "Kauffman Stadium": "NE",
-    "Guaranteed Rate Field": "NE", "Angel Stadium": "NE", "Minute Maid Park": "N",
-    "Oakland Coliseum": "N", "T-Mobile Park": "N", "Globe Life Field": "NE",
-    "Dodger Stadium": "NE", "Chase Field": "N", "Coors Field": "N",
-    "Oracle Park": "E", "Wrigley Field": "NE", "Great American Ball Park": "N",
-    "American Family Field": "NE", "PNC Park": "NE", "Busch Stadium": "NE",
-    "Truist Park": "N", "LoanDepot Park": "N", "Citi Field": "N",
-    "Nationals Park": "NE", "Petco Park": "N", "Citizens Bank Park": "NE"
-}
+# Normalize name utility
+def normalize_name(name):
+    if not isinstance(name, str):
+        return ""
+    name = ''.join(
+        c for c in unicodedata.normalize('NFD', name)
+        if unicodedata.category(c) != 'Mn'
+    )
+    return name.lower().replace('.', '').replace('-', ' ').replace("’", "'").strip()
 
-park_factors = {
-    "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
-    "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.96,
-    "Progressive Field": 1.01, "Target Field": 1.04, "Kauffman Stadium": 0.98,
-    "Guaranteed Rate Field": 1.18, "Angel Stadium": 1.05, "Minute Maid Park": 1.06,
-    "Oakland Coliseum": 0.82, "T-Mobile Park": 0.86, "Globe Life Field": 1.00,
-    "Dodger Stadium": 1.10, "Chase Field": 1.06, "Coors Field": 1.30,
-    "Oracle Park": 0.82, "Wrigley Field": 1.12, "Great American Ball Park": 1.26,
-    "American Family Field": 1.17, "PNC Park": 0.87, "Busch Stadium": 0.87,
-    "Truist Park": 1.06, "LoanDepot Park": 0.86, "Citi Field": 1.05,
-    "Nationals Park": 1.05, "Petco Park": 0.85, "Citizens Bank Park": 1.19
-}
-
+ballpark_orientations = {...}  # (keep your dict here)
+park_factors = {...}           # (keep your dict here)
 compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 
 def get_compass_idx(dir_str):
     dir_str = dir_str.upper()
-    try:
-        return compass.index(dir_str)
-    except:
-        return -1
+    try: return compass.index(dir_str)
+    except: return -1
 
 def is_wind_out(wind_dir, park_orientation):
     wi = get_compass_idx(wind_dir)
     pi = get_compass_idx(park_orientation)
-    if wi == -1 or pi == -1:
-        return "unknown"
-    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7:
-        return "out"
-    elif abs(wi - pi) == 4:
-        return "in"
-    else:
-        return "side"
+    if wi == -1 or pi == -1: return "unknown"
+    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7: return "out"
+    elif abs(wi - pi) == 4: return "in"
+    else: return "side"
 
 def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
         url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date}"
         resp = requests.get(url)
         data = resp.json()
-        if game_time:
-            game_hour = int(game_time.split(":")[0])
-        else:
-            game_hour = 14  # Default to 2pm
+        game_hour = int(game_time.split(":")[0]) if game_time else 14
         hours = data['forecast']['forecastday'][0]['hour']
         weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
         temp = weather_hour.get('temp_f', None)
@@ -92,55 +68,30 @@ def get_player_id(name):
         return None
     return None
 
-def normalize_name(name):
-    try:
-        return ''.join(
-            c for c in unicodedata.normalize('NFD', name)
-            if unicodedata.category(c) != 'Mn'
-        ).lower().replace('.', '').replace('-', ' ').replace("’", "'").strip()
-    except Exception:
-        return name.lower().strip()
-
+# Robust handedness (pybaseball then fallback to Lahman)
 def get_handedness(name):
-    # Try multiple strategies, robust!
-    orig = name
-    if pd.isna(name):
-        return None, None
-    name = str(name)
-    bats = throws = None
-    # 1. Try regular playerid_lookup
+    from pybaseball.lahman import people
     try:
+        # Try pybaseball lookup
         parts = name.strip().split()
         if len(parts) >= 2:
-            first, last = parts[0], ' '.join(parts[1:])
-            lookup = playerid_lookup(last, first)
-            if not lookup.empty:
-                bats = lookup.iloc[0].get('bats', None)
-                throws = lookup.iloc[0].get('throws', None)
-                if bats or throws:
-                    return bats, throws
-    except Exception:
-        pass
-    # 2. Try lahman fallback (normalize)
-    try:
+            first, last = parts[0], parts[-1]
+        else:
+            first, last = name.strip(), ""
+        lookup = playerid_lookup(last, first)
+        if not lookup.empty:
+            bats = lookup.iloc[0].get('bats', None)
+            throws = lookup.iloc[0].get('throws', None)
+            return bats, throws
+        # Fallback to Lahman
         df = people()
-        nname = normalize_name(orig)
-        df['nname'] = df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')
-        df['nname'] = df['nname'].map(normalize_name)
+        df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
+        nname = normalize_name(name)
         match = df[df['nname'] == nname]
         if not match.empty:
             bats = match.iloc[0].get('bats', None)
             throws = match.iloc[0].get('throws', None)
-            if bats or throws:
-                return bats, throws
-        # Partial last name fallback
-        last = normalize_name(parts[-1])
-        match = df[df['name_last'].map(normalize_name) == last]
-        if not match.empty:
-            bats = match.iloc[0].get('bats', None)
-            throws = match.iloc[0].get('throws', None)
-            if bats or throws:
-                return bats, throws
+            return bats, throws
     except Exception:
         pass
     return None, None
@@ -280,25 +231,14 @@ if uploaded_file and xhr_file:
             st.stop()
     xhr_df = pd.read_csv(xhr_file)
 
-    # Prepare robust merge columns
-    def first_last_to_comma(name):
-        if pd.isna(name): return ""
-        parts = str(name).strip().split()
-        if len(parts) >= 2:
-            return f"{parts[-1]}, {' '.join(parts[:-1])}"
-        return name.strip()
+    # Robust normalization for merge reliability
+    def norm_merge(name):
+        return normalize_name(name)
 
-    # Add batter handedness & pitcher handedness columns robustly
-    batter_handedness, pitcher_handedness = [], []
-    for idx, row in df_upload.iterrows():
-        b_bats, _ = get_handedness(row['Batter'])
-        _, p_throws = get_handedness(row['Pitcher'])
-        batter_handedness.append(b_bats)
-        pitcher_handedness.append(p_throws)
-    df_upload['BatterHandedness'] = batter_handedness
-    df_upload['PitcherHandedness'] = pitcher_handedness
+    df_upload['batter_norm'] = df_upload['Batter'].apply(norm_merge)
+    xhr_df['player_norm'] = xhr_df['player'].apply(norm_merge)
 
-    # Build game context (weather, park factor, statcast)
+    # Collect features
     weather_rows, stat_rows, park_factor_rows = [], [], []
     st.write("Fetching Statcast, weather (game time), park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
@@ -326,25 +266,26 @@ if uploaded_file and xhr_file:
     park_df = pd.DataFrame(park_factor_rows)
     df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-    # Merge xHR data (robust! comma name)
-    df_final['batter_comma'] = df_final['Batter'].apply(first_last_to_comma)
-
-    # Normalize merge columns for maximum match reliability
-    def norm_merge(name):
-        return normalize_name(first_last_to_comma(name))
-
-    df_final['batter_norm'] = df_final['Batter'].apply(norm_merge)
-    xhr_df['player_norm'] = xhr_df['player'].apply(norm_merge)
-
-    # Merge with normalized names
+    # Merge xHR/HR using normalized name
     df_final = df_final.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='batter_norm', right_on='player_norm', how='left'
     )
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
-    # Clean up merge helper columns
-    df_final = df_final.drop(columns=['batter_comma', 'batter_norm', 'player_norm'])
+    # Add handedness columns robustly to df_final
+    batter_handedness = []
+    pitcher_handedness = []
+    for idx, row in df_final.iterrows():
+        b_bats, _ = get_handedness(row['Batter'])
+        _, p_throws = get_handedness(row['Pitcher'])
+        batter_handedness.append(b_bats)
+        pitcher_handedness.append(p_throws)
+    df_final['BatterHandedness'] = batter_handedness
+    df_final['PitcherHandedness'] = pitcher_handedness
+
+    # Clean up helper columns
+    df_final = df_final.drop(columns=['batter_norm', 'player_norm'], errors='ignore')
 
     def calc_hr_score(row):
         batter_score = (
@@ -369,7 +310,7 @@ if uploaded_file and xhr_file:
         )
         park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
         weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
-        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap at 0.15
+        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))
         total = batter_score + pitcher_score + park_score + weather_score + regression_score
         total += custom_2025_boost(row)
         return round(total, 3)
@@ -383,7 +324,8 @@ if uploaded_file and xhr_file:
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
-        'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14'
+        'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14',
+        'xhr','hr_total','xhr_diff'  # Include raw xHR columns for reference
     ]
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
