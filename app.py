@@ -335,7 +335,7 @@ hr_col = [c for c in df_final.columns if c.startswith('hr_total')][0]
 # Use these columns to calculate Reg_xHR
 df_final['Reg_xHR'] = df_final[xhr_col] - df_final[hr_col]
     # Calculate HR Score
-    def calc_hr_score(row):
+def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
             norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
