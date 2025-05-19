@@ -47,22 +47,16 @@ compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 
 def get_compass_idx(dir_str):
     dir_str = dir_str.upper()
-    try:
-        return compass.index(dir_str)
-    except:
-        return -1
+    try: return compass.index(dir_str)
+    except: return -1
 
 def is_wind_out(wind_dir, park_orientation):
     wi = get_compass_idx(wind_dir)
     pi = get_compass_idx(park_orientation)
-    if wi == -1 or pi == -1:
-        return "unknown"
-    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7:
-        return "out"
-    elif abs(wi - pi) == 4:
-        return "in"
-    else:
-        return "side"
+    if wi == -1 or pi == -1: return "unknown"
+    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7: return "out"
+    elif abs(wi - pi) == 4: return "in"
+    else: return "side"
 
 def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
@@ -98,15 +92,15 @@ def get_player_id(name):
         return None
     return None
 
+# --- Robust Handedness Lookup ---
 def get_handedness(name):
-    # Always normalize name first
     clean_name = normalize_name(name)
     parts = clean_name.split()
     if len(parts) >= 2:
         first, last = parts[0], parts[-1]
     else:
         first, last = clean_name, ""
-    # First try pybaseball lookup
+    # Try pybaseball
     try:
         lookup = playerid_lookup(last.capitalize(), first.capitalize())
         if not lookup.empty:
@@ -116,7 +110,7 @@ def get_handedness(name):
                 return bats, throws
     except Exception:
         pass
-    # Fallback: use Lahman people table
+    # Fallback: Lahman
     try:
         df = people()
         df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
@@ -244,34 +238,6 @@ def custom_2025_boost(row):
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
-def calc_hr_score(row):
-    batter_score = (
-        norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
-        norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
-        norm_barrel(row.get('B_BarrelRate_5')) * 0.08 +
-        norm_barrel(row.get('B_BarrelRate_3')) * 0.05 +
-        norm_ev(row.get('B_EV_14')) * 0.10 +
-        norm_ev(row.get('B_EV_7')) * 0.07 +
-        norm_ev(row.get('B_EV_5')) * 0.05 +
-        norm_ev(row.get('B_EV_3')) * 0.03
-    )
-    pitcher_score = (
-        norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
-        norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
-        norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
-        norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
-        norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
-        norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
-        norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
-        norm_ev(row.get('P_EVAllowed_3')) * 0.01
-    )
-    park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
-    weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
-    regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap at 0.15
-    total = batter_score + pitcher_score + park_score + weather_score + regression_score
-    total += custom_2025_boost(row)
-    return round(total, 3)
-
 windows = [3, 5, 7, 14]
 
 st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, 2025 Micro-Trends, Game Time Weather)")
@@ -295,7 +261,6 @@ if uploaded_file and xhr_file:
     # STEP 2: Normalize names in both dataframes
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
-
     # STEP 3: Debug output
     st.write("DEBUG xHR CSV normalized player names (first 10):", xhr_df['player_norm'].head(10).tolist())
 
@@ -332,34 +297,64 @@ if uploaded_file and xhr_file:
         stat_row.update(pitcher_stats)
         stat_rows.append(stat_row)
         park_factor_rows.append({"ParkFactor": park_factor})
-        progress.progress((idx + 1) / len(df_merged))
+        progress.progress((idx+1)/len(df_merged))
 
     weather_df = pd.DataFrame(weather_rows)
     stat_df = pd.DataFrame(stat_rows)
     park_df = pd.DataFrame(park_factor_rows)
     df_final = pd.concat([df_merged.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-    # Add handedness
-    # Add handedness columns after df_final is created
-batter_handedness = []
-pitcher_handedness = []
-for idx, row in df_final.iterrows():
-    b_bats, _ = get_handedness(row['Batter'])
-    _, p_throws = get_handedness(row['Pitcher'])
-    print(f"DEBUG Handedness for {row['Batter']}: {b_bats}")
-    print(f"DEBUG Handedness for {row['Pitcher']}: {p_throws}")
-    batter_handedness.append(b_bats)
-    pitcher_handedness.append(p_throws)
+    # --- Add Handedness Columns Here ---
+    batter_handedness = []
+    pitcher_handedness = []
+    for idx, row in df_final.iterrows():
+        b_bats, _ = get_handedness(row['Batter'])
+        _, p_throws = get_handedness(row['Pitcher'])
+        print(f"DEBUG Handedness for {row['Batter']}: {b_bats}")
+        print(f"DEBUG Handedness for {row['Pitcher']}: {p_throws}")
+        batter_handedness.append(b_bats)
+        pitcher_handedness.append(p_throws)
 
-df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
-df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
-    # Handle Reg_xHR robustly in case of column suffixes after merge
-st.write("df_final columns after merge:", df_final.columns.tolist())
-    xhr_col = [c for c in df_final.columns if c.startswith('xhr')][0]
-    hr_col = [c for c in df_final.columns if c.startswith('hr_total')][0]
-    df_final['Reg_xHR'] = df_final[xhr_col] - df_final[hr_col]
+    df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
+    df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
+
+    # STEP 4: Merge xHR with normalized names
+    df_final = df_final.merge(
+        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
+        left_on='batter_norm', right_on='player_norm',
+        how='left'
+    )
+    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
     # Calculate HR Score
+    def calc_hr_score(row):
+        batter_score = (
+            norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
+            norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
+            norm_barrel(row.get('B_BarrelRate_5')) * 0.08 +
+            norm_barrel(row.get('B_BarrelRate_3')) * 0.05 +
+            norm_ev(row.get('B_EV_14')) * 0.10 +
+            norm_ev(row.get('B_EV_7')) * 0.07 +
+            norm_ev(row.get('B_EV_5')) * 0.05 +
+            norm_ev(row.get('B_EV_3')) * 0.03
+        )
+        pitcher_score = (
+            norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
+            norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
+            norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
+            norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
+            norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
+            norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
+            norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
+            norm_ev(row.get('P_EVAllowed_3')) * 0.01
+        )
+        park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
+        weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
+        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap at 0.15
+        total = batter_score + pitcher_score + park_score + weather_score + regression_score
+        total += custom_2025_boost(row)
+        return round(total, 3)
+
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
     df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
@@ -379,7 +374,7 @@ st.write("df_final columns after merge:", df_final.columns.tolist())
 
     # Bar chart for top 5 (HR_Score and Reg_xHR)
     if 'Reg_xHR' in top5.columns:
-        st.bar_chart(top5.set_index('Batter')[['HR_Score', 'Reg_xHR']])
+        st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
     else:
         st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
