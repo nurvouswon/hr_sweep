@@ -174,7 +174,7 @@ def get_handedness(name):
         match = df[df['name_last'].map(normalize_name) == last]
         if not match.empty:
             bats = match.iloc[0].get('bats', None)
-            throws = madef get_handedness(name):
+            throws = made
     import time
     from pybaseball.lahman import people
     first, last = None, None
