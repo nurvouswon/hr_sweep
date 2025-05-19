@@ -94,28 +94,35 @@ def get_player_id(name):
 def get_handedness(name):
     from pybaseball.lahman import people
     try:
-        # Try pybaseball lookup
-        parts = name.strip().split()
+        # Normalize and split
+        clean_name = normalize_name(name)
+        parts = clean_name.split()
         if len(parts) >= 2:
             first, last = parts[0], parts[-1]
         else:
-            first, last = name.strip(), ""
-        lookup = playerid_lookup(last, first)
+            first, last = clean_name, ""
+
+        # Attempt playerid_lookup
+        lookup = playerid_lookup(last.capitalize(), first.capitalize())
         if not lookup.empty:
-            bats = lookup.iloc[0].get('bats', None)
-            throws = lookup.iloc[0].get('throws', None)
-            return bats, throws
+            bats = lookup.iloc[0].get('bats')
+            throws = lookup.iloc[0].get('throws')
+            if pd.notnull(bats) and pd.notnull(throws):
+                return bats, throws
+
         # Fallback to Lahman
         df = people()
         df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
-        nname = normalize_name(name)
-        match = df[df['nname'] == nname]
+        match = df[df['nname'] == clean_name]
         if not match.empty:
-            bats = match.iloc[0].get('bats', None)
-            throws = match.iloc[0].get('throws', None)
-            return bats, throws
-    except Exception:
-        pass
+            return match.iloc[0].get('bats'), match.iloc[0].get('throws')
+
+        # Try by last name only
+        match = df[df['name_last'].map(normalize_name) == last]
+        if not match.empty:
+            return match.iloc[0].get('bats'), match.iloc[0].get('throws')
+    except Exception as e:
+        st.write(f"DEBUG HANDEDNESS ERROR: {name} => {e}")
     return None, None
 
 def get_batter_stats_multi(batter_name, windows):
@@ -253,10 +260,32 @@ if uploaded_file and xhr_file:
             st.stop()
     xhr_df = pd.read_csv(xhr_file)
 
-    # Robust normalization for merge reliability
-    def norm_merge(name):
-        return normalize_name(name)
+    # Normalize names for robust merge
+def normalize_name(name):
+    if not isinstance(name, str):
+        return ""
+    name = ''.join(
+        c for c in unicodedata.normalize('NFD', name)
+        if unicodedata.category(c) != 'Mn'
+    )
+    return name.lower().replace('.', '').replace('-', ' ').replace("’", "'").strip()
 
+df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
+xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
+
+# DEBUG: Show sample normalized names
+st.write("DEBUG xHR Merge — Sample Normalized Names:")
+st.dataframe(df_upload[['Batter', 'batter_norm']].head(10))
+st.dataframe(xhr_df[['player', 'player_norm']].head(10))
+
+# DEBUG: Show unmatched names
+unmatched = df_upload[~df_upload['batter_norm'].isin(xhr_df['player_norm'])]
+if not unmatched.empty:
+    st.write("DEBUG xHR Merge — Unmatched Batter Names (not found in xHR):")
+    st.dataframe(unmatched[['Batter', 'batter_norm']])
+
+# Merge xHR to final dataframe (will do again after all stat merges)
+xhr_trimmed = xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']]
     df_upload['batter_norm'] = df_upload['Batter'].apply(norm_merge)
     xhr_df['player_norm'] = xhr_df['player'].apply(norm_merge)
 
@@ -290,8 +319,12 @@ if uploaded_file and xhr_file:
 
     # Merge xHR/HR using normalized name
     df_final = df_final.merge(
-        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
-        left_on='batter_norm', right_on='player_norm', how='left'
+    xhr_trimmed,
+    on='player_norm',
+    how='left'
+)
+df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+_on='batter_norm', right_on='player_norm', how='left'
     )
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
