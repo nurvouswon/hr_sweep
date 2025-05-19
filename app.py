@@ -362,7 +362,7 @@ def calc_hr_score(row):
 df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
 df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
-    st.success("All done! Top matchups below:")
+st.success("All done! Top matchups below:")
 
     show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
@@ -374,7 +374,7 @@ df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
     top5 = df_leaderboard.head(5)
-    st.dataframe(top5[show_cols])
+st.dataframe(top5[show_cols])
 
     # Bar chart for top 5 (HR_Score and Reg_xHR)
     if 'Reg_xHR' in top5.columns:
