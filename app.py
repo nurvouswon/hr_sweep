@@ -92,7 +92,6 @@ def get_player_id(name):
         return None
     return None
 
-# --- Robust Handedness Lookup ---
 def get_handedness(name):
     clean_name = normalize_name(name)
     parts = clean_name.split()
@@ -100,7 +99,6 @@ def get_handedness(name):
         first, last = parts[0], parts[-1]
     else:
         first, last = clean_name, ""
-    # Try pybaseball
     try:
         lookup = playerid_lookup(last.capitalize(), first.capitalize())
         if not lookup.empty:
@@ -110,7 +108,6 @@ def get_handedness(name):
                 return bats, throws
     except Exception:
         pass
-    # Fallback: Lahman
     try:
         df = people()
         df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
@@ -258,18 +255,15 @@ if uploaded_file and xhr_file:
             st.error(f"Missing required column: {col}")
             st.stop()
     xhr_df = pd.read_csv(xhr_file)
-    # STEP 2: Normalize names in both dataframes
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
-    # STEP 3: Debug output
-    st.write("DEBUG xHR CSV normalized player names (first 10):", xhr_df['player_norm'].head(10).tolist())
 
     unmatched = df_upload[~df_upload['batter_norm'].isin(xhr_df['player_norm'])]
     if not unmatched.empty:
         st.write("DEBUG xHR Merge — Unmatched Batter Names (not found in xHR):")
         st.dataframe(unmatched[['Batter', 'batter_norm']])
 
-    # Merge xHR
+    # Merge xHR just once!
     df_merged = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='batter_norm', right_on='player_norm', how='left'
@@ -304,25 +298,18 @@ if uploaded_file and xhr_file:
     park_df = pd.DataFrame(park_factor_rows)
     df_final = pd.concat([df_merged.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-    # --- Add Handedness Columns Here ---
+    # Add handedness
     batter_handedness = []
     pitcher_handedness = []
     for idx, row in df_final.iterrows():
         b_bats, _ = get_handedness(row['Batter'])
         _, p_throws = get_handedness(row['Pitcher'])
-        print(f"DEBUG Handedness for {row['Batter']}: {b_bats}")
-        print(f"DEBUG Handedness for {row['Pitcher']}: {p_throws}")
         batter_handedness.append(b_bats)
         pitcher_handedness.append(p_throws)
     df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
     df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
 
-    # STEP 4: Merge xHR with normalized names (again for safety)
-    df_final = df_final.merge(
-        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
-        left_on='batter_norm', right_on='player_norm',
-        how='left'
-    )
+    # Calculate Reg_xHR using the merged columns
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
     # Calculate HR Score
@@ -364,7 +351,7 @@ if uploaded_file and xhr_file:
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
         'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14',
-        'xhr','hr_total','xhr_diff'  # Include raw xHR columns for reference
+        'xhr','hr_total','xhr_diff'
     ]
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
