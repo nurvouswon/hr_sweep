@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
+from pybaseball.lahman import people
 from datetime import datetime, timedelta
 import unicodedata
 
@@ -91,7 +92,6 @@ def get_player_id(name):
         return None
     return None
 
-# Utility: normalize names for better matching (keep for future enhancements)
 def normalize_name(name):
     try:
         return ''.join(
@@ -102,19 +102,48 @@ def normalize_name(name):
         return name.lower().strip()
 
 def get_handedness(name):
-    try:
-        first, last = name.split(" ", 1)
-        lookup = playerid_lookup(last, first)
-        if not lookup.empty:
-            bats = lookup.iloc[0].get('bats', None)
-            throws = lookup.iloc[0].get('throws', None)
-            return bats, throws
-        else:
-            st.write(f"DEBUG HANDEDNESS: {name} => Not found in lookup")
-            return None, None
-    except Exception as e:
-        st.write(f"DEBUG HANDEDNESS ERROR: {name} => {e}")
+    # Try multiple strategies, robust!
+    orig = name
+    if pd.isna(name):
         return None, None
+    name = str(name)
+    bats = throws = None
+    # 1. Try regular playerid_lookup
+    try:
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            first, last = parts[0], ' '.join(parts[1:])
+            lookup = playerid_lookup(last, first)
+            if not lookup.empty:
+                bats = lookup.iloc[0].get('bats', None)
+                throws = lookup.iloc[0].get('throws', None)
+                if bats or throws:
+                    return bats, throws
+    except Exception:
+        pass
+    # 2. Try lahman fallback (normalize)
+    try:
+        df = people()
+        nname = normalize_name(orig)
+        df['nname'] = df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')
+        df['nname'] = df['nname'].map(normalize_name)
+        match = df[df['nname'] == nname]
+        if not match.empty:
+            bats = match.iloc[0].get('bats', None)
+            throws = match.iloc[0].get('throws', None)
+            if bats or throws:
+                return bats, throws
+        # Partial last name fallback
+        last = normalize_name(parts[-1])
+        match = df[df['name_last'].map(normalize_name) == last]
+        if not match.empty:
+            bats = match.iloc[0].get('bats', None)
+            throws = match.iloc[0].get('throws', None)
+            if bats or throws:
+                return bats, throws
+    except Exception:
+        pass
+    return None, None
 
 def get_batter_stats_multi(batter_name, windows):
     pid = get_player_id(batter_name)
@@ -251,7 +280,25 @@ if uploaded_file and xhr_file:
             st.stop()
     xhr_df = pd.read_csv(xhr_file)
 
-    # Weather, park factor, statcast per matchup
+    # Prepare robust merge columns
+    def first_last_to_comma(name):
+        if pd.isna(name): return ""
+        parts = str(name).strip().split()
+        if len(parts) >= 2:
+            return f"{parts[-1]}, {' '.join(parts[:-1])}"
+        return name.strip()
+
+    # Add batter handedness & pitcher handedness columns robustly
+    batter_handedness, pitcher_handedness = [], []
+    for idx, row in df_upload.iterrows():
+        b_bats, _ = get_handedness(row['Batter'])
+        _, p_throws = get_handedness(row['Pitcher'])
+        batter_handedness.append(b_bats)
+        pitcher_handedness.append(p_throws)
+    df_upload['BatterHandedness'] = batter_handedness
+    df_upload['PitcherHandedness'] = pitcher_handedness
+
+    # Build game context (weather, park factor, statcast)
     weather_rows, stat_rows, park_factor_rows = [], [], []
     st.write("Fetching Statcast, weather (game time), park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
@@ -279,30 +326,25 @@ if uploaded_file and xhr_file:
     park_df = pd.DataFrame(park_factor_rows)
     df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-    # Handedness population
-    batter_handedness = []
-    pitcher_handedness = []
-    for idx, row in df_final.iterrows():
-        batter = row['Batter']
-        pitcher = row['Pitcher']
-        try:
-            b_bats, _ = get_handedness(batter)
-            _, p_throws = get_handedness(pitcher)
-            batter_handedness.append(b_bats)
-            pitcher_handedness.append(p_throws)
-        except Exception as e:
-            st.write(f"DEBUG HANDEDNESS ERROR: {batter} vs {pitcher} => {e}")
-            batter_handedness.append(None)
-            pitcher_handedness.append(None)
-    df_final['BatterHandedness'] = batter_handedness
-    df_final['PitcherHandedness'] = pitcher_handedness
+    # Merge xHR data (robust! comma name)
+    df_final['batter_comma'] = df_final['Batter'].apply(first_last_to_comma)
 
-    # Merge xHR data
+    # Normalize merge columns for maximum match reliability
+    def norm_merge(name):
+        return normalize_name(first_last_to_comma(name))
+
+    df_final['batter_norm'] = df_final['Batter'].apply(norm_merge)
+    xhr_df['player_norm'] = xhr_df['player'].apply(norm_merge)
+
+    # Merge with normalized names
     df_final = df_final.merge(
-        xhr_df[['player', 'hr_total', 'xhr', 'xhr_diff']],
-        left_on='Batter', right_on='player', how='left'
+        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
+        left_on='batter_norm', right_on='player_norm', how='left'
     )
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+
+    # Clean up merge helper columns
+    df_final = df_final.drop(columns=['batter_comma', 'batter_norm', 'player_norm'])
 
     def calc_hr_score(row):
         batter_score = (
