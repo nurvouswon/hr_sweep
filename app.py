@@ -325,8 +325,15 @@ if uploaded_file and xhr_file:
         left_on='batter_norm', right_on='player_norm',
         how='left'
     )
-    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+    # After merging, print the column names to debug
+st.write("df_final columns after merge:", df_final.columns.tolist())
 
+# Find the actual column names for xhr and hr_total (could be 'xhr', 'xhr_y', etc.)
+xhr_col = [c for c in df_final.columns if c.startswith('xhr')][0]
+hr_col = [c for c in df_final.columns if c.startswith('hr_total')][0]
+
+# Use these columns to calculate Reg_xHR
+df_final['Reg_xHR'] = df_final[xhr_col] - df_final[hr_col]
     # Calculate HR Score
     def calc_hr_score(row):
         batter_score = (
