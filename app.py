@@ -314,11 +314,10 @@ if uploaded_file and xhr_file:
         print(f"DEBUG Handedness for {row['Pitcher']}: {p_throws}")
         batter_handedness.append(b_bats)
         pitcher_handedness.append(p_throws)
-
     df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
     df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
 
-    # STEP 4: Merge xHR with normalized names
+    # STEP 4: Merge xHR with normalized names (again for safety)
     df_final = df_final.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='batter_norm', right_on='player_norm',
