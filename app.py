@@ -160,52 +160,66 @@ def get_player_id(name):
         return None
     return None
 
-def get_handedness(name):
-    import unicodedata
+import unicodedata
+
+# Utility: normalize names for better matching
+def normalize_name(name):
     try:
-        # Normalize: strip accents, remove extra spaces, capitalize
-        def normalize(n):
-            n = ''.join(
-                c for c in unicodedata.normalize('NFD', n)
-                if unicodedata.category(c) != 'Mn'
-            )
-            return ' '.join(n.strip().split()).title()
+        # Remove accents, lowercase, strip spaces
+        return ''.join(
+            c for c in unicodedata.normalize('NFD', name)
+            if unicodedata.category(c) != 'Mn'
+        ).lower().replace('.', '').replace('-', ' ').replace("’", "'").strip()
+    except Exception:
+        return name.lower().strip()
 
-        name = normalize(name)
-        first, last = name.split(" ", 1)
-
-        # Try all reasonable variants
-        tries = [
-            (last, first),
-            (last.upper(), first.upper()),
-            (last.lower(), first.lower()),
-            (last.capitalize(), first.capitalize()),
-            (last.split(" ")[0], first)  # just in case multi-part last
-        ]
-
-        for l, f in tries:
-            lookup = playerid_lookup(l, f)
-            if not lookup.empty:
-                throws = lookup.iloc[0]['throws'] if 'throws' in lookup.columns else None
-                bats = lookup.iloc[0]['bats'] if 'bats' in lookup.columns else None
-                if pd.notnull(bats) and pd.notnull(throws):
-                    st.write(f"DEBUG HANDEDNESS: {name} => Bats:{bats} Throws:{throws}")
-                    return bats, throws
-
-        # Final fallback: try last name only, filter for first name substring (as before)
-        lookup = playerid_lookup(last, None)
-        if not lookup.empty and 'name_first' in lookup.columns:
-            match = lookup[lookup['name_first'].str.lower().str.contains(first.lower(), na=False)]
-            if not match.empty:
-                throws = match.iloc[0]['throws'] if 'throws' in match.columns else None
-                bats = match.iloc[0]['bats'] if 'bats' in match.columns else None
-                if pd.notnull(bats) and pd.notnull(throws):
-                    st.write(f"DEBUG HANDEDNESS (fuzzy): {name} => Bats:{bats} Throws:{throws}")
-                    return bats, throws
-
-        st.write(f"DEBUG HANDEDNESS: {name} => Not found in lookup")
-    except Exception as ex:
-        st.write(f"DEBUG HANDEDNESS ERROR: {name} => {ex}")
+def get_handedness(name):
+    import time
+    from pybaseball.lahman import people
+    first, last = None, None
+    orig = name
+    if ',' in name:
+        last, first = [x.strip() for x in name.split(',', 1)]
+    elif ' ' in name:
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            first, last = parts[0], parts[-1]
+    else:
+        first, last = name.strip(), ""
+    # Try regular lookup
+    try:
+        lookup = playerid_lookup(last, first)
+        if not lookup.empty:
+            bats = lookup.iloc[0].get('bats', None)
+            throws = lookup.iloc[0].get('throws', None)
+            st.write(f"DEBUG HANDEDNESS: {orig} => Bats:{bats} Throws:{throws}")
+            return bats, throws
+    except Exception as e:
+        pass
+    # Try lahman fallback
+    try:
+        df = people()
+        nname = normalize_name(orig)
+        df['nname'] = df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')
+        df['nname'] = df['nname'].map(normalize_name)
+        match = df[df['nname'] == nname]
+        if not match.empty:
+            bats = match.iloc[0].get('bats', None)
+            throws = match.iloc[0].get('throws', None)
+            st.write(f"DEBUG HANDEDNESS: {orig} => LAHMAN Fallback Bats:{bats} Throws:{throws}")
+            return bats, throws
+        # Try partial match (just last name)
+        last = normalize_name(last or orig)
+        match = df[df['name_last'].map(normalize_name) == last]
+        if not match.empty:
+            bats = match.iloc[0].get('bats', None)
+            throws = match.iloc[0].get('throws', None)
+            st.write(f"DEBUG HANDEDNESS: {orig} => PARTIAL Fallback Bats:{bats} Throws:{throws}")
+            return bats, throws
+    except Exception as e:
+        st.write(f"DEBUG HANDEDNESS ERROR: {orig} => {e}")
+    # If all fails
+    st.write(f"DEBUG HANDEDNESS: {orig} => Not found in lookup")
     return None, None
     try:
         first, last = name.split(" ", 1)
