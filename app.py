@@ -47,16 +47,22 @@ compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 
 def get_compass_idx(dir_str):
     dir_str = dir_str.upper()
-    try: return compass.index(dir_str)
-    except: return -1
+    try:
+        return compass.index(dir_str)
+    except:
+        return -1
 
 def is_wind_out(wind_dir, park_orientation):
     wi = get_compass_idx(wind_dir)
     pi = get_compass_idx(park_orientation)
-    if wi == -1 or pi == -1: return "unknown"
-    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7: return "out"
-    elif abs(wi - pi) == 4: return "in"
-    else: return "side"
+    if wi == -1 or pi == -1:
+        return "unknown"
+    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7:
+        return "out"
+    elif abs(wi - pi) == 4:
+        return "in"
+    else:
+        return "side"
 
 def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
@@ -255,22 +261,13 @@ if uploaded_file and xhr_file:
             st.error(f"Missing required column: {col}")
             st.stop()
     xhr_df = pd.read_csv(xhr_file)
-# STEP 2: Normalize names in both dataframes
-df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
-xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
-
-# STEP 3: Debug output
-st.write("DEBUG xHR CSV normalized player names (first 10):", xhr_df['player_norm'].head(10).tolist())
-
-unmatched = df_upload[~df_upload['batter_norm'].isin(xhr_df['player_norm'])]
-if not unmatched.empty:
-    st.write("DEBUG xHR Merge — Unmatched Batter Names (not found in xHR):")
-    st.dataframe(unmatched[['Batter', 'batter_norm']])
-    # Normalize names for merge
+    # STEP 2: Normalize names in both dataframes
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
 
-    # Merge xHR/HR data in advance to display unmatched for debug
+    # STEP 3: Debug output
+    st.write("DEBUG xHR CSV normalized player names (first 10):", xhr_df['player_norm'].head(10).tolist())
+
     unmatched = df_upload[~df_upload['batter_norm'].isin(xhr_df['player_norm'])]
     if not unmatched.empty:
         st.write("DEBUG xHR Merge — Unmatched Batter Names (not found in xHR):")
@@ -323,15 +320,15 @@ if not unmatched.empty:
     df_final['PitcherHandedness'] = pitcher_handedness
 
     # STEP 4: Merge xHR with normalized names
-df_final = df_final.merge(
-    xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
-    left_on='batter_norm', right_on='player_norm',
-    how='left'
-)
-df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+    df_final = df_final.merge(
+        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
+        left_on='batter_norm', right_on='player_norm',
+        how='left'
+    )
+    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
     # Calculate HR Score
-def calc_hr_score(row):
+    def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
             norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
@@ -359,35 +356,36 @@ def calc_hr_score(row):
         total += custom_2025_boost(row)
         return round(total, 3)
 
-df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
+    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+    df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
-st.success("All done! Top matchups below:")
+    st.success("All done! Top matchups below:")
 
-show_cols = [
+    show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
         'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14',
         'xhr','hr_total','xhr_diff'  # Include raw xHR columns for reference
     ]
-show_cols = [c for c in show_cols if c in df_leaderboard.columns]
+    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
-top5 = df_leaderboard.head(5)
-st.dataframe(top5[show_cols])
+    top5 = df_leaderboard.head(5)
+    st.dataframe(top5[show_cols])
 
     # Bar chart for top 5 (HR_Score and Reg_xHR)
-if 'Reg_xHR' in top5.columns:
+    if 'Reg_xHR' in top5.columns:
         st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
-        else:
+    else:
         st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
     # Show all data and allow download
-st.dataframe(df_leaderboard[show_cols])
-csv_out = df_leaderboard.to_csv(index=False).encode()
-st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
-        else:
-st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
+    st.dataframe(df_leaderboard[show_cols])
+    csv_out = df_leaderboard.to_csv(index=False).encode()
+    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
+
+else:
+    st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days) and all advanced pitcher stats per window (Barrel%, EV, HR, BIP, HardHit%, FlyBall%, K%, BB%, HR/9) are included.**
