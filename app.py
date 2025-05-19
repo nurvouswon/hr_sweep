@@ -373,7 +373,7 @@ show_cols = [
     ]
 show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
-    top5 = df_leaderboard.head(5)
+top5 = df_leaderboard.head(5)
 st.dataframe(top5[show_cols])
 
     # Bar chart for top 5 (HR_Score and Reg_xHR)
