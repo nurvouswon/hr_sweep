@@ -383,11 +383,11 @@ else:
         st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
     # Show all data and allow download
-    st.dataframe(df_leaderboard[show_cols])
+st.dataframe(df_leaderboard[show_cols])
     csv_out = df_leaderboard.to_csv(index=False).encode()
-    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
+st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
 else:
-    st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
+st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days) and all advanced pitcher stats per window (Barrel%, EV, HR, BIP, HardHit%, FlyBall%, K%, BB%, HR/9) are included.**
