@@ -381,10 +381,10 @@ top5 = df_leaderboard.head(5)
 st.dataframe(top5[show_cols])
 
     # Bar chart for top 5 (HR_Score and Reg_xHR)
-    if 'Reg_xHR' in top5.columns:
-        st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
+if 'Reg_xHR' in top5.columns:
+st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
     else:
-        st.bar_chart(top5.set_index('Batter')[['HR_Score']])
+st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
     # Show all data and allow download
 st.dataframe(df_leaderboard[show_cols])
