@@ -101,13 +101,12 @@ def get_player_id(name):
 def get_handedness(name):
     # Always normalize name first
     clean_name = normalize_name(name)
-    # Split the clean name
     parts = clean_name.split()
     if len(parts) >= 2:
         first, last = parts[0], parts[-1]
     else:
         first, last = clean_name, ""
-    # First try pybaseball lookup (works best if names are normalized)
+    # First try pybaseball lookup
     try:
         lookup = playerid_lookup(last.capitalize(), first.capitalize())
         if not lookup.empty:
@@ -115,7 +114,7 @@ def get_handedness(name):
             throws = lookup.iloc[0].get('throws')
             if pd.notnull(bats) and pd.notnull(throws):
                 return bats, throws
-    except Exception as e:
+    except Exception:
         pass
     # Fallback: use Lahman people table
     try:
@@ -124,22 +123,26 @@ def get_handedness(name):
         match = df[df['nname'] == clean_name]
         if not match.empty:
             return match.iloc[0].get('bats'), match.iloc[0].get('throws')
-        # Try just the last name (rarely reliable)
         match = df[df['name_last'].map(normalize_name) == last]
         if not match.empty:
             return match.iloc[0].get('bats'), match.iloc[0].get('throws')
-    except Exception as e:
+    except Exception:
         pass
     return None, None
-    for idx, row in df_final.iterrows():
+
+# ---- OUTSIDE THE FUNCTION ----
+batter_handedness = []
+pitcher_handedness = []
+for idx, row in df_final.iterrows():
     b_bats, _ = get_handedness(row['Batter'])
     _, p_throws = get_handedness(row['Pitcher'])
     print(f"DEBUG Handedness for {row['Batter']}: {b_bats}")
     print(f"DEBUG Handedness for {row['Pitcher']}: {p_throws}")
     batter_handedness.append(b_bats)
     pitcher_handedness.append(p_throws)
-    df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
-    df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
+
+df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
+df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
 
 def get_batter_stats_multi(batter_name, windows):
     pid = get_player_id(batter_name)
