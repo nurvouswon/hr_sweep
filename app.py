@@ -93,12 +93,34 @@ def get_player_id(name):
     return None
 
 def get_handedness(name):
+import difflib
+
+# Add manual overrides for known "UNK" or new MLB players
+MANUAL_HANDEDNESS = {
+    # 'normalized name': ('Bats', 'Throws')
+    'alexander canario': ('R', 'R'),
+    'liam hicks': ('L', 'R'),
+    'carlos narvaez': ('R', 'R'),
+    'patrick bailey': ('B', 'R'),
+    # Add more as needed...
+}
+
+# This will log all unknowns encountered for later
+UNKNOWNS_LOG = set()
+
+def get_handedness(name):
     clean_name = normalize_name(name)
     parts = clean_name.split()
     if len(parts) >= 2:
         first, last = parts[0], parts[-1]
     else:
         first, last = clean_name, ""
+
+    # 1. Try manual override dictionary
+    if clean_name in MANUAL_HANDEDNESS:
+        return MANUAL_HANDEDNESS[clean_name]
+
+    # 2. Try pybaseball lookup
     try:
         lookup = playerid_lookup(last.capitalize(), first.capitalize())
         if not lookup.empty:
@@ -108,17 +130,30 @@ def get_handedness(name):
                 return bats, throws
     except Exception:
         pass
+
+    # 3. Try Lahman (exact match)
     try:
         df = people()
         df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
         match = df[df['nname'] == clean_name]
         if not match.empty:
             return match.iloc[0].get('bats'), match.iloc[0].get('throws')
-        match = df[df['name_last'].map(normalize_name) == last]
-        if not match.empty:
-            return match.iloc[0].get('bats'), match.iloc[0].get('throws')
     except Exception:
         pass
+
+    # 4. Try Lahman (fuzzy match)
+    try:
+        df = people()
+        df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
+        close = difflib.get_close_matches(clean_name, df['nname'].tolist(), n=1, cutoff=0.85)
+        if close:
+            row = df[df['nname'] == close[0]].iloc[0]
+            return row.get('bats'), row.get('throws')
+    except Exception:
+        pass
+
+    # 5. Log and return "UNK"
+    UNKNOWNS_LOG.add(clean_name)
     return None, None
 
 def get_batter_stats_multi(batter_name, windows):
