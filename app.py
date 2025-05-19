@@ -98,7 +98,6 @@ def get_player_id(name):
         return None
     return None
 
-# Robust handedness (pybaseball, then Lahman)
 def get_handedness(name):
     try:
         clean_name = normalize_name(name)
@@ -241,6 +240,34 @@ def custom_2025_boost(row):
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
+def calc_hr_score(row):
+    batter_score = (
+        norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
+        norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
+        norm_barrel(row.get('B_BarrelRate_5')) * 0.08 +
+        norm_barrel(row.get('B_BarrelRate_3')) * 0.05 +
+        norm_ev(row.get('B_EV_14')) * 0.10 +
+        norm_ev(row.get('B_EV_7')) * 0.07 +
+        norm_ev(row.get('B_EV_5')) * 0.05 +
+        norm_ev(row.get('B_EV_3')) * 0.03
+    )
+    pitcher_score = (
+        norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
+        norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
+        norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
+        norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
+        norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
+        norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
+        norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
+        norm_ev(row.get('P_EVAllowed_3')) * 0.01
+    )
+    park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
+    weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
+    regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap at 0.15
+    total = batter_score + pitcher_score + park_score + weather_score + regression_score
+    total += custom_2025_boost(row)
+    return round(total, 3)
+
 windows = [3, 5, 7, 14]
 
 st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, 2025 Micro-Trends, Game Time Weather)")
@@ -301,7 +328,7 @@ if uploaded_file and xhr_file:
         stat_row.update(pitcher_stats)
         stat_rows.append(stat_row)
         park_factor_rows.append({"ParkFactor": park_factor})
-        progress.progress((idx+1)/len(df_merged))
+        progress.progress((idx + 1) / len(df_merged))
 
     weather_df = pd.DataFrame(weather_rows)
     stat_df = pd.DataFrame(stat_rows)
@@ -319,80 +346,43 @@ if uploaded_file and xhr_file:
     df_final['BatterHandedness'] = batter_handedness
     df_final['PitcherHandedness'] = pitcher_handedness
 
-    # STEP 4: Merge xHR with normalized names
-    df_final = df_final.merge(
-        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
-        left_on='batter_norm', right_on='player_norm',
-        how='left'
-    )
-    # After merging, print the column names to debug
-st.write("df_final columns after merge:", df_final.columns.tolist())
+    # Handle Reg_xHR robustly in case of column suffixes after merge
+    st.write("df_final columns after merge:", df_final.columns.tolist())
+    xhr_col = [c for c in df_final.columns if c.startswith('xhr')][0]
+    hr_col = [c for c in df_final.columns if c.startswith('hr_total')][0]
+    df_final['Reg_xHR'] = df_final[xhr_col] - df_final[hr_col]
 
-# Find the actual column names for xhr and hr_total (could be 'xhr', 'xhr_y', etc.)
-xhr_col = [c for c in df_final.columns if c.startswith('xhr')][0]
-hr_col = [c for c in df_final.columns if c.startswith('hr_total')][0]
-
-# Use these columns to calculate Reg_xHR
-df_final['Reg_xHR'] = df_final[xhr_col] - df_final[hr_col]
     # Calculate HR Score
-def calc_hr_score(row):
-        batter_score = (
-            norm_barrel(row.get('B_BarrelRate_14')) * 0.15 +
-            norm_barrel(row.get('B_BarrelRate_7')) * 0.12 +
-            norm_barrel(row.get('B_BarrelRate_5')) * 0.08 +
-            norm_barrel(row.get('B_BarrelRate_3')) * 0.05 +
-            norm_ev(row.get('B_EV_14')) * 0.10 +
-            norm_ev(row.get('B_EV_7')) * 0.07 +
-            norm_ev(row.get('B_EV_5')) * 0.05 +
-            norm_ev(row.get('B_EV_3')) * 0.03
-        )
-        pitcher_score = (
-            norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
-            norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
-            norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
-            norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
-            norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
-            norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
-            norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
-            norm_ev(row.get('P_EVAllowed_3')) * 0.01
-        )
-        park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.1
-        weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
-        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.15))  # cap at 0.15
-        total = batter_score + pitcher_score + park_score + weather_score + regression_score
-        total += custom_2025_boost(row)
-        return round(total, 3)
+    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+    df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
-df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
+    st.success("All done! Top matchups below:")
 
-st.success("All done! Top matchups below:")
-
-show_cols = [
+    show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
         'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14',
         'xhr','hr_total','xhr_diff'  # Include raw xHR columns for reference
     ]
-show_cols = [c for c in show_cols if c in df_leaderboard.columns]
+    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
-top5 = df_leaderboard.head(5)
-st.dataframe(top5[show_cols])
+    top5 = df_leaderboard.head(5)
+    st.dataframe(top5[show_cols])
 
     # Bar chart for top 5 (HR_Score and Reg_xHR)
-if 'Reg_xHR' in top5.columns:
-    st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
-        else:
-    st.bar_chart(top5.set_index('Batter')[['HR_Score']])
+    if 'Reg_xHR' in top5.columns:
+        st.bar_chart(top5.set_index('Batter')[['HR_Score', 'Reg_xHR']])
+    else:
+        st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
     # Show all data and allow download
-st.dataframe(df_leaderboard[show_cols])
-csv_out = df_leaderboard.to_csv(index=False).encode()
-st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
+    st.dataframe(df_leaderboard[show_cols])
+    csv_out = df_leaderboard.to_csv(index=False).encode()
+    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
 
-    else:
-st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
+else:
+    st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days) and all advanced pitcher stats per window (Barrel%, EV, HR, BIP, HardHit%, FlyBall%, K%, BB%, HR/9) are included.**
