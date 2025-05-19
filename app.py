@@ -364,14 +364,14 @@ df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
 st.success("All done! Top matchups below:")
 
-    show_cols = [
+show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
         'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14',
         'xhr','hr_total','xhr_diff'  # Include raw xHR columns for reference
     ]
-    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
+show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
     top5 = df_leaderboard.head(5)
 st.dataframe(top5[show_cols])
