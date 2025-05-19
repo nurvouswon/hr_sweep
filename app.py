@@ -368,17 +368,17 @@ df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
 st.success("All done! Top matchups below:")
 
-    show_cols = [
+show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_HRAllowed_14','P_BIP_14','P_HardHitRate_14',
         'P_FlyBallRate_14','P_KRate_14','P_BBRate_14','P_HR9_14',
         'xhr','hr_total','xhr_diff'  # Include raw xHR columns for reference
     ]
-    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
+show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
-    top5 = df_leaderboard.head(5)
-    st.dataframe(top5[show_cols])
+top5 = df_leaderboard.head(5)
+st.dataframe(top5[show_cols])
 
     # Bar chart for top 5 (HR_Score and Reg_xHR)
     if 'Reg_xHR' in top5.columns:
@@ -387,12 +387,12 @@ st.success("All done! Top matchups below:")
         st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
     # Show all data and allow download
-    st.dataframe(df_leaderboard[show_cols])
-    csv_out = df_leaderboard.to_csv(index=False).encode()
-    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
+st.dataframe(df_leaderboard[show_cols])
+csv_out = df_leaderboard.to_csv(index=False).encode()
+st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
 
-else:
-    st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
+    else:
+st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days) and all advanced pitcher stats per window (Barrel%, EV, HR, BIP, HardHit%, FlyBall%, K%, BB%, HR/9) are included.**
