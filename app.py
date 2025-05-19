@@ -360,7 +360,7 @@ def calc_hr_score(row):
         return round(total, 3)
 
 df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-    df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
+df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
 
     st.success("All done! Top matchups below:")
 
