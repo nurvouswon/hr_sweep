@@ -379,14 +379,14 @@ st.dataframe(top5[show_cols])
     # Bar chart for top 5 (HR_Score and Reg_xHR)
 if 'Reg_xHR' in top5.columns:
         st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
-else:
+    else:
         st.bar_chart(top5.set_index('Batter')[['HR_Score']])
 
     # Show all data and allow download
 st.dataframe(df_leaderboard[show_cols])
 csv_out = df_leaderboard.to_csv(index=False).encode()
 st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
-else:
+    else:
 st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
