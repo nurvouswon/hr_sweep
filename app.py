@@ -93,7 +93,7 @@ def get_player_id(name):
     return None
 
 def get_handedness(name):
-import difflib
+    import difflib
 
 # Add manual overrides for known "UNK" or new MLB players
 MANUAL_HANDEDNESS = {
