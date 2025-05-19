@@ -11,11 +11,13 @@ API_KEY = "11ac3c31fb664ba8971102152251805"
 def normalize_name(name):
     if not isinstance(name, str):
         return ""
-    name = ''.join(
-        c for c in unicodedata.normalize('NFD', name)
-        if unicodedata.category(c) != 'Mn'
-    )
-    return name.lower().replace('.', '').replace('-', ' ').replace("’", "'").strip()
+    name = ''.join(c for c in unicodedata.normalize('NFD', name)
+                   if unicodedata.category(c) != 'Mn')
+    name = name.lower().replace('.', '').replace('-', ' ').replace("’", "'").strip()
+    if ',' in name:
+        last, first = name.split(',', 1)
+        name = f"{first.strip()} {last.strip()}"
+    return ' '.join(name.split())
 
 ballpark_orientations = {
     "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
@@ -253,7 +255,17 @@ if uploaded_file and xhr_file:
             st.error(f"Missing required column: {col}")
             st.stop()
     xhr_df = pd.read_csv(xhr_file)
+# STEP 2: Normalize names in both dataframes
+df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
+xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
 
+# STEP 3: Debug output
+st.write("DEBUG xHR CSV normalized player names (first 10):", xhr_df['player_norm'].head(10).tolist())
+
+unmatched = df_upload[~df_upload['batter_norm'].isin(xhr_df['player_norm'])]
+if not unmatched.empty:
+    st.write("DEBUG xHR Merge — Unmatched Batter Names (not found in xHR):")
+    st.dataframe(unmatched[['Batter', 'batter_norm']])
     # Normalize names for merge
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
@@ -310,8 +322,13 @@ if uploaded_file and xhr_file:
     df_final['BatterHandedness'] = batter_handedness
     df_final['PitcherHandedness'] = pitcher_handedness
 
-    # Compute regression xHR (difference between expected and actual HR)
-    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+    # STEP 4: Merge xHR with normalized names
+df_final = df_final.merge(
+    xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
+    left_on='batter_norm', right_on='player_norm',
+    how='left'
+)
+df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
     # Calculate HR Score
     def calc_hr_score(row):
