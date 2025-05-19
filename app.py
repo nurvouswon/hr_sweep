@@ -174,14 +174,65 @@ def get_handedness(name):
         match = df[df['name_last'].map(normalize_name) == last]
         if not match.empty:
             bats = match.iloc[0].get('bats', None)
+            throws = madef get_handedness(name):
+    import time
+    from pybaseball.lahman import people
+    first, last = None, None
+    orig = name
+    if ',' in name:
+        last, first = [x.strip() for x in name.split(',', 1)]
+    elif ' ' in name:
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            first, last = parts[0], parts[-1]
+    else:
+        first, last = name.strip(), ""
+    # Try regular lookup
+    try:
+        lookup = playerid_lookup(last, first)
+        if not lookup.empty:
+            bats = lookup.iloc[0].get('bats', None)
+            throws = lookup.iloc[0].get('throws', None)
+            st.write(f"DEBUG HANDEDNESS: {orig} => Bats:{bats} Throws:{throws}")
+            return bats, throws
+    except Exception as e:
+        pass
+    # Try lahman fallback
+    try:
+        df = people()
+        nname = normalize_name(orig)
+        df['nname'] = df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')
+        df['nname'] = df['nname'].map(normalize_name)
+        match = df[df['nname'] == nname]
+        if not match.empty:
+            bats = match.iloc[0].get('bats', None)
+            throws = match.iloc[0].get('throws', None)
+            st.write(f"DEBUG HANDEDNESS: {orig} => LAHMAN Fallback Bats:{bats} Throws:{throws}")
+            return bats, throws
+        # Try partial match (just last name)
+        last = normalize_name(last or orig)
+        match = df[df['name_last'].map(normalize_name) == last]
+        if not match.empty:
+            bats = match.iloc[0].get('bats', None)
             throws = match.iloc[0].get('throws', None)
             st.write(f"DEBUG HANDEDNESS: {orig} => PARTIAL Fallback Bats:{bats} Throws:{throws}")
             return bats, throws
     except Exception as e:
         st.write(f"DEBUG HANDEDNESS ERROR: {orig} => {e}")
-    # If all fails
-    st.write(f"DEBUG HANDEDNESS: {orig} => Not found in lookup")
-    return None, None
+def get_handedness(name):
+    try:
+        first, last = name.split(" ", 1)
+        lookup = playerid_lookup(last, first)
+        if not lookup.empty:
+            bats = lookup.iloc[0].get('bats', None)
+            throws = lookup.iloc[0].get('throws', None)
+            return bats, throws
+        else:
+            st.write(f"DEBUG HANDEDNESS: {name} => Not found in lookup")
+            return None, None
+    except Exception as e:
+        st.write(f"DEBUG HANDEDNESS ERROR: {name} => {e}")
+        return None, None
     try:
         first, last = name.split(" ", 1)
         lookup = playerid_lookup(last, first)
@@ -371,14 +422,23 @@ if uploaded_file and xhr_file:
     df_final['batter_comma'] = df_final['Batter'].apply(first_last_to_comma)
 
     batter_handedness = []
-    pitcher_handedness = []
-    for idx, row in df_final.iterrows():
-        b_bats, _ = get_handedness(row['Batter'])
-        _, p_throws = get_handedness(row['Pitcher'])
+pitcher_handedness = []
+for idx, row in df_upload.iterrows():
+    batter = row['Batter']
+    pitcher = row['Pitcher']
+    try:
+        b_bats, _ = get_handedness(batter)
+        _, p_throws = get_handedness(pitcher)
+        st.write(f"DEBUG HANDEDNESS: {batter} => Bats:{b_bats}")
+        st.write(f"DEBUG HANDEDNESS: {pitcher} => Throws:{p_throws}")
         batter_handedness.append(b_bats)
         pitcher_handedness.append(p_throws)
-    df_final['BatterHandedness'] = batter_handedness
-    df_final['PitcherHandedness'] = pitcher_handedness
+    except Exception as e:
+        st.write(f"DEBUG HANDEDNESS ERROR: {batter} vs {pitcher} => {e}")
+        batter_handedness.append(None)
+        pitcher_handedness.append(None)
+df_upload['BatterHandedness'] = batter_handedness
+df_upload['PitcherHandedness'] = pitcher_handedness
 
     # Merge xHR data (robust!)
     df_final = df_final.merge(
