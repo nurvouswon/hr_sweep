@@ -7,7 +7,7 @@ import unicodedata
 
 API_KEY = "11ac3c31fb664ba8971102152251805"
 
-# Normalize name utility for robust merging
+# Normalize name utility
 def normalize_name(name):
     if not isinstance(name, str):
         return ""
@@ -106,6 +106,7 @@ def get_handedness(name):
             throws = lookup.iloc[0].get('throws')
             if pd.notnull(bats) and pd.notnull(throws):
                 return bats, throws
+        # Lahman fallback
         df = people()
         df['nname'] = (df['name_first'].fillna('') + ' ' + df['name_last'].fillna('')).map(normalize_name)
         match = df[df['nname'] == clean_name]
@@ -253,20 +254,24 @@ if uploaded_file and xhr_file:
             st.stop()
     xhr_df = pd.read_csv(xhr_file)
 
-    # Normalize names for merge
+    # Normalize names for robust merge
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
 
-    # Merge xHR/HR data first so it's always present
-    df_merged = df_upload.merge(
-        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
-        left_on='batter_norm', right_on='player_norm', how='left'
-    )
+    # --- (Optional) DEBUG: show normalization samples and missing merges ---
+    # st.write("DEBUG xHR Merge — Sample Normalized Names:")
+    # st.dataframe(df_upload[['Batter', 'batter_norm']].head(10))
+    # st.dataframe(xhr_df[['player', 'player_norm']].head(10))
+    # unmatched = df_upload[~df_upload['batter_norm'].isin(xhr_df['player_norm'])]
+    # if not unmatched.empty:
+    #     st.write("DEBUG xHR Merge — Unmatched Batter Names (not found in xHR):")
+    #     st.dataframe(unmatched[['Batter', 'batter_norm']])
 
+    # --- Compute features ---
     weather_rows, stat_rows, park_factor_rows = [], [], []
     st.write("Fetching Statcast, weather (game time), park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
-    for idx, row in df_merged.iterrows():
+    for idx, row in df_upload.iterrows():
         city = row['City']
         date = row['Date']
         park = row['Park']
@@ -284,13 +289,20 @@ if uploaded_file and xhr_file:
         stat_row.update(pitcher_stats)
         stat_rows.append(stat_row)
         park_factor_rows.append({"ParkFactor": park_factor})
-        progress.progress((idx+1)/len(df_merged))
+        progress.progress((idx+1)/len(df_upload))
     weather_df = pd.DataFrame(weather_rows)
     stat_df = pd.DataFrame(stat_rows)
     park_df = pd.DataFrame(park_factor_rows)
-    df_final = pd.concat([df_merged.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
+    df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
-    # Add handedness columns robustly to df_final
+    # --- Merge xHR/HR using normalized names ---
+    df_final = df_final.merge(
+        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
+        left_on='batter_norm', right_on='player_norm', how='left'
+    )
+    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
+
+    # --- Handedness lookup after merge ---
     batter_handedness = []
     pitcher_handedness = []
     for idx, row in df_final.iterrows():
@@ -300,9 +312,6 @@ if uploaded_file and xhr_file:
         pitcher_handedness.append(p_throws)
     df_final['BatterHandedness'] = batter_handedness
     df_final['PitcherHandedness'] = pitcher_handedness
-
-    # Calculate xHR regression
-    df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
     # Clean up helper columns
     df_final = df_final.drop(columns=['batter_norm', 'player_norm'], errors='ignore')
