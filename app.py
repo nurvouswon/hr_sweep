@@ -354,7 +354,7 @@ for idx, row in df_final.iterrows():
 df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
 df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
     # Handle Reg_xHR robustly in case of column suffixes after merge
-    st.write("df_final columns after merge:", df_final.columns.tolist())
+st.write("df_final columns after merge:", df_final.columns.tolist())
     xhr_col = [c for c in df_final.columns if c.startswith('xhr')][0]
     hr_col = [c for c in df_final.columns if c.startswith('hr_total')][0]
     df_final['Reg_xHR'] = df_final[xhr_col] - df_final[hr_col]
