@@ -130,20 +130,6 @@ def get_handedness(name):
         pass
     return None, None
 
-# ---- OUTSIDE THE FUNCTION ----
-batter_handedness = []
-pitcher_handedness = []
-for idx, row in df_final.iterrows():
-    b_bats, _ = get_handedness(row['Batter'])
-    _, p_throws = get_handedness(row['Pitcher'])
-    print(f"DEBUG Handedness for {row['Batter']}: {b_bats}")
-    print(f"DEBUG Handedness for {row['Pitcher']}: {p_throws}")
-    batter_handedness.append(b_bats)
-    pitcher_handedness.append(p_throws)
-
-df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
-df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
-
 def get_batter_stats_multi(batter_name, windows):
     pid = get_player_id(batter_name)
     out = {}
@@ -354,16 +340,19 @@ if uploaded_file and xhr_file:
     df_final = pd.concat([df_merged.reset_index(drop=True), weather_df, park_df, stat_df], axis=1)
 
     # Add handedness
-    batter_handedness = []
-    pitcher_handedness = []
-    for idx, row in df_final.iterrows():
-        b_bats, _ = get_handedness(row['Batter'])
-        _, p_throws = get_handedness(row['Pitcher'])
-        batter_handedness.append(b_bats)
-        pitcher_handedness.append(p_throws)
-    df_final['BatterHandedness'] = batter_handedness
-    df_final['PitcherHandedness'] = pitcher_handedness
+    # Add handedness columns after df_final is created
+batter_handedness = []
+pitcher_handedness = []
+for idx, row in df_final.iterrows():
+    b_bats, _ = get_handedness(row['Batter'])
+    _, p_throws = get_handedness(row['Pitcher'])
+    print(f"DEBUG Handedness for {row['Batter']}: {b_bats}")
+    print(f"DEBUG Handedness for {row['Pitcher']}: {p_throws}")
+    batter_handedness.append(b_bats)
+    pitcher_handedness.append(p_throws)
 
+df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
+df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
     # Handle Reg_xHR robustly in case of column suffixes after merge
     st.write("df_final columns after merge:", df_final.columns.tolist())
     xhr_col = [c for c in df_final.columns if c.startswith('xhr')][0]
