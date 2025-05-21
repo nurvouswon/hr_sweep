@@ -247,16 +247,90 @@ def get_pitcher_stats_multi(pitcher_name, windows):
 
 # --- ADVANCED BATTED BALL/STATCAST STATS (dummy, expand as you wish) ---
 def get_batter_advanced_stats(batter_name, window=14):
-    # Fill with real logic if desired (Statcast xwOBA, xSLG, Sweet Spot%, etc)
-    return {
-        'B_xwoba_14': None, 'B_xslg_14': None, 'B_sweet_spot_pct_14': None,
-        'B_pull_pct_14': None, 'B_oppo_pct_14': None, 'B_gbfb_14': None, 'B_hardhit_pct_14': None
-    }
+    pid = get_player_id(batter_name)
+    if not pid:
+        return {k: None for k in [
+            'B_xwoba_14', 'B_xslg_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
+        ]}
+    start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
+    end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    try:
+        df = statcast_batter(start, end, pid)
+        df = df[df['type'] == 'X']
+        if df.empty:
+            return {k: None for k in [
+                'B_xwoba_14', 'B_xslg_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
+            ]}
+        # xwOBA and xSLG
+        xwoba = df['estimated_woba_using_speedangle'].mean() if 'estimated_woba_using_speedangle' in df else None
+        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df else None
+        # Sweet spot % (launch angle between 8-32)
+        sweet_spot_pct = df['launch_angle'].between(8, 32).mean() if 'launch_angle' in df else None
+        # Pull %, Oppo %
+        if 'hit_location' in df:
+            pull_pct = (df['hit_location'] <= 3).mean() # This is an approximation, may need tweaking by hand
+            oppo_pct = (df['hit_location'] >= 8).mean()
+        else:
+            pull_pct, oppo_pct = None, None
+        # GB/FB ratio
+        gb = (df['bb_type'] == 'ground_ball').sum() if 'bb_type' in df else 0
+        fb = (df['bb_type'] == 'fly_ball').sum() if 'bb_type' in df else 0
+        gbfb = gb / fb if fb > 0 else None
+        # Hard hit % (launch_speed >= 95 mph)
+        hardhit_pct = (df['launch_speed'] >= 95).mean() if 'launch_speed' in df else None
+        return {
+            'B_xwoba_14': round(xwoba, 3) if xwoba is not None else None,
+            'B_xslg_14': round(xslg, 3) if xslg is not None else None,
+            'B_sweet_spot_pct_14': round(100 * sweet_spot_pct, 1) if sweet_spot_pct is not None else None,
+            'B_pull_pct_14': round(100 * pull_pct, 1) if pull_pct is not None else None,
+            'B_oppo_pct_14': round(100 * oppo_pct, 1) if oppo_pct is not None else None,
+            'B_gbfb_14': round(gbfb, 2) if gbfb is not None else None,
+            'B_hardhit_pct_14': round(100 * hardhit_pct, 1) if hardhit_pct is not None else None
+        }
+    except Exception:
+        return {k: None for k in [
+            'B_xwoba_14', 'B_xslg_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
+        ]}
 def get_pitcher_advanced_stats(pitcher_name, window=14):
-    return {
-        'P_xwoba_14': None, 'P_xslg_14': None, 'P_sweet_spot_pct_14': None,
-        'P_pull_pct_14': None, 'P_oppo_pct_14': None, 'P_gbfb_14': None, 'P_hardhit_pct_14': None
-    }
+    pid = get_player_id(pitcher_name)
+    if not pid:
+        return {k: None for k in [
+            'P_xwoba_14', 'P_xslg_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
+        ]}
+    start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
+    end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    try:
+        df = statcast_pitcher(start, end, pid)
+        df = df[df['type'] == 'X']
+        if df.empty:
+            return {k: None for k in [
+                'P_xwoba_14', 'P_xslg_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
+            ]}
+        xwoba = df['estimated_woba_using_speedangle'].mean() if 'estimated_woba_using_speedangle' in df else None
+        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df else None
+        sweet_spot_pct = df['launch_angle'].between(8, 32).mean() if 'launch_angle' in df else None
+        if 'hit_location' in df:
+            pull_pct = (df['hit_location'] <= 3).mean()
+            oppo_pct = (df['hit_location'] >= 8).mean()
+        else:
+            pull_pct, oppo_pct = None, None
+        gb = (df['bb_type'] == 'ground_ball').sum() if 'bb_type' in df else 0
+        fb = (df['bb_type'] == 'fly_ball').sum() if 'bb_type' in df else 0
+        gbfb = gb / fb if fb > 0 else None
+        hardhit_pct = (df['launch_speed'] >= 95).mean() if 'launch_speed' in df else None
+        return {
+            'P_xwoba_14': round(xwoba, 3) if xwoba is not None else None,
+            'P_xslg_14': round(xslg, 3) if xslg is not None else None,
+            'P_sweet_spot_pct_14': round(100 * sweet_spot_pct, 1) if sweet_spot_pct is not None else None,
+            'P_pull_pct_14': round(100 * pull_pct, 1) if pull_pct is not None else None,
+            'P_oppo_pct_14': round(100 * oppo_pct, 1) if oppo_pct is not None else None,
+            'P_gbfb_14': round(gbfb, 2) if gbfb is not None else None,
+            'P_hardhit_pct_14': round(100 * hardhit_pct, 1) if hardhit_pct is not None else None
+        }
+    except Exception:
+        return {k: None for k in [
+            'P_xwoba_14', 'P_xslg_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
+        ]}
 
 def norm_barrel(x):   return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x):       return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
