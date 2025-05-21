@@ -282,7 +282,6 @@ def merge_bb_stats(row, norm_map, prefix):
     n = normalize_name(row)
     if n in norm_map:
         d = norm_map[n]
-        # These are commonly available from the CSVs
         return {
             f"{prefix}_pull_pct": d.get('Pull%', None),
             f"{prefix}_oppo_pct": d.get('Oppo%', None),
@@ -294,7 +293,6 @@ def merge_bb_stats(row, norm_map, prefix):
             f"{prefix}_hardhit_pct": d.get('HardHit%', None),
             f"{prefix}_barrel_pct": d.get('Barrel%', None)
         }
-    # else
     return {
         f"{prefix}_pull_pct": None, f"{prefix}_oppo_pct": None, f"{prefix}_gb_pct": None, f"{prefix}_fb_pct": None,
         f"{prefix}_ld_pct": None, f"{prefix}_pop_pct": None, f"{prefix}_hr_fb_pct": None,
@@ -330,7 +328,7 @@ def custom_2025_boost(row):
         if game_time:
             try:
                 hour = int(str(game_time).split(":")[0])
-                if hour < 17:
+                if hour < 17:   # Before 5 PM local
                     bonus -= 0.01
             except Exception:
                 bonus -= 0.01
@@ -364,11 +362,11 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
     # Normalize names
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
-    batter_bb['batter_norm'] = batter_bb['Name'].apply(normalize_name)
-    pitcher_bb['pitcher_norm'] = pitcher_bb['Name'].apply(normalize_name)
+    batter_bb['batter_norm'] = batter_bb['name'].apply(normalize_name)
+    pitcher_bb['pitcher_norm'] = pitcher_bb['name'].apply(normalize_name)
     # Norm maps for merge
-    batter_bb_map = get_bb_norm_map(batter_bb, 'Name')
-    pitcher_bb_map = get_bb_norm_map(pitcher_bb, 'Name')
+    batter_bb_map = get_bb_norm_map(batter_bb, 'name')
+    pitcher_bb_map = get_bb_norm_map(pitcher_bb, 'name')
     # Merge xHR
     df_upload = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
