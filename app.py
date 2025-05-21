@@ -278,36 +278,44 @@ def get_bb_norm_map(bb_df, colname):
 
 def merge_bb_stats(row, norm_map, prefix):
     n = normalize_name(row)
-    d = norm_map.get(n, None)
-    # Use .get() to avoid KeyErrors if columns are missing
-    if d is not None:
+    if n in norm_map:
+        d = norm_map[n]
+        # Safe float conversion (some files have % as string)
+        def safe_float(val):
+            try:
+                return float(str(val).replace('%',''))
+            except Exception:
+                return None
         return {
-            f"{prefix}_pull_pct": d.get('Pull%', None),
-            f"{prefix}_oppo_pct": d.get('Oppo%', None),
-            f"{prefix}_gb_pct": d.get('GB%', None),
-            f"{prefix}_fb_pct": d.get('FB%', None),
-            f"{prefix}_ld_pct": d.get('LD%', None),
-            f"{prefix}_pop_pct": d.get('POP%', None),
-            f"{prefix}_hr_fb_pct": d.get('HR/FB', None),
-            f"{prefix}_hardhit_pct": d.get('HardHit%', None),
-            f"{prefix}_barrel_pct": d.get('Barrel%', None)
+            f"{prefix}_pull_pct": safe_float(d.get('Pull%', None)),
+            f"{prefix}_oppo_pct": safe_float(d.get('Oppo%', None)),
+            f"{prefix}_gb_pct": safe_float(d.get('GB%', None)),
+            f"{prefix}_fb_pct": safe_float(d.get('FB%', None)),
+            f"{prefix}_ld_pct": safe_float(d.get('LD%', None)),
+            f"{prefix}_pop_pct": safe_float(d.get('POP%', None)),
+            f"{prefix}_hr_fb_pct": safe_float(d.get('HR/FB', None)),
+            f"{prefix}_hardhit_pct": safe_float(d.get('HardHit%', None)),
+            f"{prefix}_barrel_pct": safe_float(d.get('Barrel%', None))
         }
-    else:
-        return {f"{prefix}_{col}": None for col in ['pull_pct','oppo_pct','gb_pct','fb_pct','ld_pct','pop_pct','hr_fb_pct','hardhit_pct','barrel_pct']}
+    # else
+    return {
+        f"{prefix}_pull_pct": None, f"{prefix}_oppo_pct": None, f"{prefix}_gb_pct": None, f"{prefix}_fb_pct": None,
+        f"{prefix}_ld_pct": None, f"{prefix}_pop_pct": None, f"{prefix}_hr_fb_pct": None,
+        f"{prefix}_hardhit_pct": None, f"{prefix}_barrel_pct": None
+    }
 
 # --- NORMALIZATION & SCORING ---
-def norm_barrel(x):   return min(float(x) / 0.15, 1) if pd.notnull(x) else 0
+def norm_barrel(x):   return min(float(x) / 15, 1) if pd.notnull(x) else 0
 def norm_ev(x):       return max(0, min((float(x) - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
-def norm_park(x):     return max(0, min((float(x) - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+def norm_park(x):     
+    return max(0, min((float(x) - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+
 def norm_weather(temp, wind, wind_effect):
     score = 1
-    if temp and float(temp) > 80:
-        score += 0.05
-    if wind and float(wind) > 10:
-        if wind_effect == "out":
-            score += 0.07
-        elif wind_effect == "in":
-            score -= 0.07
+    if temp and temp > 80: score += 0.05
+    if wind and wind > 10:
+        if wind_effect == "out": score += 0.07
+        elif wind_effect == "in": score -= 0.07
     return max(0.8, min(score, 1.2))
 
 def custom_2025_boost(row):
@@ -318,16 +326,16 @@ def custom_2025_boost(row):
     if row.get('Park') == 'Wrigley Field' and row.get('WindEffect') == 'out': bonus += 0.03
     if row.get('Park') in ['American Family Field','Citizens Bank Park'] and row.get('WindEffect') == 'out': bonus += 0.015
     if row.get('Park') == 'Dodger Stadium' and row.get('BatterHandedness') == 'R': bonus += 0.01
-    if row.get('Temp') and float(row.get('Temp')) > 80: bonus += 0.01
+    if row.get('Temp') and row.get('Temp') > 80: bonus += 0.01
     if row.get('BatterHandedness') == 'R' and row.get('Park') in [
         "Yankee Stadium","Great American Ball Park","Guaranteed Rate Field"]: bonus += 0.012
-    if row.get('Humidity') and float(row.get('Humidity')) > 65 and row.get('Park') in ["Truist Park","LoanDepot Park"]: bonus += 0.01
+    if row.get('Humidity') and row.get('Humidity') > 65 and row.get('Park') in ["Truist Park","LoanDepot Park"]: bonus += 0.01
     if row.get('Park') in ["Dodger Stadium","Petco Park","Oracle Park"]:
         game_time = row.get('Time')
         if game_time:
             try:
                 hour = int(str(game_time).split(":")[0])
-                if hour < 17:   # Before 5 PM local
+                if hour < 17:
                     bonus -= 0.01
             except Exception:
                 bonus -= 0.01
@@ -358,12 +366,12 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
     xhr_df = pd.read_csv(xhr_file)
     batter_bb = pd.read_csv(batter_bb_file)
     pitcher_bb = pd.read_csv(pitcher_bb_file)
-    # Normalize names
+    # Normalize names for merge
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
     batter_bb['batter_norm'] = batter_bb['name'].apply(normalize_name)
     pitcher_bb['pitcher_norm'] = pitcher_bb['name'].apply(normalize_name)
-    # Norm maps for merge
+    # Norm maps for batted ball
     batter_bb_map = get_bb_norm_map(batter_bb, 'name')
     pitcher_bb_map = get_bb_norm_map(pitcher_bb, 'name')
     # Merge xHR
@@ -371,7 +379,7 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='batter_norm', right_on='player_norm', how='left'
     )
-    # Main loop: Feature extraction & merging
+    # Main loop
     weather_rows, stat_rows, park_factor_rows, batter_bb_rows, pitcher_bb_rows = [], [], [], [], []
     st.write("Fetching Statcast, batted ball stats, weather, park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
@@ -429,7 +437,6 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
             norm_barrel(row.get('B_BarrelRate_7')) * 0.11 +
             norm_ev(row.get('B_EV_14')) * 0.08 +
             (float(row.get('B_SLG_14')) if row.get('B_SLG_14') else 0) * 0.08 +
-            # Advanced batted ball
             (float(row.get('B_hardhit_pct')) if row.get('B_hardhit_pct') else 0) * 0.02 +
             (float(row.get('B_barrel_pct')) if row.get('B_barrel_pct') else 0) * 0.03 +
             (float(row.get('B_pull_pct')) if row.get('B_pull_pct') else 0) * 0.01 +
@@ -444,7 +451,6 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
             norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
             norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
             (float(row.get('P_SLG_14')) if row.get('P_SLG_14') else 0) * -0.08 +
-            # Advanced batted ball (penalty)
             (float(row.get('P_hardhit_pct')) if row.get('P_hardhit_pct') else 0) * -0.01 +
             (float(row.get('P_barrel_pct')) if row.get('P_barrel_pct') else 0) * -0.02 +
             (float(row.get('P_pull_pct')) if row.get('P_pull_pct') else 0) * -0.01 +
@@ -475,7 +481,6 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
     top5 = df_leaderboard.head(5)
     st.dataframe(top5[show_cols])
-    # Bar chart for top 5
     if 'Reg_xHR' in top5.columns:
         st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
     else:
