@@ -100,7 +100,6 @@ MANUAL_HANDEDNESS = {
     'alexander canario': ('R', 'R'),
     'liam hicks': ('L', 'R'),
     'patrick bailey': ('B', 'R'),
-    # Add more as needed
 }
 UNKNOWNS_LOG = set()
 try:
@@ -162,7 +161,7 @@ def get_handedness(name):
     UNKNOWNS_LOG.add(clean_name)
     return None, None
 
-# --- STATCAST + ROLLING SLG + ADVANCED STATS ---
+# --- STATCAST + ROLLING SLG ---
 def get_batter_stats_multi(batter_name, windows):
     pid = get_player_id(batter_name)
     out = {}
@@ -268,7 +267,7 @@ def get_pitcher_stats_multi(pitcher_name, windows):
             out[f"P_SLG_{w}"] = None
     return out
 
-# --- BATTED BALL PROFILE MERGE LOGIC (CASE-ROBUST, DEBUG) ---
+# --- BATTED BALL PROFILE MERGE LOGIC ---
 def get_bb_norm_map(bb_df, colname):
     norm_map = {}
     for _, row in bb_df.iterrows():
@@ -276,33 +275,30 @@ def get_bb_norm_map(bb_df, colname):
         norm_map[n] = row
     return norm_map
 
+# FIXED: USE CORRECT COLUMN NAMES FROM YOUR FILE!
 def merge_bb_stats(row, norm_map, prefix):
     n = normalize_name(row)
     if n in norm_map:
         d = norm_map[n]
-        # Always use lowercase, whitespace-stripped column access for robust matching
         return {
-            f"{prefix}_pull_pct": d.get('pull%', None),
-            f"{prefix}_oppo_pct": d.get('oppo%', None),
-            f"{prefix}_gb_pct": d.get('gb%', None),
-            f"{prefix}_fb_pct": d.get('fb%', None),
-            f"{prefix}_ld_pct": d.get('ld%', None),
-            f"{prefix}_pop_pct": d.get('pop%', None),
-            f"{prefix}_hr_fb_pct": d.get('hr/fb', None),
-            f"{prefix}_hardhit_pct": d.get('hardhit%', None),
-            f"{prefix}_barrel_pct": d.get('barrel%', None)
+            f"{prefix}_pull_pct": d.get('pull_rate', None),
+            f"{prefix}_oppo_pct": d.get('oppo_rate', None),
+            f"{prefix}_gb_pct": d.get('gb_rate', None),
+            f"{prefix}_fb_pct": d.get('fb_rate', None),
+            f"{prefix}_ld_pct": d.get('ld_rate', None),
+            f"{prefix}_pop_pct": d.get('pu_rate', None),
+            f"{prefix}_hardhit_pct": d.get('hardhit%', None),   # Will be None if not in file
+            f"{prefix}_barrel_pct": d.get('barrel%', None),
+            f"{prefix}_hr_fb_pct": d.get('hr/fb', None)
         }
-    # else
     return {
         f"{prefix}_pull_pct": None, f"{prefix}_oppo_pct": None, f"{prefix}_gb_pct": None, f"{prefix}_fb_pct": None,
-        f"{prefix}_ld_pct": None, f"{prefix}_pop_pct": None, f"{prefix}_hr_fb_pct": None,
-        f"{prefix}_hardhit_pct": None, f"{prefix}_barrel_pct": None
+        f"{prefix}_ld_pct": None, f"{prefix}_pop_pct": None, f"{prefix}_hardhit_pct": None, f"{prefix}_barrel_pct": None, f"{prefix}_hr_fb_pct": None
     }
 
-# --- NORMALIZATION & SCORING ---
-def norm_barrel(x):   return min(x / 0.15, 1) if pd.notnull(x) else 0
-def norm_ev(x):       return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
-def norm_park(x):     return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+def norm_barrel(x):   return min(float(x) / 0.15, 1) if pd.notnull(x) else 0
+def norm_ev(x):       return max(0, min((float(x) - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
+def norm_park(x):     return max(0, min((float(x) - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
 def norm_weather(temp, wind, wind_effect):
     score = 1
     if temp and temp > 80: score += 0.05
@@ -328,7 +324,7 @@ def custom_2025_boost(row):
         if game_time:
             try:
                 hour = int(str(game_time).split(":")[0])
-                if hour < 17:
+                if hour < 17:   # Before 5 PM local
                     bonus -= 0.01
             except Exception:
                 bonus -= 0.01
@@ -345,7 +341,7 @@ st.markdown("""
 **Upload your daily matchup CSV:**  
 `Batter,Pitcher,City,Park,Date,Time`  
 **Upload Batter & Pitcher Batted Ball CSVs:**  
-- Columns: `name`, `pull%`, `oppo%`, `gb%`, `fb%`, `ld%`, `pop%`, `hr/fb`, `hardhit%`, `barrel%`  
+Columns: `name`, `pull_rate`, `oppo_rate`, `gb_rate`, `fb_rate`, `ld_rate`, `pu_rate`, ...  
 **Upload Savant xHR/HR CSV**  
 """)
 
@@ -360,14 +356,7 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
     batter_bb = pd.read_csv(batter_bb_file)
     pitcher_bb = pd.read_csv(pitcher_bb_file)
 
-    # Robust lowercase columns for batted ball files
-    batter_bb.columns = [c.strip().lower() for c in batter_bb.columns]
-    pitcher_bb.columns = [c.strip().lower() for c in pitcher_bb.columns]
-
-    # Debug: Print available columns to help diagnose issues
-    st.write("Batter batted-ball columns:", list(batter_bb.columns))
-    st.write("Pitcher batted-ball columns:", list(pitcher_bb.columns))
-
+    # Normalize names
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
     batter_bb['batter_norm'] = batter_bb['name'].apply(normalize_name)
@@ -376,14 +365,15 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
     batter_bb_map = get_bb_norm_map(batter_bb, 'name')
     pitcher_bb_map = get_bb_norm_map(pitcher_bb, 'name')
 
-    # Merge xHR
+    # Merge xHR/HR
     df_upload = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='batter_norm', right_on='player_norm', how='left'
     )
 
     # Main loop: Feature extraction & merging
-    weather_rows, stat_rows, park_factor_rows, batter_bb_rows, pitcher_bb_rows, batter_missing, pitcher_missing = [], [], [], [], [], [], []
+    weather_rows, stat_rows, park_factor_rows, batter_bb_rows, pitcher_bb_rows = [], [], [], [], []
+    missing_batters, missing_pitchers = set(), set()
     st.write("Fetching Statcast, batted ball stats, weather, park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
     for idx, row in df_upload.iterrows():
@@ -400,11 +390,11 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
         pitcher_stats = get_pitcher_stats_multi(pitcher, windows)
         batter_bb_stats = merge_bb_stats(batter, batter_bb_map, "B")
         pitcher_bb_stats = merge_bb_stats(pitcher, pitcher_bb_map, "P")
-        # Debug for missing batted ball matches
-        if all(v is None for v in batter_bb_stats.values()):
-            batter_missing.append(batter)
-        if all(v is None for v in pitcher_bb_stats.values()):
-            pitcher_missing.append(pitcher)
+        # Track missing for debug
+        if all(v is None for k, v in batter_bb_stats.items()):
+            missing_batters.add(batter)
+        if all(v is None for k, v in pitcher_bb_stats.items()):
+            missing_pitchers.add(pitcher)
         weather_rows.append(weather)
         stat_row = {}
         stat_row.update(batter_stats)
@@ -415,18 +405,19 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
         pitcher_bb_rows.append(pitcher_bb_stats)
         pct = int(100 * (idx+1)/len(df_upload))
         progress.progress((idx+1)/len(df_upload), text=f"Processing {pct}%")
-
-    if batter_missing:
-        st.warning(f"Batted-ball data missing for these batters: {set(batter_missing)}")
-    if pitcher_missing:
-        st.warning(f"Batted-ball data missing for these pitchers: {set(pitcher_missing)}")
-
+    # Build dataframes
     weather_df = pd.DataFrame(weather_rows)
     stat_df = pd.DataFrame(stat_rows)
     park_df = pd.DataFrame(park_factor_rows)
     batterbb_df = pd.DataFrame(batter_bb_rows)
     pitcherbb_df = pd.DataFrame(pitcher_bb_rows)
     df_final = pd.concat([df_upload.reset_index(drop=True), weather_df, park_df, stat_df, batterbb_df, pitcherbb_df], axis=1)
+
+    # Debug: print missing batters/pitchers for batted-ball
+    if missing_batters:
+        st.warning(f"Batted-ball data missing for these batters: {missing_batters}")
+    if missing_pitchers:
+        st.warning(f"Batted-ball data missing for these pitchers: {missing_pitchers}")
 
     # Handedness
     batter_handedness = []
@@ -438,43 +429,39 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
         pitcher_handedness.append(p_throws)
     df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
     df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
+
+    # xHR Regression
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
     # --- SCORING FUNCTION ---
-    def as_float(x):
-        try:
-            return float(x)
-        except Exception:
-            return 0
-
     def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.13 +
             norm_barrel(row.get('B_BarrelRate_7')) * 0.11 +
             norm_ev(row.get('B_EV_14')) * 0.08 +
-            as_float(row.get('B_SLG_14')) * 0.08 +
-            as_float(row.get('B_hardhit_pct')) * 0.02 +
-            as_float(row.get('B_barrel_pct')) * 0.03 +
-            as_float(row.get('B_pull_pct')) * 0.01 +
-            as_float(row.get('B_oppo_pct')) * 0.01 +
-            as_float(row.get('B_gb_pct')) * 0.01 +
-            as_float(row.get('B_fb_pct')) * 0.01 +
-            as_float(row.get('B_ld_pct')) * 0.01 +
-            as_float(row.get('B_hr_fb_pct')) * 0.02
+            (float(row.get('B_SLG_14')) if row.get('B_SLG_14') else 0) * 0.08 +
+            (float(row.get('B_hardhit_pct')) if row.get('B_hardhit_pct') else 0) * 0.02 +
+            (float(row.get('B_barrel_pct')) if row.get('B_barrel_pct') else 0) * 0.03 +
+            (float(row.get('B_pull_pct')) if row.get('B_pull_pct') else 0) * 0.01 +
+            (float(row.get('B_oppo_pct')) if row.get('B_oppo_pct') else 0) * 0.01 +
+            (float(row.get('B_gb_pct')) if row.get('B_gb_pct') else 0) * 0.01 +
+            (float(row.get('B_fb_pct')) if row.get('B_fb_pct') else 0) * 0.01 +
+            (float(row.get('B_ld_pct')) if row.get('B_ld_pct') else 0) * 0.01 +
+            (float(row.get('B_hr_fb_pct')) if row.get('B_hr_fb_pct') else 0) * 0.02
         )
         pitcher_score = (
             norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
             norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
             norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
-            as_float(row.get('P_SLG_14')) * -0.08 +
-            as_float(row.get('P_hardhit_pct')) * -0.01 +
-            as_float(row.get('P_barrel_pct')) * -0.02 +
-            as_float(row.get('P_pull_pct')) * -0.01 +
-            as_float(row.get('P_oppo_pct')) * -0.01 +
-            as_float(row.get('P_gb_pct')) * -0.01 +
-            as_float(row.get('P_fb_pct')) * -0.01 +
-            as_float(row.get('P_ld_pct')) * -0.01 +
-            as_float(row.get('P_hr_fb_pct')) * -0.02
+            (float(row.get('P_SLG_14')) if row.get('P_SLG_14') else 0) * -0.08 +
+            (float(row.get('P_hardhit_pct')) if row.get('P_hardhit_pct') else 0) * -0.01 +
+            (float(row.get('P_barrel_pct')) if row.get('P_barrel_pct') else 0) * -0.02 +
+            (float(row.get('P_pull_pct')) if row.get('P_pull_pct') else 0) * -0.01 +
+            (float(row.get('P_oppo_pct')) if row.get('P_oppo_pct') else 0) * -0.01 +
+            (float(row.get('P_gb_pct')) if row.get('P_gb_pct') else 0) * -0.01 +
+            (float(row.get('P_fb_pct')) if row.get('P_fb_pct') else 0) * -0.01 +
+            (float(row.get('P_ld_pct')) if row.get('P_ld_pct') else 0) * -0.01 +
+            (float(row.get('P_hr_fb_pct')) if row.get('P_hr_fb_pct') else 0) * -0.02
         )
         park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.10
         weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.13
@@ -482,11 +469,9 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
         total = batter_score + pitcher_score + park_score + weather_score + regression_score
         total += custom_2025_boost(row)
         return round(total, 3)
-
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
     df_leaderboard = df_final.sort_values('HR_Score', ascending=False)
     st.success("All done! Top matchups below:")
-
     show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','BallparkCity','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','B_SLG_14','ParkFactor','Temp','Wind','WindEffect',
@@ -496,9 +481,9 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
         'xhr','hr_total','xhr_diff'
     ]
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
-
     top5 = df_leaderboard.head(5)
     st.dataframe(top5[show_cols])
+    # Bar chart for top 5
     if 'Reg_xHR' in top5.columns:
         st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
     else:
@@ -510,6 +495,6 @@ else:
     st.info("Please upload all required CSVs: daily matchup, Savant xHR/HR, batter & pitcher batted-ball.")
 
 st.caption("""
-- All rolling Statcast and SLG, advanced batted ball stats (from your uploads), park, weather, and xHR regression.
+- All rolling Statcast, SLG, advanced batted ball stats (from your uploads!), park, weather, and xHR regression.
 - Handedness, city, full leaderboard and export, top-5 leaderboard chart.
 """)
