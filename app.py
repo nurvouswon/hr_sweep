@@ -9,7 +9,7 @@ import difflib
 
 API_KEY = "11ac3c31fb664ba8971102152251805"
 
-# --- UTILITIES ---
+# --- NAME NORMALIZATION ---
 def normalize_name(name):
     if not isinstance(name, str):
         return ""
@@ -19,9 +19,12 @@ def normalize_name(name):
     if ',' in name:
         last, first = name.split(',', 1)
         name = f"{first.strip()} {last.strip()}"
+    # Remove common suffixes (jr, sr, II, III etc)
+    for suf in [' jr', ' jr.', ' sr', ' sr.', ' ii', ' iii', ' iv']:
+        name = name.replace(suf, '')
     return ' '.join(name.split())
 
-# --- PARK DICTS ---
+# --- PARKS / ORIENTATIONS ---
 ballpark_orientations = {
     "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
     "Camden Yards": "NE", "Rogers Centre": "NE", "Comerica Park": "N",
@@ -95,7 +98,7 @@ def get_player_id(name):
         return None
     return None
 
-# --- HANDEDNESS ---
+# --- HANDEDNESS (your latest logic, unchanged) ---
 MANUAL_HANDEDNESS = {
     'alexander canario': ('R', 'R'),
     'liam hicks': ('L', 'R'),
@@ -188,6 +191,7 @@ def get_batter_stats_multi(batter_name, windows):
             total = len(df)
             barrel_rate = barrels / total if total > 0 else 0
             ev = df['launch_speed'].mean() if total > 0 else None
+            # ROLLING SLG
             if 'events' in df.columns:
                 single = df[df['events'] == 'single'].shape[0]
                 double = df[df['events'] == 'double'].shape[0]
@@ -241,6 +245,7 @@ def get_pitcher_stats_multi(pitcher_name, windows):
             outs = df['outs_when_up'].sum() if 'outs_when_up' in df.columns else 0
             innings = outs / 3 if outs else 0
             hr9 = (hrs / innings * 9) if innings > 0 else None
+            # ROLLING SLG AGAINST
             if 'events' in df.columns:
                 single = df[df['events'] == 'single'].shape[0]
                 double = df[df['events'] == 'double'].shape[0]
@@ -266,47 +271,40 @@ def get_pitcher_stats_multi(pitcher_name, windows):
             out[f"P_SLG_{w}"] = None
     return out
 
-# --- BATTED BALL PROFILE MERGE LOGIC ---
+# --- BATTED BALL PROFILE MERGE (uses "name" col, not "Name") ---
 def get_bb_norm_map(bb_df, colname):
-    # Returns a dict of norm_name -> row
     norm_map = {}
     for _, row in bb_df.iterrows():
         n = normalize_name(row[colname])
         norm_map[n] = row
     return norm_map
 
-def merge_bb_stats(name, norm_map, prefix):
-    n = normalize_name(name)
+def merge_bb_stats(row, norm_map, prefix):
+    n = normalize_name(row)
     if n in norm_map:
         d = norm_map[n]
-        # Try both possible column naming conventions: with/without %
-        keys = [
-            ('Pull%', 'pull_pct'), ('Oppo%', 'oppo_pct'), ('GB%', 'gb_pct'), ('FB%', 'fb_pct'),
-            ('LD%', 'ld_pct'), ('POP%', 'pop_pct'), ('HR/FB', 'hr_fb_pct'),
-            ('HardHit%', 'hardhit_pct'), ('Barrel%', 'barrel_pct')
-        ]
-        result = {}
-        for col, newcol in keys:
-            val = d.get(col, None)
-            if pd.notnull(val):
-                try:
-                    result[f"{prefix}_{newcol}"] = float(val)
-                except Exception:
-                    result[f"{prefix}_{newcol}"] = None
-            else:
-                result[f"{prefix}_{newcol}"] = None
-        return result
-    # else
-    return {f"{prefix}_{col}": None for _, col in [
-        ('Pull%', 'pull_pct'), ('Oppo%', 'oppo_pct'), ('GB%', 'gb_pct'), ('FB%', 'fb_pct'),
-        ('LD%', 'ld_pct'), ('POP%', 'pop_pct'), ('HR/FB', 'hr_fb_pct'),
-        ('HardHit%', 'hardhit_pct'), ('Barrel%', 'barrel_pct')
+        return {
+            f"{prefix}_pull_pct": d.get('Pull%', None),
+            f"{prefix}_oppo_pct": d.get('Oppo%', None),
+            f"{prefix}_gb_pct": d.get('GB%', None),
+            f"{prefix}_fb_pct": d.get('FB%', None),
+            f"{prefix}_ld_pct": d.get('LD%', None),
+            f"{prefix}_pop_pct": d.get('POP%', None),
+            f"{prefix}_hr_fb_pct": d.get('HR/FB', None),
+            f"{prefix}_hardhit_pct": d.get('HardHit%', None),
+            f"{prefix}_barrel_pct": d.get('Barrel%', None)
+        }
+    return {f"{prefix}_{k}": None for k in [
+        "pull_pct","oppo_pct","gb_pct","fb_pct","ld_pct","pop_pct",
+        "hr_fb_pct","hardhit_pct","barrel_pct"
     ]}
 
 # --- NORMALIZATION & SCORING ---
 def norm_barrel(x):   return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x):       return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
-def norm_park(x):     return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+def norm_park(x):     
+    return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+
 def norm_weather(temp, wind, wind_effect):
     score = 1
     if temp and temp > 80: score += 0.05
@@ -363,7 +361,7 @@ if uploaded_file and xhr_file and batter_bb_file and pitcher_bb_file:
     xhr_df = pd.read_csv(xhr_file)
     batter_bb = pd.read_csv(batter_bb_file)
     pitcher_bb = pd.read_csv(pitcher_bb_file)
-    # Normalize names
+    # Normalize names using 'name' column
     df_upload['batter_norm'] = df_upload['Batter'].apply(normalize_name)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
     batter_bb['batter_norm'] = batter_bb['name'].apply(normalize_name)
