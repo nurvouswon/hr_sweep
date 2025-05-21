@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 import unicodedata
 import difflib
 
+API_KEY = "YOUR_WEATHER_API_KEY"
+
 # --------- Utility Functions ---------
 def normalize_name(name):
     if not isinstance(name, str):
