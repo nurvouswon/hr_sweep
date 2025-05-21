@@ -101,7 +101,6 @@ MANUAL_HANDEDNESS = {
     'alexander canario': ('R', 'R'),
     'liam hicks': ('L', 'R'),
     'patrick bailey': ('B', 'R'),
-    # Add more as needed
 }
 UNKNOWNS_LOG = set()
 try:
@@ -271,7 +270,6 @@ def get_pitcher_stats_multi(pitcher_name, windows):
 
 # --- BATTED BALL PROFILE MERGE LOGIC ---
 def get_bb_norm_map(bb_df, colname):
-    # Returns a dict of norm_name -> row
     norm_map = {}
     for _, row in bb_df.iterrows():
         n = normalize_name(row[colname])
@@ -280,8 +278,9 @@ def get_bb_norm_map(bb_df, colname):
 
 def merge_bb_stats(row, norm_map, prefix):
     n = normalize_name(row)
-    if n in norm_map:
-        d = norm_map[n]
+    d = norm_map.get(n, None)
+    # Use .get() to avoid KeyErrors if columns are missing
+    if d is not None:
         return {
             f"{prefix}_pull_pct": d.get('Pull%', None),
             f"{prefix}_oppo_pct": d.get('Oppo%', None),
@@ -293,22 +292,22 @@ def merge_bb_stats(row, norm_map, prefix):
             f"{prefix}_hardhit_pct": d.get('HardHit%', None),
             f"{prefix}_barrel_pct": d.get('Barrel%', None)
         }
-    return {
-        f"{prefix}_pull_pct": None, f"{prefix}_oppo_pct": None, f"{prefix}_gb_pct": None, f"{prefix}_fb_pct": None,
-        f"{prefix}_ld_pct": None, f"{prefix}_pop_pct": None, f"{prefix}_hr_fb_pct": None,
-        f"{prefix}_hardhit_pct": None, f"{prefix}_barrel_pct": None
-    }
+    else:
+        return {f"{prefix}_{col}": None for col in ['pull_pct','oppo_pct','gb_pct','fb_pct','ld_pct','pop_pct','hr_fb_pct','hardhit_pct','barrel_pct']}
 
 # --- NORMALIZATION & SCORING ---
-def norm_barrel(x):   return min(x / 0.15, 1) if pd.notnull(x) else 0
-def norm_ev(x):       return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
-def norm_park(x):     return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+def norm_barrel(x):   return min(float(x) / 0.15, 1) if pd.notnull(x) else 0
+def norm_ev(x):       return max(0, min((float(x) - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
+def norm_park(x):     return max(0, min((float(x) - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
 def norm_weather(temp, wind, wind_effect):
     score = 1
-    if temp and temp > 80: score += 0.05
-    if wind and wind > 10:
-        if wind_effect == "out": score += 0.07
-        elif wind_effect == "in": score -= 0.07
+    if temp and float(temp) > 80:
+        score += 0.05
+    if wind and float(wind) > 10:
+        if wind_effect == "out":
+            score += 0.07
+        elif wind_effect == "in":
+            score -= 0.07
     return max(0.8, min(score, 1.2))
 
 def custom_2025_boost(row):
@@ -319,10 +318,10 @@ def custom_2025_boost(row):
     if row.get('Park') == 'Wrigley Field' and row.get('WindEffect') == 'out': bonus += 0.03
     if row.get('Park') in ['American Family Field','Citizens Bank Park'] and row.get('WindEffect') == 'out': bonus += 0.015
     if row.get('Park') == 'Dodger Stadium' and row.get('BatterHandedness') == 'R': bonus += 0.01
-    if row.get('Temp') and row.get('Temp') > 80: bonus += 0.01
+    if row.get('Temp') and float(row.get('Temp')) > 80: bonus += 0.01
     if row.get('BatterHandedness') == 'R' and row.get('Park') in [
         "Yankee Stadium","Great American Ball Park","Guaranteed Rate Field"]: bonus += 0.012
-    if row.get('Humidity') and row.get('Humidity') > 65 and row.get('Park') in ["Truist Park","LoanDepot Park"]: bonus += 0.01
+    if row.get('Humidity') and float(row.get('Humidity')) > 65 and row.get('Park') in ["Truist Park","LoanDepot Park"]: bonus += 0.01
     if row.get('Park') in ["Dodger Stadium","Petco Park","Oracle Park"]:
         game_time = row.get('Time')
         if game_time:
@@ -345,7 +344,7 @@ st.markdown("""
 **Upload your daily matchup CSV:**  
 `Batter,Pitcher,City,Park,Date,Time`  
 **Upload Batter & Pitcher Batted Ball CSVs:**  
-- Columns: `Name`, `Pull%`, `Oppo%`, `GB%`, `FB%`, `LD%`, `POP%`, `HR/FB`, `HardHit%`, `Barrel%`
+- Columns: `name`, `Pull%`, `Oppo%`, `GB%`, `FB%`, `LD%`, `POP%`, `HR/FB`, `HardHit%`, `Barrel%`
 **Upload Savant xHR/HR CSV**  
 """)
 
