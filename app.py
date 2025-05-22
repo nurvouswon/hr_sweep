@@ -448,7 +448,7 @@ def calc_pitcher_bb_score(row):
     score += row.get('straight_air_rate_pbb', 0) * 0.01
     if row.get('bbe_pbb', 0) < 10: score *= 0.85
     return score
-    def calc_hr_score(row):
+def calc_hr_score(row):
     batter_score = (
         norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
         norm_ev(row.get('B_EV_14')) * 0.08 +
