@@ -558,4 +558,40 @@ if uploaded_file and xhr_file and battedball_file:
 
     # Add batted ball columns to the leaderboard display
     show_cols = [
-        'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','BallparkCity','Time','HR_Score','Reg_xHR
+        'Batter','Pitcher','BatterHandedness','PitcherHandedness',
+        'Park','BallparkCity','Time','HR_Score','Reg_xHR',
+        'B_BarrelRate_14','B_EV_14','B_SLG_14','ParkFactor','Temp','Wind','WindEffect',
+        'P_BarrelRateAllowed_14','P_EVAllowed_14','P_SLG_14',
+        'B_xwoba_14','B_sweet_spot_pct_14','B_pull_pct_14','B_oppo_pct_14','B_gbfb_14','B_hardhit_pct_14',
+        'P_xwoba_14','P_sweet_spot_pct_14','P_pull_pct_14','P_oppo_pct_14','P_gbfb_14','P_hardhit_pct_14',
+        'xhr','hr_total','xhr_diff',
+        # --- Batted Ball Profile Features: ---
+        'bbe','gb_rate','air_rate','fb_rate','ld_rate','pu_rate','pull_rate','straight_rate','oppo_rate',
+        'pull_gb_rate','straight_gb_rate','oppo_gb_rate','pull_air_rate','straight_air_rate','oppo_air_rate'
+    ]
+    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
+
+    top5 = df_leaderboard.head(5)
+    st.dataframe(top5[show_cols])
+
+    # Bar chart for top 5 (HR_Score and Reg_xHR)
+    if 'Reg_xHR' in top5.columns:
+        st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
+    else:
+        st.bar_chart(top5.set_index('Batter')[['HR_Score']])
+
+    st.dataframe(df_leaderboard[show_cols])
+    csv_out = df_leaderboard.to_csv(index=False).encode()
+    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
+
+else:
+    st.info("Please upload your daily CSV, Savant xHR/HR CSV, and batted ball profile CSV to begin.")
+
+st.caption("""
+- **All rolling batter and pitcher stats (3, 5, 7, 14 days)**
+- **Advanced statcast metrics** including xwOBA, sweet spot %, pull %, oppo %, GB/FB ratio, and hard hit %
+- Weather at game time, park factors, wind direction, and orientation-based adjustments
+- xHR vs HR regression and 2025 micro-trends factored into scoring
+- **Batted ball profile stats**: gb/air/fb/ld/pu/pull/straight/oppo/pull_gb/air etc. fully integrated into the leaderboard and scoring
+- Full leaderboard, top 5 bar chart, and CSV export
+""")
