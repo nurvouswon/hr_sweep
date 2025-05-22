@@ -448,6 +448,49 @@ def calc_pitcher_bb_score(row):
     score += row.get('straight_air_rate_pbb', 0) * 0.01
     if row.get('bbe_pbb', 0) < 10: score *= 0.85
     return score
+    # === Normalization Helpers ===
+def norm_barrel(x):
+    return min(x / 0.15, 1) if pd.notnull(x) else 0
+
+def norm_ev(x):
+    return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
+
+def norm_park(x):
+    return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+
+def norm_weather(temp, wind, wind_effect):
+    score = 1
+    if temp and temp > 80: score += 0.05
+    if wind and wind > 10:
+        if wind_effect == "out": score += 0.07
+        elif wind_effect == "in": score -= 0.07
+    return max(0.8, min(score, 1.2))
+
+# === Contextual Boost Logic ===
+def custom_2025_boost(row):
+    bonus = 0
+    if row.get('Park') == 'Citi Field': bonus += 0.025
+    if row.get('Park') == 'Comerica Park': bonus += 0.02
+    if row.get('Park') == 'Wrigley Field' and row.get('WindEffect') == 'out': bonus += 0.03
+    if row.get('Park') in ['American Family Field', 'Citizens Bank Park'] and row.get('WindEffect') == 'out': bonus += 0.015
+    if row.get('Park') == 'Dodger Stadium' and row.get('BatterHandedness') == 'R': bonus += 0.01
+    if row.get('Temp') and row.get('Temp') > 80: bonus += 0.01
+    if row.get('BatterHandedness') == 'R' and row.get('Park') in [
+        "Yankee Stadium", "Great American Ball Park", "Guaranteed Rate Field"]: bonus += 0.012
+    if row.get('Humidity') and row.get('Humidity') > 65 and row.get('Park') in ["Truist Park", "LoanDepot Park"]: bonus += 0.01
+    if row.get('Park') in ["Dodger Stadium", "Petco Park", "Oracle Park"]:
+        game_time = row.get('Time')
+        if game_time:
+            try:
+                hour = int(str(game_time).split(":")[0])
+                if hour < 17: bonus -= 0.01
+            except Exception: bonus -= 0.01
+        else:
+            bonus -= 0.01
+    if row.get('PitcherHandedness') == 'L': bonus += 0.01
+    return bonus
+
+# === Main HR Scoring Function ===
 def calc_hr_score(row):
     batter_score = (
         norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
