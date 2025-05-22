@@ -1,6 +1,6 @@
 streamlit
 pandas
-pybaseball==2.2.7
+pybaseball
 scikit-learn
 beautifulsoup4
 unidecode
