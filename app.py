@@ -273,7 +273,7 @@ def get_pitcher_stats_multi(pitcher_id, windows):
 def get_batter_advanced_stats(batter_id, window=14):
     if not batter_id:
         return {k: None for k in [
-            'B_xwoba_14', 'B_xslg_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
+            'B_xwoba_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
         ]}
     start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
     end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -282,10 +282,9 @@ def get_batter_advanced_stats(batter_id, window=14):
         df = df[df['type'] == 'X']
         if df.empty:
             return {k: None for k in [
-                'B_xwoba_14', 'B_xslg_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
+                'B_xwoba_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
             ]}
         xwoba = df['estimated_woba_using_speedangle'].mean() if 'estimated_woba_using_speedangle' in df else None
-        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df else None
         sweet_spot_pct = df['launch_angle'].between(8, 32).mean() if 'launch_angle' in df else None
         pull_pct, oppo_pct = None, None
         if 'hit_location' in df:
@@ -297,7 +296,6 @@ def get_batter_advanced_stats(batter_id, window=14):
         hardhit_pct = (df['launch_speed'] >= 95).mean() if 'launch_speed' in df else None
         return {
             'B_xwoba_14': round(xwoba, 3) if xwoba is not None else None,
-            'B_xslg_14': round(xslg, 3) if xslg is not None else None,
             'B_sweet_spot_pct_14': round(100 * sweet_spot_pct, 1) if sweet_spot_pct is not None else None,
             'B_pull_pct_14': round(100 * pull_pct, 1) if pull_pct is not None else None,
             'B_oppo_pct_14': round(100 * oppo_pct, 1) if oppo_pct is not None else None,
@@ -306,13 +304,13 @@ def get_batter_advanced_stats(batter_id, window=14):
         }
     except Exception:
         return {k: None for k in [
-            'B_xwoba_14', 'B_xslg_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
+            'B_xwoba_14', 'B_sweet_spot_pct_14', 'B_pull_pct_14', 'B_oppo_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14'
         ]}
 
 def get_pitcher_advanced_stats(pitcher_id, window=14):
     if not pitcher_id:
         return {k: None for k in [
-            'P_xwoba_14', 'P_xslg_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
+            'P_xwoba_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
         ]}
     start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
     end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -321,10 +319,9 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         df = df[df['type'] == 'X']
         if df.empty:
             return {k: None for k in [
-                'P_xwoba_14', 'P_xslg_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
+                'P_xwoba_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
             ]}
         xwoba = df['estimated_woba_using_speedangle'].mean() if 'estimated_woba_using_speedangle' in df else None
-        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df else None
         sweet_spot_pct = df['launch_angle'].between(8, 32).mean() if 'launch_angle' in df else None
         pull_pct, oppo_pct = None, None
         if 'hit_location' in df:
@@ -336,7 +333,6 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         hardhit_pct = (df['launch_speed'] >= 95).mean() if 'launch_speed' in df else None
         return {
             'P_xwoba_14': round(xwoba, 3) if xwoba is not None else None,
-            'P_xslg_14': round(xslg, 3) if xslg is not None else None,
             'P_sweet_spot_pct_14': round(100 * sweet_spot_pct, 1) if sweet_spot_pct is not None else None,
             'P_pull_pct_14': round(100 * pull_pct, 1) if pull_pct is not None else None,
             'P_oppo_pct_14': round(100 * oppo_pct, 1) if oppo_pct is not None else None,
@@ -345,7 +341,7 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         }
     except Exception:
         return {k: None for k in [
-            'P_xwoba_14', 'P_xslg_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
+            'P_xwoba_14', 'P_sweet_spot_pct_14', 'P_pull_pct_14', 'P_oppo_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14'
         ]}
 
 def norm_barrel(x):   return min(x / 0.15, 1) if pd.notnull(x) else 0
@@ -488,7 +484,6 @@ if uploaded_file and xhr_file:
             (row.get('B_SLG_14') or 0) * 0.09 +
             # Advanced Statcast for batter
             (row.get('B_xwoba_14') or 0) * 0.10 +
-            (row.get('B_xslg_14') or 0) * 0.06 +
             (row.get('B_sweet_spot_pct_14') or 0) * 0.03 +
             (row.get('B_pull_pct_14') or 0) * 0.01 +
             (row.get('B_oppo_pct_14') or 0) * 0.01 +
@@ -507,7 +502,6 @@ if uploaded_file and xhr_file:
             (-(row.get('P_SLG_14') or 0)) * 0.09 +   # Pitcher SLG against
             # Advanced Statcast for pitcher (as negative factors)
             (-(row.get('P_xwoba_14') or 0)) * 0.05 +
-            (-(row.get('P_xslg_14') or 0)) * 0.03 +
             (-(row.get('P_sweet_spot_pct_14') or 0)) * 0.02 +
             (-(row.get('P_pull_pct_14') or 0)) * 0.01 +
             (-(row.get('P_oppo_pct_14') or 0)) * 0.01 +
@@ -531,8 +525,8 @@ if uploaded_file and xhr_file:
         'B_BarrelRate_14','B_EV_14','B_SLG_14','ParkFactor','Temp','Wind','WindEffect',
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_SLG_14',
         # Advanced columns:
-        'B_xwoba_14','B_xslg_14','B_sweet_spot_pct_14','B_pull_pct_14','B_oppo_pct_14','B_gbfb_14','B_hardhit_pct_14',
-        'P_xwoba_14','P_xslg_14','P_sweet_spot_pct_14','P_pull_pct_14','P_oppo_pct_14','P_gbfb_14','P_hardhit_pct_14',
+        'B_xwoba_14','B_sweet_spot_pct_14','B_pull_pct_14','B_oppo_pct_14','B_gbfb_14','B_hardhit_pct_14',
+        'P_xwoba_14','P_sweet_spot_pct_14','P_pull_pct_14','P_oppo_pct_14','P_gbfb_14','P_hardhit_pct_14',
         'xhr','hr_total','xhr_diff'
     ]
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
@@ -555,7 +549,7 @@ else:
 
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days)**  
-- **Advanced statcast metrics** including xwOBA, xSLG, sweet spot %, pull %, oppo %, GB/FB ratio, and hard hit %
+- **Advanced statcast metrics** including xwOBA, sweet spot %, pull %, oppo %, GB/FB ratio, and hard hit %
 - Weather at game time, park factors, wind direction, and orientation-based adjustments
 - xHR vs HR regression and 2025 micro-trends factored into scoring
 - Full leaderboard, top 5 bar chart, and CSV export
