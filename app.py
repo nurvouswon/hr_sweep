@@ -84,6 +84,7 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         }
 
 def get_player_id(name):
+    # Try to resolve name to MLBAM ID, fallback to None
     try:
         first, last = name.split(" ", 1)
         info = playerid_lookup(last, first)
@@ -93,7 +94,7 @@ def get_player_id(name):
         return None
     return None
 
-# --- HANDEDNESS (same as before, for completeness) ---
+# Handedness function (with override/fallback)
 MANUAL_HANDEDNESS = {
     'alexander canario': ('R', 'R'),
     'liam hicks': ('L', 'R'),
@@ -163,7 +164,7 @@ def get_handedness(name):
     UNKNOWNS_LOG.add(clean_name)
     return None, None
 
-# --- ROLLING STATS WITH SLG INTEGRATION ---
+# --- ROLLING STATS + SLG ---
 def get_batter_stats_multi(batter_name, windows):
     pid = get_player_id(batter_name)
     out = {}
@@ -287,20 +288,20 @@ def custom_2025_boost(row):
     if row.get('Park') in ["Dodger Stadium","Petco Park","Oracle Park"]:
         game_time = row.get('Time')
         if game_time:
-            try:hour = int(str(game_time).split(":")[0])
-        if hour < 17:   # Before 5 PM local
+            try:
+                hour = int(str(game_time).split(":")[0])
+                if hour < 17:   # Before 5 PM local
                     bonus -= 0.01
             except Exception:
                 bonus -= 0.01
         else:
             bonus -= 0.01
-    if row.get('PitcherHandedness') == 'L':
-        bonus += 0.01
+    if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
 windows = [3, 5, 7, 14]
 
-st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, Rolling SLG, Advanced Statcast, Weather)")
+st.title("⚾️ MLB HR Matchup Leaderboard (All Pitcher Stats, Handedness, Rolling SLG, Statcast, 2025 Micro-Trends, Weather)")
 
 st.markdown("""
 **Upload your daily matchup CSV:**  
@@ -332,7 +333,7 @@ if uploaded_file and xhr_file:
         left_on='batter_norm', right_on='player_norm', how='left'
     )
 
-    # Feature matrices
+    # --- MAIN DATA EXTRACTION LOOP ---
     weather_rows, stat_rows, park_factor_rows = [], [], []
     st.write("Fetching Statcast, rolling SLG, weather, park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
@@ -356,6 +357,7 @@ if uploaded_file and xhr_file:
         stat_row.update(pitcher_stats)
         stat_rows.append(stat_row)
         park_factor_rows.append({"ParkFactor": park_factor, "BallparkCity": city})
+
         pct = int(100 * (idx+1)/len(df_merged))
         progress.progress((idx+1)/len(df_merged), text=f"Processing {pct}%")
 
@@ -378,21 +380,21 @@ if uploaded_file and xhr_file:
     # Reg_xHR
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
-    # --- HR SCORE: now INCLUDES ROLLING SLG (batter & pitcher) ---
+    # --- SCORING FUNCTION (ROLLING SLG INCLUDED) ---
     def calc_hr_score(row):
         batter_score = (
-            norm_barrel(row.get('B_BarrelRate_14')) * 0.11 +
-            norm_barrel(row.get('B_BarrelRate_7')) * 0.09 +
-            norm_ev(row.get('B_EV_14')) * 0.07 +
-            (row.get('B_SLG_14') or 0) * 0.08 +   # <-- rolling SLG batter
-            (row.get('B_SLG_7') or 0) * 0.03
+            norm_barrel(row.get('B_BarrelRate_14')) * 0.13 +
+            norm_barrel(row.get('B_BarrelRate_7')) * 0.11 +
+            norm_ev(row.get('B_EV_14')) * 0.08 +
+            (row.get('B_SLG_14') or 0) * 0.10 +   # ROLLING SLG weighted
+            (row.get('B_SLG_7') or 0) * 0.05
         )
         pitcher_score = (
             norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
             norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
             norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
-            -(row.get('P_SLG_14') or 0) * 0.08 +  # <-- rolling SLG pitcher (penalty)
-            -(row.get('P_SLG_7') or 0) * 0.03
+            (row.get('P_SLG_14') or 0) * -0.07 +  # Penalize pitcher with high allowed SLG
+            (row.get('P_SLG_7') or 0) * -0.03
         )
         park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.10
         weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.13
@@ -409,14 +411,14 @@ if uploaded_file and xhr_file:
     show_cols = [
         'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','BallparkCity','Time','HR_Score','Reg_xHR',
         'B_BarrelRate_14','B_EV_14','B_SLG_14','ParkFactor','Temp','Wind','WindEffect',
-        'P_BarrelRateAllowed_14','P_EVAllowed_14','P_SLG_14',
-        'xhr','hr_total','xhr_diff'
+        'P_BarrelRateAllowed_14','P_EVAllowed_14','P_SLG_14','xhr','hr_total','xhr_diff'
     ]
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
     top5 = df_leaderboard.head(5)
     st.dataframe(top5[show_cols])
 
+    # Bar chart for top 5 (HR_Score and Reg_xHR)
     if 'Reg_xHR' in top5.columns:
         st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
     else:
@@ -430,7 +432,7 @@ else:
     st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
-- **All rolling batter and pitcher stats (3, 5, 7, 14 days) and rolling SLG, plus park factor, weather, handedness, and xHR regression.**
-- Latest 2025 micro-trends: park upgrades, humidity, wind, warm weather, pitcher/batter splits, and more.
-- Ballpark city and factors included. CSV download and top-5 leaderboard chart included.
+- **All rolling batter and pitcher stats (3, 5, 7, 14 days) with rolling SLG and all advanced micro-trends are included.**
+- Weather, wind (at game time!), park factor, handedness, and xHR regression are all automated.
+- Park/city, CSV download, top-5 leaderboard chart included.
 """)
