@@ -288,7 +288,7 @@ def custom_2025_boost(row):
         game_time = row.get('Time')
         if game_time:
             try:hour = int(str(game_time).split(":")[0])
-                if hour < 17:   # Before 5 PM local
+        if hour < 17:   # Before 5 PM local
                     bonus -= 0.01
             except Exception:
                 bonus -= 0.01
