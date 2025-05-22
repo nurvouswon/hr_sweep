@@ -6,7 +6,7 @@ from pybaseball.lahman import people
 from datetime import datetime, timedelta
 import unicodedata
 import difflib
-import time
+import numpy as np
 
 API_KEY = "11ac3c31fb664ba8971102152251805"
 
@@ -173,60 +173,40 @@ def get_handedness(name):
     UNKNOWNS_LOG.add(clean_name)
     return None, None
 
-# -------------------- PLATOON SPLIT SCRAPER FUNCTIONS --------------------
-def fetch_fangraphs_batter_platoon_woba(mlbam_id, vs_hand="L"):
+# ----------- PLATOON SPLIT FETCH FUNCTIONS (Statcast, Automated) -----------
+def get_statcast_batter_platoon_woba(batter_id, vs_hand, days=365):
     try:
-        url = f"https://www.fangraphs.com/players/id/{mlbam_id}/splits?position=all"
-        tables = pd.read_html(url)
-        for table in tables:
-            if any("vs RHP" in str(x) or "vs LHP" in str(x) for x in table.iloc[:,0]):
-                split_table = table
-                break
-        else:
-            return None
-        col_map = {str(c).lower(): i for i, c in enumerate(split_table.columns)}
-        hand_row = "vs LHP" if vs_hand == "L" else "vs RHP"
-        row = split_table[split_table.iloc[:,0] == hand_row]
-        if row.empty:
-            return None
-        for c in ["woba", "wOBA"]:
-            if c in col_map:
-                val = row.iloc[0, col_map[c]]
-                try:
-                    return float(val)
-                except: pass
-        return None
-    except Exception:
-        time.sleep(1)
-        return None
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end = datetime.now().strftime("%Y-%m-%d")
+        df = statcast_batter(start, end, batter_id)
+        if df.empty:
+            return np.nan
+        df = df[df['p_throws'] == vs_hand]
+        if df.empty:
+            return np.nan
+        return df['woba_value'].mean()
+    except Exception as e:
+        print(f"Error in batter platoon split for {batter_id}: {e}")
+        return np.nan
 
-def fetch_fangraphs_pitcher_platoon_woba(mlbam_id, vs_hand="L"):
+def get_statcast_pitcher_platoon_woba(pitcher_id, vs_hand, days=365):
     try:
-        url = f"https://www.fangraphs.com/players/id/{mlbam_id}/splits?position=P"
-        tables = pd.read_html(url)
-        for table in tables:
-            if any("vs RHB" in str(x) or "vs LHB" in str(x) for x in table.iloc[:,0]):
-                split_table = table
-                break
-        else:
-            return None
-        col_map = {str(c).lower(): i for i, c in enumerate(split_table.columns)}
-        hand_row = "vs LHB" if vs_hand == "L" else "vs RHB"
-        row = split_table[split_table.iloc[:,0] == hand_row]
-        if row.empty:
-            return None
-        for c in ["woba", "wOBA"]:
-            if c in col_map:
-                val = row.iloc[0, col_map[c]]
-                try:
-                    return float(val)
-                except: pass
-        return None
-    except Exception:
-        time.sleep(1)
-        return None
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end = datetime.now().strftime("%Y-%m-%d")
+        df = statcast_pitcher(start, end, pitcher_id)
+        if df.empty:
+            return np.nan
+        df = df[df['stand'] == vs_hand]
+        if df.empty:
+            return np.nan
+        return df['woba_value'].mean()
+    except Exception as e:
+        print(f"Error in pitcher platoon split for {pitcher_id}: {e}")
+        return np.nan
 
-# ------------------- STATCAST/ADVANCED/BATTED-BALL STATS -------------------
+# ----------- REST OF YOUR STAT FUNCTIONS (unchanged) -----------
+
+# ...[Include all your other stat functions here: get_batter_stats_multi, get_pitcher_stats_multi, get_batter_advanced_stats, get_pitcher_advanced_stats, norm_barrel, norm_ev, norm_park, norm_weather, custom_2025_boost]...
 
 def get_batter_stats_multi(batter_id, windows):
     out = {}
@@ -471,7 +451,8 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     )
 
     weather_rows, stat_rows, park_factor_rows, adv_rows = [], [], [], []
-    st.write("Fetching Statcast, advanced stats, weather, park factor, and merging xHR (may take a few minutes)...")
+    platoon_batters, platoon_pitchers = [], []
+    st.write("Fetching Statcast, advanced stats, weather, park factor, merging xHR, and building platoon splits (may take a few minutes)...")
     progress = st.progress(0)
     for idx, row in df_merged.iterrows():
         city = row['City']
@@ -489,6 +470,14 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         bstat_adv = get_batter_advanced_stats(batter_id, 14)
         pstat_adv = get_pitcher_advanced_stats(pitcher_id, 14)
 
+        # Platoon split: live Statcast splits by matchup handedness
+        b_bats, _ = get_handedness(row['Batter'])
+        _, p_throws = get_handedness(row['Pitcher'])
+        batter_platoon = get_statcast_batter_platoon_woba(batter_id, p_throws) if b_bats and p_throws else np.nan
+        pitcher_platoon = get_statcast_pitcher_platoon_woba(pitcher_id, b_bats) if b_bats and p_throws else np.nan
+        platoon_batters.append(batter_platoon)
+        platoon_pitchers.append(pitcher_platoon)
+
         weather_rows.append(weather)
         stat_row = {}
         stat_row.update(batter_stats)
@@ -501,6 +490,10 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         adv_rows.append(adv_row)
         pct = int(100 * (idx+1)/len(df_merged))
         progress.progress((idx+1)/len(df_merged), text=f"Processing {pct}%")
+
+    # Add platoon columns before final concat
+    df_merged['Platoon_Batter_xwOBA'] = platoon_batters
+    df_merged['Platoon_Pitcher_xwOBA'] = platoon_pitchers
 
     weather_df = pd.DataFrame(weather_rows)
     stat_df = pd.DataFrame(stat_rows)
@@ -532,19 +525,6 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", 'bbe':'bbe_pbb'})
     pitcher_bb = pitcher_bb.rename(columns={col: f"{col}_pbb" for col in pitcher_bb.columns if col not in ["pitcher_id","name_pbb"]})
     df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
-
-    # ---- Platoon Splits Integration ----
-    platoon_batter_wobas = []
-    platoon_pitcher_wobas = []
-    for idx, row in df_final.iterrows():
-        b_hand = row.get('BatterHandedness', 'R')
-        p_hand = row.get('PitcherHandedness', 'R')
-        b_woba = fetch_fangraphs_batter_platoon_woba(row['batter_id'], vs_hand=p_hand)
-        p_woba = fetch_fangraphs_pitcher_platoon_woba(row['pitcher_id'], vs_hand=b_hand)
-        platoon_batter_wobas.append(b_woba)
-        platoon_pitcher_wobas.append(p_woba)
-    df_final['Platoon_Batter_xwOBA'] = platoon_batter_wobas
-    df_final['Platoon_Pitcher_xwOBA'] = platoon_pitcher_wobas
 
     # Batter batted ball scoring
     def calc_batted_ball_score(row):
@@ -596,31 +576,19 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             score += row.get('gb_rate_pbb', 0) * 0.09
         if row.get('oppo_gb_rate_pbb') is not None:
             score += row.get('oppo_gb_rate_pbb', 0) * 0.04
-        if row.get('pull_gb_rate_pbb') is not None:
+        if row.get('pull_gb_rate_pbb', 0) * 0.01 is not None:
             score += row.get('pull_gb_rate_pbb', 0) * 0.01
-        if row.get('straight_gb_rate_pbb') is not None:
+        if row.get('straight_gb_rate_pbb', 0) * 0.01 is not None:
             score += row.get('straight_gb_rate_pbb', 0) * 0.01
-        if row.get('oppo_air_rate_pbb') is not None:
+        if row.get('oppo_air_rate_pbb', 0) * 0.02 is not None:
             score += row.get('oppo_air_rate_pbb', 0) * 0.02
-        if row.get('straight_air_rate_pbb') is not None:
+        if row.get('straight_air_rate_pbb', 0) * 0.01 is not None:
             score += row.get('straight_air_rate_pbb', 0) * 0.01
         if row.get('bbe_pbb', 0) < 10:
             score *= 0.85
         return score
 
-    # PLATOON SCORING
-    def platoon_score(row):
-        # Use wOBA splits; if not available, return 0
-        b = row.get('Platoon_Batter_xwOBA')
-        p = row.get('Platoon_Pitcher_xwOBA')
-        if b is None or p is None:
-            return 0
-        # Center around league average (roughly .310-.320); boost positive, dampen negative
-        batter_boost = (b - 0.320) * 0.25  # positive if batter's platoon split is good
-        pitcher_boost = -(p - 0.320) * 0.20  # negative if pitcher is strong against
-        return batter_boost + pitcher_boost
-
-    # Main scoring
+    # Main scoring, with platoon splits integrated
     def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
@@ -661,10 +629,19 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.12))
         batted_ball_score = calc_batted_ball_score(row)
         pitcher_bb_score = calc_pitcher_bb_score(row)
-        platoon = platoon_score(row)
+
+        # Platoon splits (wOBA)
+        platoon_batter = row.get('Platoon_Batter_xwOBA')
+        platoon_pitcher = row.get('Platoon_Pitcher_xwOBA')
+        platoon_score = 0
+        if pd.notnull(platoon_batter):
+            platoon_score += (platoon_batter - 0.320) * 0.15  # Slightly above league avg = bonus
+        if pd.notnull(platoon_pitcher):
+            platoon_score -= (platoon_pitcher - 0.320) * 0.10  # Below avg allowed is good
+
         total = (batter_score + pitcher_score + park_score + weather_score +
                  regression_score + batted_ball_score + pitcher_bb_score +
-                 platoon + custom_2025_boost(row))
+                 platoon_score + custom_2025_boost(row))
         return round(total, 3)
 
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
@@ -678,15 +655,12 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         'P_BarrelRateAllowed_14','P_EVAllowed_14','P_SLG_14',
         'B_xwoba_14','B_sweet_spot_pct_14','B_pull_pct_14','B_oppo_pct_14','B_gbfb_14','B_hardhit_pct_14',
         'P_xwoba_14','P_sweet_spot_pct_14','P_pull_pct_14','P_oppo_pct_14','P_gbfb_14','P_hardhit_pct_14',
+        'Platoon_Batter_xwOBA','Platoon_Pitcher_xwOBA',
         'xhr','hr_total','xhr_diff',
-        # Batter batted ball profile:
         'bbe','gb_rate','air_rate','fb_rate','ld_rate','pu_rate','pull_rate','straight_rate','oppo_rate',
         'pull_gb_rate','straight_gb_rate','oppo_gb_rate','pull_air_rate','straight_air_rate','oppo_air_rate',
-        # Pitcher batted ball profile:
         'bbe_pbb','gb_rate_pbb','air_rate_pbb','fb_rate_pbb','ld_rate_pbb','pu_rate_pbb','pull_rate_pbb','straight_rate_pbb','oppo_rate_pbb',
-        'pull_gb_rate_pbb','straight_gb_rate_pbb','oppo_gb_rate_pbb','pull_air_rate_pbb','straight_air_rate_pbb','oppo_air_rate_pbb',
-        # Platoon splits:
-        'Platoon_Batter_xwOBA','Platoon_Pitcher_xwOBA'
+        'pull_gb_rate_pbb','straight_gb_rate_pbb','oppo_gb_rate_pbb','pull_air_rate_pbb','straight_air_rate_pbb','oppo_air_rate_pbb'
     ]
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
@@ -711,6 +685,6 @@ st.caption("""
 - Weather at game time, park factors, wind direction, and orientation-based adjustments
 - xHR vs HR regression and 2025 micro-trends factored into scoring
 - **Batter and pitcher batted ball profiles**: integrated into scoring and leaderboard
-- **Platoon splits (auto-scraped from FanGraphs)** are live and weighted in the HR Score
+- **Platoon splits via Statcast**: NO CSV upload needed—bot fetches and scores the matchup automatically!
 - Full leaderboard, top 5 bar chart, and CSV export
 """)
