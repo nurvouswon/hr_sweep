@@ -93,7 +93,6 @@ def get_player_id(name):
         return None
     return None
 
-# Add player_id to uploaded matchups if not present
 def add_player_ids(df, batter_col='Batter', pitcher_col='Pitcher'):
     batter_ids = []
     pitcher_ids = []
@@ -104,7 +103,6 @@ def add_player_ids(df, batter_col='Batter', pitcher_col='Pitcher'):
     df['pitcher_id'] = pitcher_ids
     return df
 
-# --- HANDEDNESS (as before) ---
 MANUAL_HANDEDNESS = {
     'alexander canario': ('R', 'R'),
     'liam hicks': ('L', 'R'),
@@ -174,7 +172,6 @@ def get_handedness(name):
     UNKNOWNS_LOG.add(clean_name)
     return None, None
 
-# --- ROLLING & ADVANCED STATCAST STATS (WITH SLG) ---
 def get_batter_stats_multi(batter_id, windows):
     out = {}
     if not batter_id:
@@ -269,7 +266,6 @@ def get_pitcher_stats_multi(pitcher_id, windows):
             out[f"P_SLG_{w}"] = None
     return out
 
-# --- ADVANCED STATCAST METRICS (14-day window, player ID based) ---
 def get_batter_advanced_stats(batter_id, window=14):
     if not batter_id:
         return {k: None for k in [
@@ -383,18 +379,20 @@ def custom_2025_boost(row):
 
 windows = [3, 5, 7, 14]
 
-st.title("⚾️ MLB HR Matchup Leaderboard (All Stats, Player ID, Micro-Trends, Weather)")
+st.title("⚾️ MLB HR Matchup Leaderboard (All Stats, Player ID, Micro-Trends, Weather, Batted Ball Profile)")
 
 st.markdown("""
 **Upload your daily matchup CSV:**  
 `Batter,Pitcher,City,Park,Date,Time`  
-And a **Baseball Savant xHR/HR CSV** (with columns `player`, `hr_total`, `xhr`, `xhr_diff`)
+And a **Baseball Savant xHR/HR CSV** (with columns `player`, `hr_total`, `xhr`, `xhr_diff`)  
+And your **Batted Ball Profile CSV** (with MLBAM `id`, 14d window)
 """)
 
 uploaded_file = st.file_uploader("Upload your daily CSV:", type=["csv"])
 xhr_file = st.file_uploader("Upload Baseball Savant xHR/HR CSV:", type=["csv"])
+battedball_file = st.file_uploader("Upload Batter batted-ball profile CSV:", type=["csv"])
 
-if uploaded_file and xhr_file:
+if uploaded_file and xhr_file and battedball_file:
     df_upload = pd.read_csv(uploaded_file)
     for col in ['Batter','Pitcher','City','Park','Date','Time']:
         if col not in df_upload.columns:
@@ -469,7 +467,46 @@ if uploaded_file and xhr_file:
     # Reg_xHR
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
-    # Extended HR Score function with advanced stats and rolling SLG
+    # Merge batted ball profile data
+    batted_ball = pd.read_csv(battedball_file)
+    batted_ball = batted_ball.rename(columns={"id": "batter_id"})
+    df_final = df_final.merge(batted_ball, on="batter_id", how="left")
+
+    # --- ADVANCED BATTED BALL SCORING LOGIC ---
+    def calc_batted_ball_score(row):
+        # Most predictive: fb_rate, pull_air_rate, pull_rate, air_rate
+        # Opposite: too many popups or oppo/straight GBs
+        score = 0
+        if row.get('fb_rate') is not None:
+            score += row.get('fb_rate', 0) * 0.09       # fly ball rate upweighted
+        if row.get('pull_air_rate') is not None:
+            score += row.get('pull_air_rate', 0) * 0.09 # pulled air balls are best for HRs
+        if row.get('pull_rate') is not None:
+            score += row.get('pull_rate', 0) * 0.04
+        if row.get('air_rate') is not None:
+            score += row.get('air_rate', 0) * 0.03
+        if row.get('ld_rate') is not None:
+            score += row.get('ld_rate', 0) * 0.01       # line drives: a bit positive
+        if row.get('pu_rate') is not None:
+            score -= row.get('pu_rate', 0) * 0.07       # popups strongly negative
+        if row.get('gb_rate') is not None:
+            score -= row.get('gb_rate', 0) * 0.09       # grounders very negative
+        if row.get('oppo_gb_rate') is not None:
+            score -= row.get('oppo_gb_rate', 0) * 0.04  # oppo grounders = death for HRs
+        if row.get('pull_gb_rate') is not None:
+            score -= row.get('pull_gb_rate', 0) * 0.01
+        if row.get('straight_gb_rate') is not None:
+            score -= row.get('straight_gb_rate', 0) * 0.01
+        if row.get('oppo_air_rate') is not None:
+            score -= row.get('oppo_air_rate', 0) * 0.02 # oppo air can work but less likely
+        if row.get('straight_air_rate') is not None:
+            score -= row.get('straight_air_rate', 0) * 0.01
+        # Sample size caution
+        if row.get('bbe', 0) < 10:
+            score *= 0.85  # small sample, reduce trust
+        return score
+
+    # --- MAIN SCORING FUNCTION ---
     def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
@@ -480,9 +517,7 @@ if uploaded_file and xhr_file:
             norm_ev(row.get('B_EV_7')) * 0.06 +
             norm_ev(row.get('B_EV_5')) * 0.04 +
             norm_ev(row.get('B_EV_3')) * 0.02 +
-            # Rolling SLG (new feature)
             (row.get('B_SLG_14') or 0) * 0.09 +
-            # Advanced Statcast for batter
             (row.get('B_xwoba_14') or 0) * 0.10 +
             (row.get('B_sweet_spot_pct_14') or 0) * 0.03 +
             (row.get('B_pull_pct_14') or 0) * 0.01 +
@@ -499,8 +534,7 @@ if uploaded_file and xhr_file:
             norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
             norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
             norm_ev(row.get('P_EVAllowed_3')) * 0.01 +
-            (-(row.get('P_SLG_14') or 0)) * 0.09 +   # Pitcher SLG against
-            # Advanced Statcast for pitcher (as negative factors)
+            (-(row.get('P_SLG_14') or 0)) * 0.09 +
             (-(row.get('P_xwoba_14') or 0)) * 0.05 +
             (-(row.get('P_sweet_spot_pct_14') or 0)) * 0.02 +
             (-(row.get('P_pull_pct_14') or 0)) * 0.01 +
@@ -510,8 +544,10 @@ if uploaded_file and xhr_file:
         )
         park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.10
         weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
-        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.12))  # cap at 0.12
+        regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.12))
+        batted_ball_score = calc_batted_ball_score(row)
         total = batter_score + pitcher_score + park_score + weather_score + regression_score
+        total += batted_ball_score
         total += custom_2025_boost(row)
         return round(total, 3)
 
@@ -520,37 +556,6 @@ if uploaded_file and xhr_file:
 
     st.success("All done! Top matchups below:")
 
+    # Add batted ball columns to the leaderboard display
     show_cols = [
-        'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','BallparkCity','Time','HR_Score','Reg_xHR',
-        'B_BarrelRate_14','B_EV_14','B_SLG_14','ParkFactor','Temp','Wind','WindEffect',
-        'P_BarrelRateAllowed_14','P_EVAllowed_14','P_SLG_14',
-        # Advanced columns:
-        'B_xwoba_14','B_sweet_spot_pct_14','B_pull_pct_14','B_oppo_pct_14','B_gbfb_14','B_hardhit_pct_14',
-        'P_xwoba_14','P_sweet_spot_pct_14','P_pull_pct_14','P_oppo_pct_14','P_gbfb_14','P_hardhit_pct_14',
-        'xhr','hr_total','xhr_diff'
-    ]
-    show_cols = [c for c in show_cols if c in df_leaderboard.columns]
-
-    top5 = df_leaderboard.head(5)
-    st.dataframe(top5[show_cols])
-
-    # Bar chart for top 5 (HR_Score and Reg_xHR)
-    if 'Reg_xHR' in top5.columns:
-        st.bar_chart(top5.set_index('Batter')[['HR_Score','Reg_xHR']])
-    else:
-        st.bar_chart(top5.set_index('Batter')[['HR_Score']])
-
-    st.dataframe(df_leaderboard[show_cols])
-    csv_out = df_leaderboard.to_csv(index=False).encode()
-    st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
-
-else:
-    st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
-
-st.caption("""
-- **All rolling batter and pitcher stats (3, 5, 7, 14 days)**  
-- **Advanced statcast metrics** including xwOBA, sweet spot %, pull %, oppo %, GB/FB ratio, and hard hit %
-- Weather at game time, park factors, wind direction, and orientation-based adjustments
-- xHR vs HR regression and 2025 micro-trends factored into scoring
-- Full leaderboard, top 5 bar chart, and CSV export
-""")
+        'Batter','Pitcher','BatterHandedness','PitcherHandedness','Park','BallparkCity','Time','HR_Score','Reg_xHR
