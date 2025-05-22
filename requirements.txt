@@ -4,3 +4,4 @@ pybaseball==2.2.7
 scikit-learn
 beautifulsoup4
 unidecode
+requests
