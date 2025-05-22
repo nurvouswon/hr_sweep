@@ -336,7 +336,7 @@ def get_plate_discipline_stats(player_id, is_pitcher=False, window=14):
         who = 'Pitcher' if is_pitcher else 'Batter'
         error_log.append(f"Plate discipline error for {who} {player_id}: {e}")
         return {}
-        def get_pitcher_pitch_mix(pitcher_id, window=14):
+def get_pitcher_pitch_mix(pitcher_id, window=14):
     try:
         start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
