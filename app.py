@@ -554,4 +554,9 @@ else:
     st.info("Please upload your daily CSV and Savant xHR/HR CSV to begin.")
 
 st.caption("""
-- **All rolling batter and pitcher stats (3, 5, 7, 14 days), advanced stat
+- **All rolling batter and pitcher stats (3, 5, 7, 14 days)**  
+- **Advanced statcast metrics** including xwOBA, xSLG, sweet spot %, pull %, oppo %, GB/FB ratio, and hard hit %
+- Weather at game time, park factors, wind direction, and orientation-based adjustments
+- xHR vs HR regression and 2025 micro-trends factored into scoring
+- Full leaderboard, top 5 bar chart, and CSV export
+""")
