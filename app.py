@@ -6,6 +6,7 @@ from pybaseball.lahman import people
 from datetime import datetime, timedelta
 import unicodedata
 import difflib
+import time
 
 API_KEY = "11ac3c31fb664ba8971102152251805"
 
@@ -171,6 +172,61 @@ def get_handedness(name):
         pass
     UNKNOWNS_LOG.add(clean_name)
     return None, None
+
+# -------------------- PLATOON SPLIT SCRAPER FUNCTIONS --------------------
+def fetch_fangraphs_batter_platoon_woba(mlbam_id, vs_hand="L"):
+    try:
+        url = f"https://www.fangraphs.com/players/id/{mlbam_id}/splits?position=all"
+        tables = pd.read_html(url)
+        for table in tables:
+            if any("vs RHP" in str(x) or "vs LHP" in str(x) for x in table.iloc[:,0]):
+                split_table = table
+                break
+        else:
+            return None
+        col_map = {str(c).lower(): i for i, c in enumerate(split_table.columns)}
+        hand_row = "vs LHP" if vs_hand == "L" else "vs RHP"
+        row = split_table[split_table.iloc[:,0] == hand_row]
+        if row.empty:
+            return None
+        for c in ["woba", "wOBA"]:
+            if c in col_map:
+                val = row.iloc[0, col_map[c]]
+                try:
+                    return float(val)
+                except: pass
+        return None
+    except Exception:
+        time.sleep(1)
+        return None
+
+def fetch_fangraphs_pitcher_platoon_woba(mlbam_id, vs_hand="L"):
+    try:
+        url = f"https://www.fangraphs.com/players/id/{mlbam_id}/splits?position=P"
+        tables = pd.read_html(url)
+        for table in tables:
+            if any("vs RHB" in str(x) or "vs LHB" in str(x) for x in table.iloc[:,0]):
+                split_table = table
+                break
+        else:
+            return None
+        col_map = {str(c).lower(): i for i, c in enumerate(split_table.columns)}
+        hand_row = "vs LHB" if vs_hand == "L" else "vs RHB"
+        row = split_table[split_table.iloc[:,0] == hand_row]
+        if row.empty:
+            return None
+        for c in ["woba", "wOBA"]:
+            if c in col_map:
+                val = row.iloc[0, col_map[c]]
+                try:
+                    return float(val)
+                except: pass
+        return None
+    except Exception:
+        time.sleep(1)
+        return None
+
+# ------------------- STATCAST/ADVANCED/BATTED-BALL STATS -------------------
 
 def get_batter_stats_multi(batter_id, windows):
     out = {}
@@ -377,35 +433,9 @@ def custom_2025_boost(row):
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
-# ----------- PLATOON SPLIT FETCH FUNCTIONS (AUTOMATIC) -----------
-from pybaseball.fangraphs.splits import batter_splits, pitcher_splits
-
-def get_batter_platoon_xwoba(batter_id):
-    try:
-        splits = batter_splits(batter_id, season=datetime.now().year-1)
-        vs_left = splits[splits['Split'] == 'vs LHP']
-        vs_right = splits[splits['Split'] == 'vs RHP']
-        xwoba_L = float(vs_left['xwOBA'].values[0]) if not vs_left.empty and 'xwOBA' in vs_left else None
-        xwoba_R = float(vs_right['xwOBA'].values[0]) if not vs_right.empty and 'xwOBA' in vs_right else None
-        return xwoba_L, xwoba_R
-    except Exception:
-        return None, None
-
-def get_pitcher_platoon_xwoba(pitcher_id):
-    try:
-        splits = pitcher_splits(pitcher_id, season=datetime.now().year-1)
-        vs_left = splits[splits['Split'] == 'vs LHB']
-        vs_right = splits[splits['Split'] == 'vs RHB']
-        xwoba_L = float(vs_left['xwOBA'].values[0]) if not vs_left.empty and 'xwOBA' in vs_left else None
-        xwoba_R = float(vs_right['xwOBA'].values[0]) if not vs_right.empty and 'xwOBA' in vs_right else None
-        return xwoba_L, xwoba_R
-    except Exception:
-        return None, None
-
-# ----- STREAMLIT UI & MAIN APP BLOCK -----
 windows = [3, 5, 7, 14]
 
-st.title("⚾️ MLB HR Matchup Leaderboard (Auto Platoon, All Stats, Micro-Trends, Weather, Batted Ball)")
+st.title("⚾️ MLB HR Matchup Leaderboard (All Stats, Player ID, Micro-Trends, Weather, Batted Ball Profile, Platoon Splits)")
 
 st.markdown("""
 **Upload your daily matchup CSV:**  
@@ -503,26 +533,18 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     pitcher_bb = pitcher_bb.rename(columns={col: f"{col}_pbb" for col in pitcher_bb.columns if col not in ["pitcher_id","name_pbb"]})
     df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
 
-    # --------- PLATOON SPLITS: auto-fetch and assign ---------
-    batt_vs_pitch_xwoba = []
-    pit_vs_batt_xwoba = []
+    # ---- Platoon Splits Integration ----
+    platoon_batter_wobas = []
+    platoon_pitcher_wobas = []
     for idx, row in df_final.iterrows():
-        batter_id = row['batter_id']
-        pitcher_id = row['pitcher_id']
-        p_hand = row['PitcherHandedness']
-
-        batter_vs_L, batter_vs_R = get_batter_platoon_xwoba(batter_id)
-        pitcher_vs_L, pitcher_vs_R = get_pitcher_platoon_xwoba(pitcher_id)
-
-        if p_hand == 'L':
-            batt_vs_pitch_xwoba.append(batter_vs_L)
-            pit_vs_batt_xwoba.append(pitcher_vs_R)
-        else:
-            batt_vs_pitch_xwoba.append(batter_vs_R)
-            pit_vs_batt_xwoba.append(pitcher_vs_L)
-
-    df_final['Platoon_Batter_xwOBA'] = batt_vs_pitch_xwoba
-    df_final['Platoon_Pitcher_xwOBA'] = pit_vs_batt_xwoba
+        b_hand = row.get('BatterHandedness', 'R')
+        p_hand = row.get('PitcherHandedness', 'R')
+        b_woba = fetch_fangraphs_batter_platoon_woba(row['batter_id'], vs_hand=p_hand)
+        p_woba = fetch_fangraphs_pitcher_platoon_woba(row['pitcher_id'], vs_hand=b_hand)
+        platoon_batter_wobas.append(b_woba)
+        platoon_pitcher_wobas.append(p_woba)
+    df_final['Platoon_Batter_xwOBA'] = platoon_batter_wobas
+    df_final['Platoon_Pitcher_xwOBA'] = platoon_pitcher_wobas
 
     # Batter batted ball scoring
     def calc_batted_ball_score(row):
@@ -586,6 +608,18 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             score *= 0.85
         return score
 
+    # PLATOON SCORING
+    def platoon_score(row):
+        # Use wOBA splits; if not available, return 0
+        b = row.get('Platoon_Batter_xwOBA')
+        p = row.get('Platoon_Pitcher_xwOBA')
+        if b is None or p is None:
+            return 0
+        # Center around league average (roughly .310-.320); boost positive, dampen negative
+        batter_boost = (b - 0.320) * 0.25  # positive if batter's platoon split is good
+        pitcher_boost = -(p - 0.320) * 0.20  # negative if pitcher is strong against
+        return batter_boost + pitcher_boost
+
     # Main scoring
     def calc_hr_score(row):
         batter_score = (
@@ -627,14 +661,10 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.12))
         batted_ball_score = calc_batted_ball_score(row)
         pitcher_bb_score = calc_pitcher_bb_score(row)
-        # Platoon split scoring
-        platoon_score = 0
-        if pd.notnull(row.get('Platoon_Batter_xwOBA')) and pd.notnull(row.get('Platoon_Pitcher_xwOBA')):
-            platoon_score = (row['Platoon_Batter_xwOBA'] - row['Platoon_Pitcher_xwOBA']) * 0.11
-
+        platoon = platoon_score(row)
         total = (batter_score + pitcher_score + park_score + weather_score +
                  regression_score + batted_ball_score + pitcher_bb_score +
-                 custom_2025_boost(row) + platoon_score)
+                 platoon + custom_2025_boost(row))
         return round(total, 3)
 
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
@@ -681,6 +711,6 @@ st.caption("""
 - Weather at game time, park factors, wind direction, and orientation-based adjustments
 - xHR vs HR regression and 2025 micro-trends factored into scoring
 - **Batter and pitcher batted ball profiles**: integrated into scoring and leaderboard
-- **Platoon splits**: fetched automatically (no upload) and integrated in the score
+- **Platoon splits (auto-scraped from FanGraphs)** are live and weighted in the HR Score
 - Full leaderboard, top 5 bar chart, and CSV export
 """)
