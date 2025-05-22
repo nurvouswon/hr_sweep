@@ -172,6 +172,7 @@ def get_handedness(name):
     UNKNOWNS_LOG.add(clean_name)
     return None, None
 
+# --- Rolling & Advanced Statcast Stats ---
 def get_batter_stats_multi(batter_id, windows):
     out = {}
     if not batter_id:
@@ -379,7 +380,7 @@ def custom_2025_boost(row):
 
 windows = [3, 5, 7, 14]
 
-st.title("⚾️ MLB HR Matchup Leaderboard (All Stats, Player ID, Micro-Trends, Weather, Batted Ball Profile)")
+st.title("⚾️ MLB HR Matchup Leaderboard (All Stats, Player ID, Micro-Trends, Weather, Batted Ball Profile, Platoon Splits)")
 
 st.markdown("""
 **Upload your daily matchup CSV:**  
@@ -393,8 +394,9 @@ uploaded_file = st.file_uploader("Upload your daily CSV:", type=["csv"])
 xhr_file = st.file_uploader("Upload Baseball Savant xHR/HR CSV:", type=["csv"])
 battedball_file = st.file_uploader("Upload Batter batted-ball profile CSV:", type=["csv"])
 pitcher_battedball_file = st.file_uploader("Upload Pitcher batted-ball profile CSV:", type=["csv"])
+platoon_file = st.file_uploader("Upload Batter/Pitcher Platoon Splits CSV:", type=["csv"])
 
-if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
+if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file and platoon_file:
     df_upload = pd.read_csv(uploaded_file)
     for col in ['Batter','Pitcher','City','Park','Date','Time']:
         if col not in df_upload.columns:
@@ -415,6 +417,8 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     )
 
     weather_rows, stat_rows, park_factor_rows, adv_rows = [], [], [], []
+    batter_handedness, pitcher_handedness = [], []
+
     st.write("Fetching Statcast, advanced stats, weather, park factor, and merging xHR (may take a few minutes)...")
     progress = st.progress(0)
     for idx, row in df_merged.iterrows():
@@ -443,6 +447,10 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         adv_row.update(bstat_adv)
         adv_row.update(pstat_adv)
         adv_rows.append(adv_row)
+        b_bats, _ = get_handedness(row['Batter'])
+        _, p_throws = get_handedness(row['Pitcher'])
+        batter_handedness.append(b_bats)
+        pitcher_handedness.append(p_throws)
         pct = int(100 * (idx+1)/len(df_merged))
         progress.progress((idx+1)/len(df_merged), text=f"Processing {pct}%")
 
@@ -452,18 +460,8 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     adv_df = pd.DataFrame(adv_rows)
     df_final = pd.concat([df_merged.reset_index(drop=True), weather_df, park_df, stat_df, adv_df], axis=1)
 
-    # Handedness
-    batter_handedness = []
-    pitcher_handedness = []
-    for idx, row in df_final.iterrows():
-        b_bats, _ = get_handedness(row['Batter'])
-        _, p_throws = get_handedness(row['Pitcher'])
-        batter_handedness.append(b_bats)
-        pitcher_handedness.append(p_throws)
     df_final['BatterHandedness'] = [b if b is not None else "UNK" for b in batter_handedness]
     df_final['PitcherHandedness'] = [p if p is not None else "UNK" for p in pitcher_handedness]
-
-    # Reg_xHR
     df_final['Reg_xHR'] = df_final['xhr'] - df_final['hr_total']
 
     # Merge batted ball profile data (Batter)
@@ -474,11 +472,25 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     # Merge batted ball profile data (Pitcher)
     pitcher_bb = pd.read_csv(pitcher_battedball_file)
     pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", 'bbe':'bbe_pbb'})
-    # Add _pbb suffix to all columns except pitcher_id and name
     pitcher_bb = pitcher_bb.rename(columns={col: f"{col}_pbb" for col in pitcher_bb.columns if col not in ["pitcher_id","name_pbb"]})
     df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
 
-    # Batter batted ball scoring
+    # Merge platoon splits (should contain: batter_id, vs_L_xwoba, vs_R_xwoba, pitcher_id, vs_L_xwoba, vs_R_xwoba)
+    platoon = pd.read_csv(platoon_file)
+    df_final = df_final.merge(platoon, on=['batter_id', 'pitcher_id'], how='left')
+
+    def get_matchup_platoon(row):
+        p_hand = row['PitcherHandedness']
+        if p_hand == 'L':
+            batter_xwoba = row.get('vs_L_xwoba')
+            pitcher_xwoba = row.get('vs_R_xwoba_pit')
+        else:
+            batter_xwoba = row.get('vs_R_xwoba')
+            pitcher_xwoba = row.get('vs_L_xwoba_pit')
+        return pd.Series({'Platoon_Batter_xwOBA': batter_xwoba, 'Platoon_Pitcher_xwOBA': pitcher_xwoba})
+
+    df_final[['Platoon_Batter_xwOBA','Platoon_Pitcher_xwOBA']] = df_final.apply(get_matchup_platoon, axis=1)
+
     def calc_batted_ball_score(row):
         score = 0
         if row.get('fb_rate') is not None:
@@ -509,7 +521,6 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             score *= 0.85
         return score
 
-    # Pitcher batted ball scoring
     def calc_pitcher_bb_score(row):
         score = 0
         if row.get('fb_rate_pbb') is not None:
@@ -540,7 +551,6 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             score *= 0.85
         return score
 
-    # Main scoring
     def calc_hr_score(row):
         batter_score = (
             norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
@@ -581,9 +591,13 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         regression_score = max(0, min((row.get('Reg_xHR', 0) or 0) / 5, 0.12))
         batted_ball_score = calc_batted_ball_score(row)
         pitcher_bb_score = calc_pitcher_bb_score(row)
+        # Platoon adjustment: use difference of batter's and pitcher's split xwOBA, scaled
+        platoon_score = 0
+        if pd.notnull(row.get('Platoon_Batter_xwOBA')) and pd.notnull(row.get('Platoon_Pitcher_xwOBA')):
+            platoon_score = (row['Platoon_Batter_xwOBA'] - row['Platoon_Pitcher_xwOBA']) * 0.11
         total = (batter_score + pitcher_score + park_score + weather_score +
                  regression_score + batted_ball_score + pitcher_bb_score +
-                 custom_2025_boost(row))
+                 platoon_score + custom_2025_boost(row))
         return round(total, 3)
 
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
@@ -598,12 +612,14 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         'B_xwoba_14','B_sweet_spot_pct_14','B_pull_pct_14','B_oppo_pct_14','B_gbfb_14','B_hardhit_pct_14',
         'P_xwoba_14','P_sweet_spot_pct_14','P_pull_pct_14','P_oppo_pct_14','P_gbfb_14','P_hardhit_pct_14',
         'xhr','hr_total','xhr_diff',
-        # Batter batted ball profile:
+        # Batted ball profiles:
         'bbe','gb_rate','air_rate','fb_rate','ld_rate','pu_rate','pull_rate','straight_rate','oppo_rate',
         'pull_gb_rate','straight_gb_rate','oppo_gb_rate','pull_air_rate','straight_air_rate','oppo_air_rate',
         # Pitcher batted ball profile:
         'bbe_pbb','gb_rate_pbb','air_rate_pbb','fb_rate_pbb','ld_rate_pbb','pu_rate_pbb','pull_rate_pbb','straight_rate_pbb','oppo_rate_pbb',
-        'pull_gb_rate_pbb','straight_gb_rate_pbb','oppo_gb_rate_pbb','pull_air_rate_pbb','straight_air_rate_pbb','oppo_air_rate_pbb'
+        'pull_gb_rate_pbb','straight_gb_rate_pbb','oppo_gb_rate_pbb','pull_air_rate_pbb','straight_air_rate_pbb','oppo_air_rate_pbb',
+        # Platoon splits:
+        'Platoon_Batter_xwOBA','Platoon_Pitcher_xwOBA'
     ]
     show_cols = [c for c in show_cols if c in df_leaderboard.columns]
 
@@ -620,7 +636,7 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     st.download_button("Download Results as CSV", csv_out, "hr_leaderboard_all_pitcher_stats.csv")
 
 else:
-    st.info("Please upload your daily CSV, Savant xHR/HR CSV, and both batted ball profile CSVs to begin.")
+    st.info("Please upload your daily CSV, Savant xHR/HR CSV, both batted ball profile CSVs, and platoon splits CSV to begin.")
 
 st.caption("""
 - **All rolling batter and pitcher stats (3, 5, 7, 14 days)**
@@ -628,5 +644,6 @@ st.caption("""
 - Weather at game time, park factors, wind direction, and orientation-based adjustments
 - xHR vs HR regression and 2025 micro-trends factored into scoring
 - **Batter and pitcher batted ball profiles**: integrated into scoring and leaderboard
+- **Platoon splits** (batter & pitcher, by handedness) included in scoring
 - Full leaderboard, top 5 bar chart, and CSV export
 """)
