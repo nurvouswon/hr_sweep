@@ -312,10 +312,10 @@ if uploaded_file and xhr_file and batted_file and pitcher_file:
     df['ParkFactor'] = df['Park'].map(park_factors)
     df['ParkOrientation'] = df['Park'].map(ballpark_orientations)
 
-    rows = []
+rows = []
 progress = st.progress(0)
 
-for idx, row in df_merged.iterrows():
+for i, row in df_merged.iterrows():
     try:
         weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
         bstats = get_batter_stats_multi(row['batter_id'])
@@ -348,6 +348,8 @@ for idx, row in df_merged.iterrows():
     except Exception as e:
         error_log.append(f"{row['Batter']} vs {row['Pitcher']}: {e}")
 
+    # Progress percentage
+    progress.progress((i + 1) / len(df_merged), text=f"Processing {int(100 * (i + 1) / len(df_merged))}%")
     # Progress percentage
     progress.progress((i + 1) / len(df_merged), text=f"Processing {int(100 * (i + 1) / len(df_merged))}%")
     df_final = pd.DataFrame(records)
