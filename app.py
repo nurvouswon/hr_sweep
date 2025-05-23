@@ -219,12 +219,20 @@ def get_batter_advanced_stats(batter_id, window=14):
         df = cached_statcast_batter(start, end, batter_id)
         df = df[df['type'] == 'X']
         xwoba = df['estimated_woba_using_speedangle'].mean()
-        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
         sweet = df['launch_angle'].between(8, 32).mean()
+        hard = (df['launch_speed'] >= 95).mean()
         gb = (df['bb_type'] == 'ground_ball').sum()
         fb = (df['bb_type'] == 'fly_ball').sum()
         gbfb = gb / fb if fb > 0 else None
-        hard = (df['launch_speed'] >= 95).mean()
+
+        # Calculate xSLG manually
+        single = df[df['estimated_ba_using_speedangle'] >= 0.5 & (df['launch_angle'] < 15)].shape[0]
+        double = df[df['estimated_ba_using_speedangle'] >= 0.5 & df['launch_angle'].between(15, 30)].shape[0]
+        triple = df[df['estimated_ba_using_speedangle'] >= 0.5 & df['launch_angle'].between(30, 40)].shape[0]
+        hr = df[df['launch_angle'] > 35 & df['launch_speed'] > 100].shape[0]
+        ab = single + double + triple + hr
+        xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
+
         return {
             'B_xwoba_14': round(xwoba, 3) if xwoba else None,
             'B_xSLG_14': round(xslg, 3) if xslg else None,
@@ -245,12 +253,20 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         df = cached_statcast_pitcher(start, end, pitcher_id)
         df = df[df['type'] == 'X']
         xwoba = df['estimated_woba_using_speedangle'].mean()
-        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
         sweet = df['launch_angle'].between(8, 32).mean()
+        hard = (df['launch_speed'] >= 95).mean()
         gb = (df['bb_type'] == 'ground_ball').sum()
         fb = (df['bb_type'] == 'fly_ball').sum()
         gbfb = gb / fb if fb > 0 else None
-        hard = (df['launch_speed'] >= 95).mean()
+
+        # Manual xSLG for pitchers
+        single = df[df['estimated_ba_using_speedangle'] >= 0.5 & (df['launch_angle'] < 15)].shape[0]
+        double = df[df['estimated_ba_using_speedangle'] >= 0.5 & df['launch_angle'].between(15, 30)].shape[0]
+        triple = df[df['estimated_ba_using_speedangle'] >= 0.5 & df['launch_angle'].between(30, 40)].shape[0]
+        hr = df[df['launch_angle'] > 35 & df['launch_speed'] > 100].shape[0]
+        ab = single + double + triple + hr
+        xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
+
         return {
             'P_xwoba_14': round(xwoba, 3) if xwoba else None,
             'P_xSLG_14': round(xslg, 3) if xslg else None,
