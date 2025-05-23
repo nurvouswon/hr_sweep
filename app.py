@@ -27,8 +27,15 @@ def cached_playerid_lookup(last, first):
 @st.cache_data
 def cached_weather_api(city, date, api_key):
     url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date}"
-    resp = requests.get(url, timeout=10)
-    return resp.json()
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200 and resp.text.strip():
+            return resp.json()
+        else:
+            raise ValueError(f"Empty or bad response: {resp.status_code}")
+    except Exception as e:
+        error_log.append(f"Weather API call failed for {city} on {date}: {e}")
+        return {}
 
 def normalize_name(name):
     if not isinstance(name, str): return ""
