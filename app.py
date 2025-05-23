@@ -226,10 +226,10 @@ def get_batter_advanced_stats(batter_id, window=14):
         gbfb = gb / fb if fb > 0 else None
 
         # Calculate xSLG manually
-        single = df[df['estimated_ba_using_speedangle'] >= 0.5 & (df['launch_angle'] < 15)].shape[0]
-        double = df[df['estimated_ba_using_speedangle'] >= 0.5 & df['launch_angle'].between(15, 30)].shape[0]
-        triple = df[df['estimated_ba_using_speedangle'] >= 0.5 & df['launch_angle'].between(30, 40)].shape[0]
-        hr = df[df['launch_angle'] > 35 & df['launch_speed'] > 100].shape[0]
+        single = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'] < 15)].shape[0]
+        double = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(15, 30))].shape[0]
+        triple = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
+        hr = df[(df['launch_angle'] > 35) & (df['launch_speed'] > 100)].shape[0]
         ab = single + double + triple + hr
         xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
 
@@ -260,10 +260,10 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         gbfb = gb / fb if fb > 0 else None
 
         # Manual xSLG for pitchers
-        single = df[df['estimated_ba_using_speedangle'] >= 0.5 & (df['launch_angle'] < 15)].shape[0]
-        double = df[df['estimated_ba_using_speedangle'] >= 0.5 & df['launch_angle'].between(15, 30)].shape[0]
-        triple = df[df['estimated_ba_using_speedangle'] >= 0.5 & df['launch_angle'].between(30, 40)].shape[0]
-        hr = df[df['launch_angle'] > 35 & df['launch_speed'] > 100].shape[0]
+        single = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'] < 15)].shape[0]
+        double = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(15, 30))].shape[0]
+        triple = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
+        hr = df[(df['launch_angle'] > 35) & (df['launch_speed'] > 100)].shape[0]
         ab = single + double + triple + hr
         xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
 
