@@ -567,6 +567,7 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
 
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
     df_leaderboard = df_final.sort_values("HR_Score", ascending=False)
+    df_leaderboard.insert(0, 'Rank', range(1, len(df_leaderboard) + 1))
 
     st.success("Leaderboard ready! Top Matchups:")
     cols_to_show = [
