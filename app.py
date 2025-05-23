@@ -89,24 +89,42 @@ def is_wind_out(wind_dir, park_orientation):
 
 def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
-        data = cached_weather_api(city, date, api_key)
-        game_hour = int(game_time.split(":")[0]) if game_time else 14
+        if not isinstance(city, str) or pd.isna(city):
+            raise ValueError("City is not a valid string")
+
+        city_clean = city.strip()
+        data = cached_weather_api(city_clean, date, api_key)
+
+        # Use 2PM local time as default fallback
+        game_hour = int(str(game_time).split(":")[0]) if isinstance(game_time, str) and ":" in game_time else 14
         hours = data['forecast']['forecastday'][0]['hour']
-        weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
-        temp = weather_hour.get('temp_f', None)
-        wind = weather_hour.get('wind_mph', None)
-        raw_wind_dir = weather_hour.get('wind_dir', '')
-        wind_dir = str(raw_wind_dir).upper()[:2] if isinstance(raw_wind_dir, str) else ""
-        humidity = weather_hour.get('humidity', None)
-        condition = weather_hour.get('condition', {}).get('text', None)
+        weather_hour = min(
+            hours, 
+            key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour)
+        )
+
+        temp = weather_hour.get('temp_f')
+        wind = weather_hour.get('wind_mph')
+        wind_dir = weather_hour.get('wind_dir', '')[:2].upper()
+        humidity = weather_hour.get('humidity')
+        condition = weather_hour.get('condition', {}).get('text')
         wind_effect = is_wind_out(wind_dir, park_orientation)
+
         return {
-            "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
-            "Humidity": humidity, "Condition": condition
+            "Temp": temp,
+            "Wind": wind,
+            "WindDir": wind_dir,
+            "WindEffect": wind_effect,
+            "Humidity": humidity,
+            "Condition": condition
         }
+
     except Exception as e:
         error_log.append(f"Weather error for {city} on {date}: {e}")
-        return { "Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None }
+        return {
+            "Temp": None, "Wind": None, "WindDir": None,
+            "WindEffect": None, "Humidity": None, "Condition": None
+        }
 
 def get_player_id(name):
     try:
