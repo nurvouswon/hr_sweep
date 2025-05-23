@@ -249,42 +249,73 @@ def get_pull_oppo_spray(df, is_pitcher=False):
 
 # ======= Advanced Metrics: Mistake Rate, Hard%, etc =======
 def get_batter_advanced_stats(batter_id, window=14):
-    if not batter_id: return {}
+    if not batter_id:
+        return {}
     try:
         start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_batter(start, end, batter_id)
         df = df[df['type'] == 'X']
         xwoba = df['estimated_woba_using_speedangle'].mean()
+        sweet = df['launch_angle'].between(8, 32).mean()
         hard = (df['launch_speed'] >= 95).mean()
-        la_zone = launch_angle_zones(df)
-        pull_stats = get_pull_oppo_spray(df, is_pitcher=False)
+        gb = (df['bb_type'] == 'ground_ball').sum()
+        fb = (df['bb_type'] == 'fly_ball').sum()
+        gbfb = gb / fb if fb > 0 else None
+
+        single = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'] < 15)].shape[0]
+        double = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(15, 30))].shape[0]
+        triple = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
+        hr = df[(df['launch_angle'] > 35) & (df['launch_speed'] > 100)].shape[0]
+        ab = single + double + triple + hr
+        xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
+        xba = df['estimated_ba_using_speedangle'].mean()
+        xiso = (xslg - xba) if xslg and xba else None
+
         return {
             'B_xwoba_14': round(xwoba, 3) if xwoba else None,
-            'B_hardhit_pct_14': round(100 * hard, 1) if hard else None,
-            **la_zone,
-            **pull_stats
+            'B_xSLG_14': round(xslg, 3) if xslg else None,
+            'B_xISO_14': round(xiso, 3) if xiso else None,
+            'B_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
+            'B_gbfb_14': round(gbfb, 2) if gbfb else None,
+            'B_hardhit_pct_14': round(100 * hard, 1) if hard else None
         }
     except Exception as e:
         error_log.append(f"Batter advanced stat error ({batter_id}): {e}")
         return {}
 
 def get_pitcher_advanced_stats(pitcher_id, window=14):
-    if not pitcher_id: return {}
+def get_pitcher_advanced_stats(pitcher_id, window=14):
+    if not pitcher_id:
+        return {}
     try:
         start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_pitcher(start, end, pitcher_id)
         df = df[df['type'] == 'X']
         xwoba = df['estimated_woba_using_speedangle'].mean()
+        sweet = df['launch_angle'].between(8, 32).mean()
         hard = (df['launch_speed'] >= 95).mean()
-        la_zone = launch_angle_zones(df)
-        pull_stats = get_pull_oppo_spray(df, is_pitcher=True)
+        gb = (df['bb_type'] == 'ground_ball').sum()
+        fb = (df['bb_type'] == 'fly_ball').sum()
+        gbfb = gb / fb if fb > 0 else None
+
+        single = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'] < 15)].shape[0]
+        double = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(15, 30))].shape[0]
+        triple = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
+        hr = df[(df['launch_angle'] > 35) & (df['launch_speed'] > 100)].shape[0]
+        ab = single + double + triple + hr
+        xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
+        xba = df['estimated_ba_using_speedangle'].mean()
+        xiso = (xslg - xba) if xslg and xba else None
+
         return {
             'P_xwoba_14': round(xwoba, 3) if xwoba else None,
-            'P_hardhit_pct_14': round(100 * hard, 1) if hard else None,
-            **la_zone,
-            **pull_stats
+            'P_xSLG_14': round(xslg, 3) if xslg else None,
+            'P_xISO_14': round(xiso, 3) if xiso else None,
+            'P_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
+            'P_gbfb_14': round(gbfb, 2) if gbfb else None,
+            'P_hardhit_pct_14': round(100 * hard, 1) if hard else None
         }
     except Exception as e:
         error_log.append(f"Pitcher advanced stat error ({pitcher_id}): {e}")
@@ -440,12 +471,15 @@ def calc_hr_score(row):
         norm_ev(row.get('B_EV_7')) * 0.06 +
         norm_ev(row.get('B_EV_5')) * 0.04 +
         norm_ev(row.get('B_EV_3')) * 0.02 +
-        (row.get('B_SLG_14') or 0) * 0.04 +
-        (row.get('B_xSLG_14') or 0) * 0.06 +
-        (row.get('B_xISO_14') or 0) * 0.04 +
-        (row.get('B_xwoba_14') or 0) * 0.10 +
-        (row.get('B_hardhit_pct_14') or 0) * 0.03
+        (row.get('B_SLG_14') or 0) * 0.06 +
+        (row.get('B_xSLG_14') or 0) * 0.08 +
+        (row.get('B_xISO_14') or 0) * 0.06 +
+        (row.get('B_xwoba_14') or 0) * 0.09 +
+        (row.get('B_sweet_spot_pct_14') or 0) * 0.03 +
+        (row.get('B_gbfb_14') or 0) * 0.01 +
+        (row.get('B_hardhit_pct_14') or 0) * 0.02
     )
+
     pitcher_score = (
         norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
         norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
@@ -455,17 +489,21 @@ def calc_hr_score(row):
         norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
         norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
         norm_ev(row.get('P_EVAllowed_3')) * 0.01 +
-        -(row.get('P_SLG_14') or 0) * 0.03 +
-        -(row.get('P_xSLG_14') or 0) * 0.05 +
-        -(row.get('P_xISO_14') or 0) * 0.02 +
-        -(row.get('P_xwoba_14') or 0) * 0.06 +
-        -(row.get('P_hardhit_pct_14') or 0) * 0.03
+        -(row.get('P_SLG_14') or 0) * 0.04 +
+        -(row.get('P_xSLG_14') or 0) * 0.06 +
+        -(row.get('P_xISO_14') or 0) * 0.05 +
+        -(row.get('P_xwoba_14') or 0) * 0.05 +
+        -(row.get('P_sweet_spot_pct_14') or 0) * 0.02 +
+        -(row.get('P_gbfb_14') or 0) * 0.01 +
+        -(row.get('P_hardhit_pct_14') or 0) * 0.02
     )
+
     park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.10
     weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
     regression_score = max(0, min((row.get('xhr_diff', 0) or 0) / 5, 0.12))
     platoon_score = ((row.get('PlatoonWoba') or 0.320) - 0.320) * 0.1
     pitchtype_boost = row.get("PitchMixBoost", 0)
+
     return round(
         batter_score + pitcher_score + park_score + weather_score +
         regression_score + row.get('BattedBallScore', 0) + row.get('PitcherBBScore', 0) +
@@ -552,13 +590,12 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     # Show Leaderboard
     st.success("Leaderboard ready! Top Matchups:")
     cols_to_show = [
-        'Rank','Batter', 'Pitcher', 'HR_Score', 'xhr_diff', 'xhr', 'hr_total', 'Park', 'City', 'Time',
-        'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xSLG_14', 'B_xISO_14', 'B_xwoba_14', 'B_hardhit_pct_14',
-        'B_pull_pct', 'B_oppo_pct', 'B_spray_pct', 'HR_Band%', 'Popup%', 'LD%', 'GB%',
-        'PlatoonWoba', 'PitchMixBoost',
-        'P_BarrelRateAllowed_14', 'P_EVAllowed_14', 'P_SLG_14', 'P_xSLG_14', 'P_xISO_14', 'P_xwoba_14', 'P_hardhit_pct_14',
-        'P_pull_pct', 'P_oppo_pct', 'P_spray_pct', 'Temp', 'Wind', 'WindEffect',
-        'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost'
+    'Rank', 'Batter', 'Pitcher', 'HR_Score', 'xhr_diff', 'xhr', 'hr_total', 'Park', 'City', 'Time',
+    'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xSLG_14', 'B_xISO_14', 'B_xwoba_14',
+    'B_sweet_spot_pct_14', 'B_gbfb_14', 'B_hardhit_pct_14', 'PlatoonWoba', 'PitchMixBoost',
+    'P_BarrelRateAllowed_14', 'P_EVAllowed_14', 'P_SLG_14', 'P_xSLG_14', 'P_xISO_14', 'P_xwoba_14',
+    'P_sweet_spot_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14', 'Temp', 'Wind', 'WindEffect',
+    'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost'
     ]
     cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
     st.dataframe(df_leaderboard[cols_to_show].head(15))
