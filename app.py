@@ -315,7 +315,7 @@ if uploaded_file and xhr_file and batted_file and pitcher_file:
     rows = []
 progress = st.progress(0)
 
-for i, row in df_merged.iterrows():
+for idx, row in df_merged.iterrows():
     try:
         weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
         bstats = get_batter_stats_multi(row['batter_id'])
