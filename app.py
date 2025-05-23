@@ -566,39 +566,33 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
 
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-    df_leaderboard = df_final.sort_values("HR_Score", ascending=False)
-    df_leaderboard.insert(0, 'Rank', range(1, len(df_leaderboard) + 1))
+    # Sort and re-index leaderboard
+df_leaderboard = df_final.sort_values("HR_Score", ascending=False)
 
-    st.success("Leaderboard ready! Top Matchups:")
-    cols_to_show = [
-        'Batter', 'Pitcher', 'HR_Score', 'xhr_diff', 'xhr', 'hr_total', 'Park', 'City', 'Time',
-        'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xwoba_14', 'B_xSLG_14', 'B_sweet_spot_pct_14',
-        'B_gbfb_14', 'B_hardhit_pct_14', 'PlatoonWoba', 'PitchMixBoost',
-        'P_BarrelRateAllowed_14', 'P_EVAllowed_14', 'P_SLG_14', 'P_xwoba_14', 'P_xSLG_14',
-        'P_sweet_spot_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14',
-        'Temp', 'Wind', 'WindEffect', 'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost'
-    ]
-    # Add any new batted ball profile fields for batter and pitcher (pull%, oppo% etc)
-    batter_bb_fields = [col for col in df_final.columns if col.endswith('_rate') and col not in cols_to_show]
-    pitcher_bb_fields = [col for col in df_final.columns if col.endswith('_pbb') and col not in cols_to_show]
-    cols_to_show.extend(batter_bb_fields + pitcher_bb_fields)
+# Re-index to get sequential row numbers starting from 1
+df_leaderboard.reset_index(drop=True, inplace=True)
+df_leaderboard.index += 1  # start index from 1
+df_leaderboard.index.name = "#"
 
-    # Only show columns that actually exist in the data
-    cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
-    st.dataframe(df_leaderboard[cols_to_show].head(15))
+# Show Leaderboard
+st.success("Leaderboard ready! Top Matchups:")
+cols_to_show = [
+    'Batter', 'Pitcher', 'HR_Score', 'xhr_diff', 'xhr', 'hr_total', 'Park', 'City', 'Time',
+    'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xwoba_14', 'B_sweet_spot_pct_14',
+    'B_gbfb_14', 'B_hardhit_pct_14', 'B_xSLG_14',
+    'PlatoonWoba', 'PitchMixBoost',
+    'P_BarrelRateAllowed_14', 'P_EVAllowed_14', 'P_SLG_14', 'P_xwoba_14',
+    'P_sweet_spot_pct_14', 'P_gbfb_14', 'P_hardhit_pct_14', 'P_xSLG_14',
+    'Temp', 'Wind', 'WindEffect',
+    'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost'
+]
+cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
+st.dataframe(df_leaderboard[cols_to_show].head(15))
 
-    # Top 5 bar chart
-    st.subheader("Top 5 HR Scores")
-    st.bar_chart(df_leaderboard.set_index('Batter')[['HR_Score']].head(5))
+# Chart Top 5
+st.subheader("Top 5 HR Scores")
+st.bar_chart(df_leaderboard[['HR_Score']].head(5))
 
-    # CSV Download button
-    csv_bytes = df_leaderboard.to_csv(index=False).encode()
-    st.download_button("Download Full Leaderboard as CSV", csv_bytes, file_name="hr_leaderboard.csv")
-
-    # Error Log Viewer
-    if error_log:
-        with st.expander("⚠️ Errors and Warnings"):
-            for e in error_log:
-                st.text(e)
-else:
-    st.info("Upload all 4 files to generate the leaderboard.")
+# Download CSV
+csv_bytes = df_leaderboard.to_csv().encode()
+st.download_button("Download Full Leaderboard as CSV", csv_bytes, file_name="hr_leaderboard.csv")
