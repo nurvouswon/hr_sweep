@@ -438,47 +438,45 @@ def calc_pitcher_bb_score(row):
     return score
 
 def calc_hr_score(row):
+    # Batter performance metrics
     batter_score = (
-        norm_barrel(row.get('B_BarrelRate_14')) * 0.11 +
-        norm_barrel(row.get('B_BarrelRate_7')) * 0.08 +
-        norm_barrel(row.get('B_BarrelRate_5')) * 0.06 +
-        norm_barrel(row.get('B_BarrelRate_3')) * 0.04 +
-        norm_ev(row.get('B_EV_14')) * 0.07 +
-        norm_ev(row.get('B_EV_7')) * 0.05 +
-        norm_ev(row.get('B_EV_5')) * 0.03 +
-        norm_ev(row.get('B_EV_3')) * 0.01 +
-        (row.get('B_SLG_14') or 0) * 0.07 +
-        (row.get('B_xwoba_14') or 0) * 0.09 +
+        norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
+        norm_barrel(row.get('B_BarrelRate_7')) * 0.09 +
+        norm_ev(row.get('B_EV_14')) * 0.08 +
+        norm_ev(row.get('B_EV_7')) * 0.06 +
+        (row.get('B_SLG_14') or 0) * 0.06 +
         (row.get('B_xSLG_14') or 0) * 0.07 +
-        (row.get('B_sweet_spot_pct_14') or 0) * 0.03 +
-        (row.get('B_gbfb_14') or 0) * 0.01 +
-        (row.get('B_hardhit_pct_14') or 0) * 0.02
+        (row.get('B_xwoba_14') or 0) * 0.10 +
+        (row.get('B_hardhit_pct_14') or 0) * 0.04 +
+        (row.get('BattedBallScore', 0)) * 0.08
     )
+
+    # Pitcher susceptibility metrics
     pitcher_score = (
         norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
-        norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
-        norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
-        norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.01 +
         norm_ev(row.get('P_EVAllowed_14')) * 0.04 +
-        norm_ev(row.get('P_EVAllowed_7')) * 0.02 +
-        norm_ev(row.get('P_EVAllowed_5')) * 0.01 +
-        norm_ev(row.get('P_EVAllowed_3')) * 0.01 +
-        -(row.get('P_SLG_14') or 0) * 0.08 +
-        -(row.get('P_xwoba_14') or 0) * 0.05 +
+        -(row.get('P_SLG_14') or 0) * 0.06 +
         -(row.get('P_xSLG_14') or 0) * 0.07 +
-        -(row.get('P_sweet_spot_pct_14') or 0) * 0.02 +
-        -(row.get('P_gbfb_14') or 0) * 0.01 +
-        -(row.get('P_hardhit_pct_14') or 0) * 0.02
+        -(row.get('P_xwoba_14') or 0) * 0.06 +
+        -(row.get('P_hardhit_pct_14') or 0) * 0.03 +
+        (row.get('PitcherBBScore', 0)) * 0.04
     )
-    park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.10
-    weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
-    regression_score = max(0, min(-row.get('xhr_diff', 0) / 5, 0.12))
-    platoon_score = ((row.get('PlatoonWoba') or 0.320) - 0.320) * 0.1
+
+    # Park and weather environment
+    park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.07
+    weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.08
+
+    # Regression logic (inverted)
+    regression_score = max(0, min((-(row.get('xhr_diff', 0) or 0)) / 4, 0.12))
+
+    # Matchup context
+    platoon_score = ((row.get('PlatoonWoba') or 0.320) - 0.320) * 0.08
     pitchtype_boost = row.get("PitchMixBoost", 0)
+    custom_boost = custom_2025_boost(row)
+
     return round(
         batter_score + pitcher_score + park_score + weather_score +
-        regression_score + row.get('BattedBallScore', 0) + row.get('PitcherBBScore', 0) +
-        platoon_score + pitchtype_boost + custom_2025_boost(row),
+        regression_score + platoon_score + pitchtype_boost + custom_boost,
         3
     )
 
