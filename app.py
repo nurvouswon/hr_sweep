@@ -1,6 +1,6 @@
 # MLB HR Matchup Leaderboard – Fully Robust Version
 
-import streamlit as stt
+import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
