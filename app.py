@@ -40,8 +40,31 @@ def normalize_name(name):
         name = f"{first.strip()} {last.strip()}"
     return ' '.join(name.split())
 
-ballpark_orientations = { ... }  # same as previous, omitted for brevity
-park_factors = { ... }           # same as previous, omitted for brevity
+ballpark_orientations = {
+    "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
+    "Camden Yards": "NE", "Rogers Centre": "NE", "Comerica Park": "N",
+    "Progressive Field": "NE", "Target Field": "N", "Kauffman Stadium": "NE",
+    "Guaranteed Rate Field": "NE", "Angel Stadium": "NE", "Minute Maid Park": "N",
+    "Oakland Coliseum": "N", "T-Mobile Park": "N", "Globe Life Field": "NE",
+    "Dodger Stadium": "NE", "Chase Field": "N", "Coors Field": "N",
+    "Oracle Park": "E", "Wrigley Field": "NE", "Great American Ball Park": "N",
+    "American Family Field": "NE", "PNC Park": "NE", "Busch Stadium": "NE",
+    "Truist Park": "N", "LoanDepot Park": "N", "Citi Field": "N",
+    "Nationals Park": "NE", "Petco Park": "N", "Citizens Bank Park": "NE"
+}
+
+park_factors = {
+    "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
+    "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.96,
+    "Progressive Field": 1.01, "Target Field": 1.04, "Kauffman Stadium": 0.98,
+    "Guaranteed Rate Field": 1.18, "Angel Stadium": 1.05, "Minute Maid Park": 1.06,
+    "Oakland Coliseum": 0.82, "T-Mobile Park": 0.86, "Globe Life Field": 1.00,
+    "Dodger Stadium": 1.10, "Chase Field": 1.06, "Coors Field": 1.30,
+    "Oracle Park": 0.82, "Wrigley Field": 1.12, "Great American Ball Park": 1.26,
+    "American Family Field": 1.17, "PNC Park": 0.87, "Busch Stadium": 0.87,
+    "Truist Park": 1.06, "LoanDepot Park": 0.86, "Citi Field": 1.05,
+    "Nationals Park": 1.05, "Petco Park": 0.85, "Citizens Bank Park": 1.19
+}           # same as previous, omitted for brevity
 compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 
 def get_compass_idx(dir_str):
