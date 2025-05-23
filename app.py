@@ -80,12 +80,19 @@ def get_compass_idx(dir_str):
     except: return -1
 
 def is_wind_out(wind_dir, park_orientation):
+    # Ensure both arguments are strings
+    if not isinstance(wind_dir, str) or not isinstance(park_orientation, str):
+        return "unknown"
     wi = get_compass_idx(wind_dir)
     pi = get_compass_idx(park_orientation)
-    if wi == -1 or pi == -1: return "unknown"
-    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7: return "out"
-    elif abs(wi - pi) == 4: return "in"
-    else: return "side"
+    if wi == -1 or pi == -1:
+        return "unknown"
+    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7:
+        return "out"
+    elif abs(wi - pi) == 4:
+        return "in"
+    else:
+        return "side"
 
 def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
