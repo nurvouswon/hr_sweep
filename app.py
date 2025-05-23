@@ -285,7 +285,6 @@ def get_batter_advanced_stats(batter_id, window=14):
         return {}
 
 def get_pitcher_advanced_stats(pitcher_id, window=14):
-def get_pitcher_advanced_stats(pitcher_id, window=14):
     if not pitcher_id:
         return {}
     try:
