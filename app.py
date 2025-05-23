@@ -218,14 +218,16 @@ def get_batter_advanced_stats(batter_id, window=14):
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_batter(start, end, batter_id)
         df = df[df['type'] == 'X']
-        xwoba = df['estimated_woba_using_speedangle'].mean() if not df.empty else None
-        sweet = df['launch_angle'].between(8, 32).mean() if not df.empty else None
-        gb = (df['bb_type'] == 'ground_ball').sum() if not df.empty else 0
-        fb = (df['bb_type'] == 'fly_ball').sum() if not df.empty else 0
+        xwoba = df['estimated_woba_using_speedangle'].mean()
+        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
+        sweet = df['launch_angle'].between(8, 32).mean()
+        gb = (df['bb_type'] == 'ground_ball').sum()
+        fb = (df['bb_type'] == 'fly_ball').sum()
         gbfb = gb / fb if fb > 0 else None
-        hard = (df['launch_speed'] >= 95).mean() if not df.empty else None
+        hard = (df['launch_speed'] >= 95).mean()
         return {
             'B_xwoba_14': round(xwoba, 3) if xwoba else None,
+            'B_xSLG_14': round(xslg, 3) if xslg else None,
             'B_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
             'B_gbfb_14': round(gbfb, 2) if gbfb else None,
             'B_hardhit_pct_14': round(100 * hard, 1) if hard else None
@@ -242,14 +244,16 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_pitcher(start, end, pitcher_id)
         df = df[df['type'] == 'X']
-        xwoba = df['estimated_woba_using_speedangle'].mean() if not df.empty else None
-        sweet = df['launch_angle'].between(8, 32).mean() if not df.empty else None
-        gb = (df['bb_type'] == 'ground_ball').sum() if not df.empty else 0
-        fb = (df['bb_type'] == 'fly_ball').sum() if not df.empty else 0
+        xwoba = df['estimated_woba_using_speedangle'].mean()
+        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
+        sweet = df['launch_angle'].between(8, 32).mean()
+        gb = (df['bb_type'] == 'ground_ball').sum()
+        fb = (df['bb_type'] == 'fly_ball').sum()
         gbfb = gb / fb if fb > 0 else None
-        hard = (df['launch_speed'] >= 95).mean() if not df.empty else None
+        hard = (df['launch_speed'] >= 95).mean()
         return {
             'P_xwoba_14': round(xwoba, 3) if xwoba else None,
+            'P_xSLG_14': round(xslg, 3) if xslg else None,
             'P_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
             'P_gbfb_14': round(gbfb, 2) if gbfb else None,
             'P_hardhit_pct_14': round(100 * hard, 1) if hard else None
