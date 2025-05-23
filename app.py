@@ -561,18 +561,18 @@ df_leaderboard.index += 1  # Make index start from 1
 df_leaderboard.index.name = "#"  # Label the index column
 
     # Merge batted ball CSVs (batter and pitcher, with oppo/pull extended for pitcher)
-    batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
-    df_final = df_final.merge(batted, on="batter_id", how="left")
+batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
+df_final = df_final.merge(batted, on="batter_id", how="left")
 
-    pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
-    pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
-    df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
+pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
+pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
+df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
 
-    df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
-    df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
-    df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
+df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
+df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
+df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
 
-    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
     # Sort and re-index leaderboard
 df_leaderboard = df_final.sort_values("HR_Score", ascending=False)
 
