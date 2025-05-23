@@ -312,34 +312,44 @@ if uploaded_file and xhr_file and batted_file and pitcher_file:
     df['ParkFactor'] = df['Park'].map(park_factors)
     df['ParkOrientation'] = df['Park'].map(ballpark_orientations)
 
-    records = []
-    progress = st.progress(0)
-    for i, row in df.iterrows():
-        try:
-            weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
-            bstats = get_batter_stats_multi(row['batter_id'])
-            pstats = get_pitcher_stats_multi(row['pitcher_id'])
-            badv = get_batter_advanced_stats_xslg(row['batter_id'])
-            padv = get_pitcher_advanced_stats_xslg(row['pitcher_id'])
-            b_bats, _ = get_handedness(row['Batter'])
-            _, p_throws = get_handedness(row['Pitcher'])
-            platoon = get_platoon_woba(row['batter_id'], p_throws)
-            pitchmix = get_pitcher_pitch_mix(row['pitcher_id'])
-            pitchwoba = get_batter_pitchtype_woba(row['batter_id'])
-            pitchboost = calc_pitchtype_boost(pitchwoba, pitchmix)
-            r = row.to_dict()
-            r.update(weather)
-            r.update(bstats)
-            r.update(pstats)
-            r.update(badv)
-            r.update(padv)
-            r['PlatoonWoba'] = platoon
-            r['PitchMixBoost'] = pitchboost
-            records.append(r)
-        except Exception as e:
-            error_log.append(f"{row['Batter']} vs {row['Pitcher']}: {e}")
-        progress.progress((i + 1) / len(df), text=f"Processing {int(100 * (i+1)/len(df))}%")
+    rows = []
+progress = st.progress(0)
 
+for i, row in df_merged.iterrows():
+    try:
+        weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
+        bstats = get_batter_stats_multi(row['batter_id'])
+        pstats = get_pitcher_stats_multi(row['pitcher_id'])
+        badv = get_batter_advanced_stats_xslg(row['batter_id'])
+        padv = get_pitcher_advanced_stats_xslg(row['pitcher_id'])
+        b_bats, _ = get_handedness(row['Batter'])
+        _, p_throws = get_handedness(row['Pitcher'])
+        platoon = get_platoon_woba(row['batter_id'], p_throws)
+        pitchmix = get_pitcher_pitch_mix(row['pitcher_id'])
+        pitchwoba = get_batter_pitchtype_woba(row['batter_id'])
+        pitchboost = calc_pitchtype_boost(pitchwoba, pitchmix)
+
+        r = row.to_dict()
+
+        # Ensure IDs are carried forward
+        r['batter_id'] = row.get('batter_id')
+        r['pitcher_id'] = row.get('pitcher_id')
+
+        r.update(weather)
+        r.update(bstats)
+        r.update(pstats)
+        r.update(badv)
+        r.update(padv)
+        r['PlatoonWoba'] = platoon
+        r['PitchMixBoost'] = pitchboost
+
+        rows.append(r)
+
+    except Exception as e:
+        error_log.append(f"{row['Batter']} vs {row['Pitcher']}: {e}")
+
+    # Progress percentage
+    progress.progress((i + 1) / len(df_merged), text=f"Processing {int(100 * (i + 1) / len(df_merged))}%")
     df_final = pd.DataFrame(records)
     df_final = df_final.merge(batted, on="batter_id", how="left")
     df_final = df_final.merge(pitcher, on="pitcher_id", how="left")
