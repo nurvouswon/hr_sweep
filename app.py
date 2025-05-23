@@ -472,7 +472,7 @@ def calc_hr_score(row):
     )
     park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.10
     weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
-    regression_score = max(0, min((row.get('xhr_diff', 0) or 0) / 5, 0.12))
+    regression_score = max(0, min(-row.get('xhr_diff', 0) / 5, 0.12))
     platoon_score = ((row.get('PlatoonWoba') or 0.320) - 0.320) * 0.1
     pitchtype_boost = row.get("PitchMixBoost", 0)
     return round(
