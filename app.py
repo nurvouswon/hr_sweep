@@ -88,7 +88,8 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         weather_hour = min(hours, key=lambda h: abs(int(h['time'].split(' ')[1].split(':')[0]) - game_hour))
         temp = weather_hour.get('temp_f', None)
         wind = weather_hour.get('wind_mph', None)
-        wind_dir = weather_hour.get('wind_dir', '')[:2].upper()
+        raw_wind_dir = weather_hour.get('wind_dir', '')
+        wind_dir = str(raw_wind_dir).upper()[:2] if isinstance(raw_wind_dir, str) else ""
         humidity = weather_hour.get('humidity', None)
         condition = weather_hour.get('condition', {}).get('text', None)
         wind_effect = is_wind_out(wind_dir, park_orientation)
