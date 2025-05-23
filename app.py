@@ -551,7 +551,14 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             error_log.append(f"Row error ({row['Batter']} vs {row['Pitcher']}): {e}")
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
 
-    df_final = pd.DataFrame(rows)
+    # Finalize DataFrame from enriched rows
+df_final = pd.DataFrame(rows)
+
+# Sort by HR_Score and re-index with sequential row numbers
+df_leaderboard = df_final.sort_values("HR_Score", ascending=False)
+df_leaderboard.reset_index(drop=True, inplace=True)
+df_leaderboard.index += 1  # Make index start from 1
+df_leaderboard.index.name = "#"  # Label the index column
 
     # Merge batted ball CSVs (batter and pitcher, with oppo/pull extended for pitcher)
     batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
