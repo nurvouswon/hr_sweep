@@ -221,11 +221,11 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
     out = {}
     if not pitcher_id:
         for w in windows:
-            out[f"P_BarrelRateAllowed_{w}"] = None
-            out[f"P_EVAllowed_{w}"] = None
-            out[f"P_SLG_{w}"] = None
-            out[f"P_xSLG_{w}"] = None
-            out[f"P_xISO_{w}"] = None
+            out[f"P_BarrelRateAllowed_{w}"] = 0
+            out[f"P_EVAllowed_{w}"] = 0
+            out[f"P_SLG_{w}"] = 0
+            out[f"P_xSLG_{w}"] = 0
+            out[f"P_xISO_{w}"] = 0
         return out
     for w in windows:
         try:
@@ -233,25 +233,35 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
             end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             df = cached_statcast_pitcher(start, end, pitcher_id)
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
+            if df.empty:
+                error_log.append(f"No data for pitcher {pitcher_id}, window {w}")
+                raise ValueError("Empty DataFrame")
+
             barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
-            ev = df['launch_speed'].mean() if len(df) > 0 else None
+            ev = df['launch_speed'].mean()
             singles = df[df['events'] == 'single'].shape[0]
             doubles = df[df['events'] == 'double'].shape[0]
             triples = df[df['events'] == 'triple'].shape[0]
             hrs = df[df['events'] == 'home_run'].shape[0]
             outs = df[df['events'].isin(['field_out','force_out','other_out'])].shape[0]
             ab = singles + doubles + triples + hrs + outs
-            slg = (singles + 2*doubles + 3*triples + 4*hrs) / ab if ab > 0 else None
-            xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
-            xiso = (xslg - df['estimated_ba_using_speedangle'].mean()) if xslg and 'estimated_ba_using_speedangle' in df.columns else None
+            slg = (singles + 2*doubles + 3*triples + 4*hrs) / ab if ab > 0 else 0
+            xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else 0
+            xiso = (xslg - df['estimated_ba_using_speedangle'].mean()) if xslg and 'estimated_ba_using_speedangle' in df.columns else 0
             total = len(df)
-            out[f"P_BarrelRateAllowed_{w}"] = round(barrels / total, 3) if total else None
-            out[f"P_EVAllowed_{w}"] = round(ev, 1) if ev else None
-            out[f"P_SLG_{w}"] = round(slg, 3) if slg else None
-            out[f"P_xSLG_{w}"] = round(xslg, 3) if xslg else None
-            out[f"P_xISO_{w}"] = round(xiso, 3) if xiso else None
+
+            out[f"P_BarrelRateAllowed_{w}"] = round(barrels / total, 3) if total else 0
+            out[f"P_EVAllowed_{w}"] = round(ev, 1) if ev else 0
+            out[f"P_SLG_{w}"] = round(slg, 3)
+            out[f"P_xSLG_{w}"] = round(xslg, 3)
+            out[f"P_xISO_{w}"] = round(xiso, 3)
         except Exception as e:
             error_log.append(f"Pitcher stat error ({pitcher_id}, {w}d): {e}")
+            out[f"P_BarrelRateAllowed_{w}"] = 0
+            out[f"P_EVAllowed_{w}"] = 0
+            out[f"P_SLG_{w}"] = 0
+            out[f"P_xSLG_{w}"] = 0
+            out[f"P_xISO_{w}"] = 0
     return out
 
 # ======= Launch Angle/Hard Hit Zone Functions =======
@@ -321,18 +331,25 @@ def get_batter_advanced_stats(batter_id, window=14):
 
 def get_pitcher_advanced_stats(pitcher_id, window=14):
     if not pitcher_id:
-        return {}
+        return {
+            'P_xISO_14': 0, 'P_xwoba_14': 0, 'P_xSLG_14': 0,
+            'P_sweet_spot_pct_14': 0, 'P_gbfb_14': 0, 'P_hardhit_pct_14': 0,
+            "HR_Band%": 0, "Popup%": 0, "LD%": 0, "GB%": 0
+        }
     try:
         start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_pitcher(start, end, pitcher_id)
         df = df[df['type'] == 'X']
+        if df.empty:
+            raise ValueError("Empty statcast data")
+
         xwoba = df['estimated_woba_using_speedangle'].mean()
         sweet = df['launch_angle'].between(8, 32).mean()
         hard = (df['launch_speed'] >= 95).mean()
         gb = (df['bb_type'] == 'ground_ball').sum()
         fb = (df['bb_type'] == 'fly_ball').sum()
-        gbfb = gb / fb if fb > 0 else None
+        gbfb = gb / fb if fb > 0 else 0
         la_zone = launch_angle_zones(df)
 
         single = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'] < 15)].shape[0]
@@ -340,43 +357,26 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         triple = df[(df['estimated_ba_using_speedangle'] >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
         hr = df[(df['launch_angle'] > 35) & (df['launch_speed'] > 100)].shape[0]
         ab = single + double + triple + hr
-        xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
+        xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else 0
         xba = df['estimated_ba_using_speedangle'].mean()
-        xiso = (xslg - xba) if xslg and xba else None
+        xiso = (xslg - xba) if xslg and xba else 0
 
         return {
-            'P_xISO_14': round(xiso, 3) if xiso else None,
-            'P_xwoba_14': round(xwoba, 3) if xwoba else None,
-            'P_xSLG_14': round(xslg, 3) if xslg else None,
-            'P_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
-            'P_gbfb_14': round(gbfb, 2) if gbfb else None,
-            'P_hardhit_pct_14': round(100 * hard, 1) if hard else None,
-            **la_zone
+            'P_xISO_14': round(xiso, 3),
+            'P_xwoba_14': round(xwoba, 3) if xwoba else 0,
+            'P_xSLG_14': round(xslg, 3),
+            'P_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else 0,
+            'P_gbfb_14': round(gbfb, 2),
+            'P_hardhit_pct_14': round(100 * hard, 1) if hard else 0,
+            **{k: (v if v is not None else 0) for k, v in la_zone.items()}
         }
     except Exception as e:
         error_log.append(f"Pitcher advanced stat error ({pitcher_id}): {e}")
-        return {}
-
-# ========== Pitch Type/Matchup/Platoon Logic ==========
-def get_pitcher_pitch_mix(pitcher_id, window=14):
-    try:
-        start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
-        end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        df = cached_statcast_pitcher(start, end, pitcher_id)
-        total = len(df)
-        if total == 0: return {}
-        pct = df['pitch_type'].value_counts(normalize=True).to_dict()
         return {
-            "FB%": round(100 * sum(pct.get(pt, 0) for pt in ['FF', 'FT', 'SI']), 1),
-            "SL%": round(100 * pct.get('SL', 0), 1),
-            "CU%": round(100 * pct.get('CU', 0), 1),
-            "CH%": round(100 * pct.get('CH', 0), 1),
-            "CT%": round(100 * pct.get('CT', 0), 1),
-            "SP%": round(100 * pct.get('FS', 0), 1)
+            'P_xISO_14': 0, 'P_xwoba_14': 0, 'P_xSLG_14': 0,
+            'P_sweet_spot_pct_14': 0, 'P_gbfb_14': 0, 'P_hardhit_pct_14': 0,
+            "HR_Band%": 0, "Popup%": 0, "LD%": 0, "GB%": 0
         }
-    except Exception as e:
-        error_log.append(f"Pitch mix error: {e}")
-        return {}
 
 def get_batter_pitchtype_woba(batter_id, window=14):
     try:
