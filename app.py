@@ -9,23 +9,6 @@ from datetime import datetime, timedelta
 from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
 from pybaseball.lahman import people
 
-with st.expander("Test: Sandy Alcantara Statcast Data (Last 14 Days)"):
-    try:
-        from pybaseball import statcast_pitcher
-        from datetime import datetime, timedelta
-
-        pitcher_id = 645261  # Sandy Alcantara
-        start = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
-        end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-
-        alcantara_df = statcast_pitcher(start, end, pitcher_id)
-        if not alcantara_df.empty:
-            st.success(f"Found {len(alcantara_df)} records for Sandy Alcantara between {start} and {end}.")
-            st.dataframe(alcantara_df[['game_date', 'release_speed', 'launch_speed', 'launch_angle']].head())
-        else:
-            st.warning(f"No data returned for Sandy Alcantara between {start} and {end}.")
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
 API_KEY = st.secrets["weather"]["api_key"]
 error_log = []
 
@@ -151,11 +134,6 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         }
 
 def get_player_id(name):
-    norm_name = normalize_name(name)
-    if name in MANUAL_PLAYER_IDS:
-        return MANUAL_PLAYER_IDS[name]
-    if norm_name in MANUAL_PLAYER_IDS:
-        return MANUAL_PLAYER_IDS[norm_name]
     try:
         first, last = name.split(" ", 1)
         info = cached_playerid_lookup(last, first)
@@ -166,11 +144,7 @@ def get_player_id(name):
     return None
 
 MANUAL_HANDEDNESS = { ... }  # (add custom fixes as needed)
-# Manual ID overrides for players with name mismatches or lookup issues
-MANUAL_PLAYER_IDS = {
-    "Sandy Alcantara": 645261,
-    "S. Alcantara": 645261  # optional alias, adjust based on your CSV
-}
+
 @st.cache_data
 def get_handedness(name):
     name = normalize_name(name)
@@ -247,37 +221,37 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
     out = {}
     if not pitcher_id:
         for w in windows:
-    try:
-        start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
-        end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        df = cached_statcast_pitcher(start, end, pitcher_id)
-
-        if df is not None and not df.empty:
-            error_log.append(f"✅ Statcast returned {len(df)} rows for pitcher ID {pitcher_id} from {start} to {end}")
-        else:
-            error_log.append(f"⚠️ No Statcast data returned for pitcher ID {pitcher_id} from {start} to {end}")
-
-        df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
-        barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
-        ev = df['launch_speed'].mean() if len(df) > 0 else None
-        singles = df[df['events'] == 'single'].shape[0]
-        doubles = df[df['events'] == 'double'].shape[0]
-        triples = df[df['events'] == 'triple'].shape[0]
-        hrs = df[df['events'] == 'home_run'].shape[0]
-        outs = df[df['events'].isin(['field_out', 'force_out', 'other_out'])].shape[0]
-        ab = singles + doubles + triples + hrs + outs
-        slg = (singles + 2*doubles + 3*triples + 4*hrs) / ab if ab > 0 else None
-        xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
-        xiso = (xslg - df['estimated_ba_using_speedangle'].mean()) if xslg and 'estimated_ba_using_speedangle' in df.columns else None
-        total = len(df)
-        out[f"P_BarrelRateAllowed_{w}"] = round(barrels / total, 3) if total else None
-        out[f"P_EVAllowed_{w}"] = round(ev, 1) if ev else None
-        out[f"P_SLG_{w}"] = round(slg, 3) if slg else None
-        out[f"P_xSLG_{w}"] = round(xslg, 3) if xslg else None
-        out[f"P_xISO_{w}"] = round(xiso, 3) if xiso else None
-
-    except Exception as e:
-        error_log.append(f"Pitcher stat error ({pitcher_id}, {w}d): {e}")
+            out[f"P_BarrelRateAllowed_{w}"] = None
+            out[f"P_EVAllowed_{w}"] = None
+            out[f"P_SLG_{w}"] = None
+            out[f"P_xSLG_{w}"] = None
+            out[f"P_xISO_{w}"] = None
+        return out
+    for w in windows:
+        try:
+            start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
+            end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            df = cached_statcast_pitcher(start, end, pitcher_id)
+            df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
+            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
+            ev = df['launch_speed'].mean() if len(df) > 0 else None
+            singles = df[df['events'] == 'single'].shape[0]
+            doubles = df[df['events'] == 'double'].shape[0]
+            triples = df[df['events'] == 'triple'].shape[0]
+            hrs = df[df['events'] == 'home_run'].shape[0]
+            outs = df[df['events'].isin(['field_out','force_out','other_out'])].shape[0]
+            ab = singles + doubles + triples + hrs + outs
+            slg = (singles + 2*doubles + 3*triples + 4*hrs) / ab if ab > 0 else None
+            xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
+            xiso = (xslg - df['estimated_ba_using_speedangle'].mean()) if xslg and 'estimated_ba_using_speedangle' in df.columns else None
+            total = len(df)
+            out[f"P_BarrelRateAllowed_{w}"] = round(barrels / total, 3) if total else None
+            out[f"P_EVAllowed_{w}"] = round(ev, 1) if ev else None
+            out[f"P_SLG_{w}"] = round(slg, 3) if slg else None
+            out[f"P_xSLG_{w}"] = round(xslg, 3) if xslg else None
+            out[f"P_xISO_{w}"] = round(xiso, 3) if xiso else None
+        except Exception as e:
+            error_log.append(f"Pitcher stat error ({pitcher_id}, {w}d): {e}")
     return out
 
 # ======= Launch Angle/Hard Hit Zone Functions =======
@@ -352,7 +326,7 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_pitcher(start, end, pitcher_id)
-        df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
+        df = df[df['type'] == 'X']
         xwoba = df['estimated_woba_using_speedangle'].mean()
         sweet = df['launch_angle'].between(8, 32).mean()
         hard = (df['launch_speed'] >= 95).mean()
@@ -609,8 +583,6 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
     df_upload['batter_id'] = df_upload['Batter'].apply(get_player_id)
     df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
-    st.text("Sandy Alcantara ID check:")
-    st.text(df_upload[df_upload['Pitcher'].str.contains("Sandy", case=False, na=False)][['Pitcher', 'pitcher_id']])
     df_merged = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
