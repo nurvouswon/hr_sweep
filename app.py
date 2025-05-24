@@ -618,7 +618,15 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
     df_final = pd.DataFrame(rows)
     # Merge batted ball CSVs
-    batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
+    batted = pd.read_csv(battedball_file)
+# Ensure 'id' exists before renaming
+if 'id' in batted.columns:
+    batted = batted.rename(columns={"id": "batter_id"})
+elif 'batter_id' not in batted.columns:
+    st.error("Batter batted-ball CSV must contain an 'id' or 'batter_id' column.")
+    st.stop()
+
+    df_final = df_final.merge(batted, on="batter_id", how="left")
     df_final = df_final.merge(batted, on="batter_id", how="left")
     pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
     pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
