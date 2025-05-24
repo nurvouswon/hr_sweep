@@ -290,6 +290,8 @@ def get_batter_advanced_stats(batter_id, window=14):
         df = cached_statcast_batter(start, end, batter_id)
         df = df[df['type'] == 'X']
         xwoba = df['estimated_woba_using_speedangle'].mean()
+        xba = df['estimated_ba_using_speedangle'].mean()
+        xiso = (xslg - xba) if xslg and xba else None
         la_zone = launch_angle_zones(df)
         sweet = df['launch_angle'].between(8, 32).mean()
         hard = (df['launch_speed'] >= 95).mean()
@@ -307,6 +309,7 @@ def get_batter_advanced_stats(batter_id, window=14):
         xiso = (xslg - xba) if xslg and xba else None
 
         return {
+    'B_xISO_14': round(xiso, 3) if xiso else None,
     'B_xwoba_14': round(xwoba, 3) if xwoba else None,
     'B_xSLG_14': round(xslg, 3) if xslg else None,
     'B_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
@@ -326,6 +329,8 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_pitcher(start, end, pitcher_id)
         df = df[df['type'] == 'X']
+        xba = df['estimated_ba_using_speedangle'].mean()
+        xiso = (xslg - xba) if xslg and xba else None
         xwoba = df['estimated_woba_using_speedangle'].mean()
         la_zone = launch_angle_zones(df)
         xwoba = df['estimated_woba_using_speedangle'].mean()
@@ -345,6 +350,7 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         xiso = (xslg - xba) if xslg and xba else None
 
         return {
+    'P_xISO_14': round(xiso, 3) if xiso else None,
     'P_xwoba_14': round(xwoba, 3) if xwoba else None,
     'P_xSLG_14': round(xslg, 3) if xslg else None,
     'P_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
