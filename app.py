@@ -257,10 +257,12 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
         try:
             start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
             end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        try:
             df = cached_statcast_pitcher(start, end, pitcher_id)
-print(f"Statcast returned {len(df)} rows for pitcher ID {pitcher_id} from {start} to {end}")
-if df.empty:
-    error_log.append(f"No Statcast data returned for pitcher ID {pitcher_id} from {start} to {end}")
+            print(f"Statcast returned {len(df)} rows for pitcher ID {pitcher_id} from {start} to {end}")
+        except Exception as e:
+            error_log.append(f"Pitcher Statcast fetch failed ({pitcher_id}, {w}d): {e}")
+        continue
             if df.empty: error_log.append(f"⚠️ No Statcast data returned for pitcher ID {pitcher_id} from {start} to {end}")
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
             barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
