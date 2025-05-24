@@ -9,6 +9,23 @@ from datetime import datetime, timedelta
 from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
 from pybaseball.lahman import people
 
+with st.expander("Test: Sandy Alcantara Statcast Data (Last 14 Days)"):
+    try:
+        from pybaseball import statcast_pitcher
+        from datetime import datetime, timedelta
+
+        pitcher_id = 645261  # Sandy Alcantara
+        start = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+        end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        alcantara_df = statcast_pitcher(start, end, pitcher_id)
+        if not alcantara_df.empty:
+            st.success(f"Found {len(alcantara_df)} records for Sandy Alcantara between {start} and {end}.")
+            st.dataframe(alcantara_df[['game_date', 'release_speed', 'launch_speed', 'launch_angle']].head())
+        else:
+            st.warning(f"No data returned for Sandy Alcantara between {start} and {end}.")
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
 API_KEY = st.secrets["weather"]["api_key"]
 error_log = []
 
