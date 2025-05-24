@@ -289,7 +289,7 @@ def get_batter_advanced_stats(batter_id, window=14):
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_batter(start, end, batter_id)
         df = df[df['type'] == 'X']
-        xwoba = df['estimated_woba_using_speedangle'].mean()
+        la_zone = launch_angle_zones(df) = df['estimated_woba_using_speedangle'].mean()
         sweet = df['launch_angle'].between(8, 32).mean()
         hard = (df['launch_speed'] >= 95).mean()
         gb = (df['bb_type'] == 'ground_ball').sum()
@@ -306,13 +306,13 @@ def get_batter_advanced_stats(batter_id, window=14):
         xiso = (xslg - xba) if xslg and xba else None
 
         return {
-            'B_xwoba_14': round(xwoba, 3) if xwoba else None,
-            'B_xSLG_14': round(xslg, 3) if xslg else None,
-            'B_xISO_14': round(xiso, 3) if xiso else None,
-            'B_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
-            'B_gbfb_14': round(gbfb, 2) if gbfb else None,
-            'B_hardhit_pct_14': round(100 * hard, 1) if hard else None
-        }
+    'B_xwoba_14': round(xwoba, 3) if xwoba else None,
+    'B_xSLG_14': round(xslg, 3) if xslg else None,
+    'B_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
+    'B_gbfb_14': round(gbfb, 2) if gbfb else None,
+    'B_hardhit_pct_14': round(100 * hard, 1) if hard else None,
+    **la_zone
+}
     except Exception as e:
         error_log.append(f"Batter advanced stat error ({batter_id}): {e}")
         return {}
@@ -325,6 +325,7 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_pitcher(start, end, pitcher_id)
         df = df[df['type'] == 'X']
+        la_zone = launch_angle_zones(df)
         xwoba = df['estimated_woba_using_speedangle'].mean()
         sweet = df['launch_angle'].between(8, 32).mean()
         hard = (df['launch_speed'] >= 95).mean()
@@ -342,13 +343,13 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         xiso = (xslg - xba) if xslg and xba else None
 
         return {
-            'P_xwoba_14': round(xwoba, 3) if xwoba else None,
-            'P_xSLG_14': round(xslg, 3) if xslg else None,
-            'P_xISO_14': round(xiso, 3) if xiso else None,
-            'P_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
-            'P_gbfb_14': round(gbfb, 2) if gbfb else None,
-            'P_hardhit_pct_14': round(100 * hard, 1) if hard else None
-        }
+    'P_xwoba_14': round(xwoba, 3) if xwoba else None,
+    'P_xSLG_14': round(xslg, 3) if xslg else None,
+    'P_sweet_spot_pct_14': round(100 * sweet, 1) if sweet else None,
+    'P_gbfb_14': round(gbfb, 2) if gbfb else None,
+    'P_hardhit_pct_14': round(100 * hard, 1) if hard else None,
+    **la_zone
+}
     except Exception as e:
         error_log.append(f"Pitcher advanced stat error ({pitcher_id}): {e}")
         return {}
@@ -420,7 +421,17 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
 def norm_park(x): return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
-
+def launch_angle_zones(df):
+    hr_zone = df['launch_angle'].between(20, 35) & (df['launch_speed'] > 95)
+    popup = df['launch_angle'] > 50
+    ld = df['launch_angle'].between(8, 25)
+    gb = df['launch_angle'] < 8
+    return {
+        "HR_Band%": round(hr_zone.mean()*100, 1) if not df.empty else None,
+        "Popup%": round(popup.mean()*100, 1) if not df.empty else None,
+        "LD%": round(ld.mean()*100, 1) if not df.empty else None,
+        "GB%": round(gb.mean()*100, 1) if not df.empty else None
+    }
 def norm_weather(temp, wind, wind_effect):
     score = 1
     if temp and temp > 80: score += 0.05
