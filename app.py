@@ -134,6 +134,11 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         }
 
 def get_player_id(name):
+    norm_name = normalize_name(name)
+    if name in MANUAL_PLAYER_IDS:
+        return MANUAL_PLAYER_IDS[name]
+    if norm_name in MANUAL_PLAYER_IDS:
+        return MANUAL_PLAYER_IDS[norm_name]
     try:
         first, last = name.split(" ", 1)
         info = cached_playerid_lookup(last, first)
@@ -144,7 +149,11 @@ def get_player_id(name):
     return None
 
 MANUAL_HANDEDNESS = { ... }  # (add custom fixes as needed)
-
+# Manual ID overrides for players with name mismatches or lookup issues
+MANUAL_PLAYER_IDS = {
+    "Sandy Alcantara": 645261,
+    "S. Alcantara": 645261  # optional alias, adjust based on your CSV
+}
 @st.cache_data
 def get_handedness(name):
     name = normalize_name(name)
