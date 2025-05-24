@@ -584,6 +584,8 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
     df_upload['batter_id'] = df_upload['Batter'].apply(get_player_id)
     df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
+    st.text("Sandy Alcantara ID check:")
+    st.text(df_upload[df_upload['Pitcher'].str.contains("Sandy", case=False, na=False)][['Pitcher', 'pitcher_id']])
     df_merged = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
