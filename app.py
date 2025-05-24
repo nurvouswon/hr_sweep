@@ -289,7 +289,8 @@ def get_batter_advanced_stats(batter_id, window=14):
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_batter(start, end, batter_id)
         df = df[df['type'] == 'X']
-        la_zone = launch_angle_zones(df) = df['estimated_woba_using_speedangle'].mean()
+        xwoba = df['estimated_woba_using_speedangle'].mean()
+        la_zone = launch_angle_zones(df)
         sweet = df['launch_angle'].between(8, 32).mean()
         hard = (df['launch_speed'] >= 95).mean()
         gb = (df['bb_type'] == 'ground_ball').sum()
@@ -325,6 +326,7 @@ def get_pitcher_advanced_stats(pitcher_id, window=14):
         end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         df = cached_statcast_pitcher(start, end, pitcher_id)
         df = df[df['type'] == 'X']
+        xwoba = df['estimated_woba_using_speedangle'].mean()
         la_zone = launch_angle_zones(df)
         xwoba = df['estimated_woba_using_speedangle'].mean()
         sweet = df['launch_angle'].between(8, 32).mean()
