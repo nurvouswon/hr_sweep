@@ -191,21 +191,21 @@ def fetch_today_matchups():
             opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
             # Grab lineups, handling both direct and expected keys
             lineups_obj = game.get("lineups", {})
-            lineups = (game.get("lineups", {}).get(side) or game.get("lineups", {}).get("expected", {}).get(side) or game.get("gameInfo", {}).get("lineups", {}).get(side) or game.get("gameInfo", {}).get("expectedLineups", {}).get(side) or {}
-)
-            # DEBUG: You can uncomment next line for troubleshooting
-            # st.write(f"{team} lineups object:", lineups)
-            batters = []
-if isinstance(lineups, dict) and "battings" in lineups:
-    batters = [
-        (entry.get("batter", {}).get("fullName", ""), entry.get("battingOrder", ""))
-        for entry in lineups.get("battings", [])
-    ]
-elif isinstance(lineups, list):
-    batters = [
-        (b.get("batter", {}).get("fullName", ""), b.get("battingOrder", ""))
-        for b in lineups
-    ]
+            # Choose the right lineup key: 'homePlayers' or 'awayPlayers'
+lineups = game.get("lineups", {})
+if side == "home":
+    batters_list = lineups.get("homePlayers", [])
+elif side == "away":
+    batters_list = lineups.get("awayPlayers", [])
+else:
+    batters_list = []
+
+# Extract batter names and order (use index+1 for batting order if not present)
+batters = [
+    (b.get("fullName", ""), str(idx + 1))
+    for idx, b in enumerate(batters_list)
+    if b.get("fullName")
+]
             if batters:
                 for batter, batting_order in batters:
                     if batter:
