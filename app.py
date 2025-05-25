@@ -1,5 +1,3 @@
-# MLB HR Matchup Leaderboard – Full Advanced Statcast/Derived Scoring + Pitcher Velocity Drift + ML Model Integration
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -153,15 +151,35 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         error_log.append(f"Weather error for {city} on {date}: {e}")
         return {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
 
+# -------------------- Normalization Functions --------------------
+def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
+def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
+def norm_park(x): return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
+def norm_weather(temp, wind, wind_effect):
+    score = 1
+    if temp and temp > 80: score += 0.05
+    if wind and wind > 10:
+        if wind_effect == "out": score += 0.07
+        elif wind_effect == "in": score -= 0.07
+    return max(0.8, min(score, 1.2))
+
+def norm_xwoba(x): 
+    return max(0, min((x - 0.250) / (0.400 - 0.250), 1)) if pd.notnull(x) else 0
+def norm_sweetspot(x):
+    return max(0, min((x - 0.25) / (0.45 - 0.25), 1)) if pd.notnull(x) else 0
+def norm_hardhit(x):
+    return max(0, min((x - 0.25) / (0.60 - 0.25), 1)) if pd.notnull(x) else 0
+def norm_whiff(x):
+    return max(0, min((x - 0.15) / (0.40 - 0.15), 1)) if pd.notnull(x) else 0
+
 # -------------------- Advanced Statcast Functions --------------------
-def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
+def get_batter_stats_multi(batter_id, windows=[3,5,7,14]):
     out = {}
     if not batter_id:
         for w in windows:
-            for k in ['B_BarrelRate', 'B_EV', 'B_SLG', 'B_xSLG', 'B_xISO', 'B_xwoba', 'B_sweet_spot_pct', 'B_hardhit_pct']:
+            for k in ['B_BarrelRate','B_EV','B_SLG','B_xSLG','B_xISO','B_xwoba','B_sweet_spot_pct','B_hardhit_pct']:
                 out[f"{k}_{w}"] = None
         return out
-
     for w in windows:
         try:
             start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
@@ -169,14 +187,10 @@ def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
             df = cached_statcast_batter(start, end, batter_id)
             df = df[df['type'] == 'X']
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
-            if df.empty:
-                raise ValueError("No batted ball data")
-
+            if df.empty: raise ValueError("No batted ball data")
             pa = df.shape[0]
             barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
             ev = df['launch_speed'].mean()
-
-            # Derived stats
             single = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'] < 15)].shape[0]
             double = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'].between(15, 30))].shape[0]
             triple = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
@@ -185,20 +199,14 @@ def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
             xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
             xba = df['estimated_ba_using_speedangle'].mean() if 'estimated_ba_using_speedangle' in df.columns else None
             xiso = (xslg - xba) if xslg and xba else None
-
-            # Actual SLG
             events = df['events'].value_counts().to_dict()
             ab2 = sum(events.get(e, 0) for e in ['single', 'double', 'triple', 'home_run', 'field_out', 'force_out', 'other_out'])
             total_bases = (events.get('single', 0) + 2 * events.get('double', 0) +
                            3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
             slg = total_bases / ab2 if ab2 > 0 else None
-
-            # New: xwOBA, sweet spot %, hard hit %
             xwoba = df['woba_value'].mean() if 'woba_value' in df.columns else None
             sweet_spot_pct = df[(df['launch_angle'].between(8, 32))].shape[0] / pa if pa > 0 else None
             hard_hit_pct = df[(df['launch_speed'] >= 95)].shape[0] / pa if pa > 0 else None
-
-            # Store results
             out[f'B_BarrelRate_{w}'] = round(barrels / pa, 3)
             out[f'B_EV_{w}'] = round(ev, 1)
             out[f'B_SLG_{w}'] = round(slg, 3) if slg is not None else None
@@ -207,35 +215,29 @@ def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
             out[f'B_xwoba_{w}'] = round(xwoba, 3) if xwoba is not None else None
             out[f'B_sweet_spot_pct_{w}'] = round(sweet_spot_pct, 3) if sweet_spot_pct is not None else None
             out[f'B_hardhit_pct_{w}'] = round(hard_hit_pct, 3) if hard_hit_pct is not None else None
-
         except Exception as e:
             error_log.append(f"Batter stats error ({batter_id}, {w}d): {e}")
-            for k in ['B_BarrelRate', 'B_EV', 'B_SLG', 'B_xSLG', 'B_xISO', 'B_xwoba', 'B_sweet_spot_pct', 'B_hardhit_pct']:
+            for k in ['B_BarrelRate','B_EV','B_SLG','B_xSLG','B_xISO','B_xwoba','B_sweet_spot_pct','B_hardhit_pct']:
                 out[f"{k}_{w}"] = None
-
     return out
 
-def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
+def get_pitcher_stats_multi(pitcher_id, windows=[3,5,7,14]):
     out = {}
     if not pitcher_id:
         for w in windows:
-            for k in ['P_BarrelRateAllowed', 'P_EVAllowed', 'P_SLG', 'P_xSLG', 'P_xISO', 'P_xwoba', 'P_sweet_spot_pct', 'P_hardhit_pct']:
+            for k in ['P_BarrelRateAllowed','P_EVAllowed','P_SLG','P_xSLG','P_xISO','P_xwoba','P_sweet_spot_pct','P_hardhit_pct']:
                 out[f"{k}_{w}"] = None
         return out
-
     for w in windows:
         try:
             start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
             end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             df = cached_statcast_pitcher(start, end, pitcher_id)
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
-            if df.empty:
-                raise ValueError("No batted ball data")
-
+            if df.empty: raise ValueError("No batted ball data")
             total = df.shape[0]
             barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
             ev = df['launch_speed'].mean()
-
             single = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'] < 15)].shape[0]
             double = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'].between(15, 30))].shape[0]
             triple = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
@@ -244,17 +246,14 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
             xslg = (1*single + 2*double + 3*triple + 4*hr) / ab if ab else None
             xba = df['estimated_ba_using_speedangle'].mean() if 'estimated_ba_using_speedangle' in df.columns else None
             xiso = (xslg - xba) if xslg and xba else None
-
             events = df['events'].value_counts().to_dict()
             ab2 = sum(events.get(e, 0) for e in ['single', 'double', 'triple', 'home_run', 'field_out', 'force_out', 'other_out'])
             total_bases = (events.get('single', 0) + 2 * events.get('double', 0) +
                            3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
             slg = total_bases / ab2 if ab2 > 0 else None
-
             xwoba = df['woba_value'].mean() if 'woba_value' in df.columns else None
             sweet_spot_pct = df[(df['launch_angle'].between(8, 32))].shape[0] / total if total > 0 else None
             hard_hit_pct = df[(df['launch_speed'] >= 95)].shape[0] / total if total > 0 else None
-
             out[f'P_BarrelRateAllowed_{w}'] = round(barrels / total, 3)
             out[f'P_EVAllowed_{w}'] = round(ev, 1)
             out[f'P_SLG_{w}'] = round(slg, 3) if slg is not None else None
@@ -263,57 +262,61 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
             out[f'P_xwoba_{w}'] = round(xwoba, 3) if xwoba is not None else None
             out[f'P_sweet_spot_pct_{w}'] = round(sweet_spot_pct, 3) if sweet_spot_pct is not None else None
             out[f'P_hardhit_pct_{w}'] = round(hard_hit_pct, 3) if hard_hit_pct is not None else None
-
         except Exception as e:
             error_log.append(f"Pitcher stats error ({pitcher_id}, {w}d): {e}")
-            for k in ['P_BarrelRateAllowed', 'P_EVAllowed', 'P_SLG', 'P_xSLG', 'P_xISO', 'P_xwoba', 'P_sweet_spot_pct', 'P_hardhit_pct']:
+            for k in ['P_BarrelRateAllowed','P_EVAllowed','P_SLG','P_xSLG','P_xISO','P_xwoba','P_sweet_spot_pct','P_hardhit_pct']:
                 out[f"{k}_{w}"] = None
-
     return out
 
-# -------------------- Velocity Drift/Trend Tracking --------------------
-def pitcher_velocity_location_trends(pitcher_id, days=30):
-    try:
-        start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-        end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        df = cached_statcast_pitcher(start, end, pitcher_id)
-        fb_df = df[df['pitch_type'] == 'FF']
-        if fb_df.empty:
-            return {"recent_velo": None, "velo_delta": None, "location_std": None}
-        recent_velo = fb_df['release_speed'].tail(50).mean()
-        season_avg_velo = fb_df['release_speed'].mean()
-        velo_delta = recent_velo - season_avg_velo
-        recent_zone = fb_df[['plate_x', 'plate_z']].tail(50).std().mean()
-        return {
-            "recent_velo": round(recent_velo, 1) if recent_velo else None,
-            "velo_delta": round(velo_delta, 2) if velo_delta else None,
-            "location_std": round(recent_zone, 2) if recent_zone else None
-        }
-    except Exception as e:
-        error_log.append(f"Velocity/Location trend error for pitcher {pitcher_id}: {e}")
-        return {"recent_velo": None, "velo_delta": None, "location_std": None}
+# --- Pitch-level metrics ---
+def get_batter_pitch_metrics(batter_id, windows=[3,5,7,14]):
+    out = {}
+    for w in windows:
+        try:
+            start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
+            end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            df = cached_statcast_batter(start, end, batter_id)
+            swings = df[df['description'].str.contains('swing', na=False)]
+            whiffs = swings[swings['description'].str.contains('miss', na=False)]
+            whiff_rate = whiffs.shape[0] / swings.shape[0] if swings.shape[0] > 0 else None
+            out[f'B_WhiffRate_{w}'] = round(whiff_rate, 3) if whiff_rate is not None else None
+        except Exception as e:
+            error_log.append(f"Batter pitch metric error ({batter_id}, {w}d): {e}")
+            out[f'B_WhiffRate_{w}'] = None
+    return out
 
-# -------------------- ML Model Section --------------------
-def train_and_apply_model(df_leaderboard):
-    # Example: Use all stat columns except names as features
-    features = [col for col in df_leaderboard.columns if col not in ['Batter', 'Pitcher', 'HR_Score', 'Rank', 'City', 'Park', 'Date', 'Time']]
-    df_ml = df_leaderboard.dropna(subset=features)
-    if 'hr_outcome' not in df_ml.columns or df_ml.shape[0] < 50:
-        st.warning("Not enough labeled data (with hr_outcome=1/0) for model. Add hr_outcome column to train ML model.")
-        return None, None
-    X = df_ml[features]
-    y = df_ml['hr_outcome']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
-    df_leaderboard['ML_HR_Prob'] = model.predict_proba(df_leaderboard[features].fillna(0))[:, 1]
-    importances = pd.DataFrame({
-        'feature': features,
-        'importance': model.feature_importances_
-    }).sort_values('importance', ascending=False)
-    return df_leaderboard, importances
+def get_pitcher_pitch_metrics(pitcher_id, windows=[3,5,7,14]):
+    out = {}
+    for w in windows:
+        try:
+            start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
+            end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            df = cached_statcast_pitcher(start, end, pitcher_id)
+            swings = df[df['description'].str.contains('swing', na=False)]
+            whiffs = swings[swings['description'].str.contains('miss', na=False)]
+            whiff_rate = whiffs.shape[0] / swings.shape[0] if swings.shape[0] > 0 else None
+            out[f'P_WhiffRate_{w}'] = round(whiff_rate, 3) if whiff_rate is not None else None
+        except Exception as e:
+            error_log.append(f"Pitcher pitch metric error ({pitcher_id}, {w}d): {e}")
+            out[f'P_WhiffRate_{w}'] = None
+    return out
 
-# -------------------- Advanced Metrics, Matchup/Boost Functions --------------------
+def get_pitcher_spin_metrics(pitcher_id, windows=[3,5,7,14]):
+    out = {}
+    for w in windows:
+        try:
+            start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
+            end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            df = cached_statcast_pitcher(start, end, pitcher_id)
+            fb = df[df['pitch_type'] == 'FF']
+            avg_spin = fb['release_spin_rate'].mean() if not fb.empty else None
+            out[f'P_FF_Spin_{w}'] = round(avg_spin, 1) if avg_spin is not None else None
+        except Exception as e:
+            error_log.append(f"Pitcher spin metric error ({pitcher_id}, {w}d): {e}")
+            out[f'P_FF_Spin_{w}'] = None
+    return out
+
+# --- Advanced matchups (Platoon, pitch mix, etc.) ---
 def get_pitcher_pitch_mix(pitcher_id, window=14):
     try:
         start = (datetime.now() - timedelta(days=window)).strftime('%Y-%m-%d')
@@ -376,18 +379,7 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
         error_log.append(f"Pitch type matchup boost error: {e}")
         return 0
 
-# Normalization Functions
-def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
-def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
-def norm_park(x): return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
-def norm_weather(temp, wind, wind_effect):
-    score = 1
-    if temp and temp > 80: score += 0.05
-    if wind and wind > 10:
-        if wind_effect == "out": score += 0.07
-        elif wind_effect == "in": score -= 0.07
-    return max(0.8, min(score, 1.2))
-
+# --- Custom 2025 Environment Boosts ---
 def custom_2025_boost(row):
     bonus = 0
     if row.get('Park') == 'Citi Field': bonus += 0.025
@@ -412,7 +404,7 @@ def custom_2025_boost(row):
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
-# Batted Ball Profile Score (Batter)
+# --- Batted Ball Profile Scores (optional, can skip if you don't use them) ---
 def calc_batted_ball_score(row):
     score = 0
     score += row.get('fb_rate', 0) * 0.09
@@ -449,6 +441,7 @@ def calc_pitcher_bb_score(row):
         score *= 0.85
     return score
 
+# --- Robust, Advanced HR Scoring ---
 def calc_hr_score(row):
     batter_score = (
         norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
@@ -459,23 +452,26 @@ def calc_hr_score(row):
         norm_ev(row.get('B_EV_7')) * 0.06 +
         norm_ev(row.get('B_EV_5')) * 0.04 +
         norm_ev(row.get('B_EV_3')) * 0.02 +
+        norm_xwoba(row.get('B_xwoba_14')) * 0.08 +
+        norm_xwoba(row.get('B_xwoba_7')) * 0.05 +
+        norm_xwoba(row.get('B_xwoba_5')) * 0.03 +
+        norm_xwoba(row.get('B_xwoba_3')) * 0.02 +
+        norm_sweetspot(row.get('B_sweet_spot_pct_14')) * 0.025 +
+        norm_sweetspot(row.get('B_sweet_spot_pct_7')) * 0.015 +
+        norm_sweetspot(row.get('B_sweet_spot_pct_5')) * 0.01 +
+        norm_sweetspot(row.get('B_sweet_spot_pct_3')) * 0.005 +
+        norm_hardhit(row.get('B_hardhit_pct_14')) * 0.02 +
+        norm_hardhit(row.get('B_hardhit_pct_7')) * 0.012 +
+        norm_hardhit(row.get('B_hardhit_pct_5')) * 0.008 +
+        norm_hardhit(row.get('B_hardhit_pct_3')) * 0.004 +
+        (1 - norm_whiff(row.get('B_WhiffRate_14'))) * 0.012 +
+        (1 - norm_whiff(row.get('B_WhiffRate_7'))) * 0.008 +
+        (1 - norm_whiff(row.get('B_WhiffRate_5'))) * 0.006 +
+        (1 - norm_whiff(row.get('B_WhiffRate_3'))) * 0.004 +
         (row.get('B_SLG_14') or 0) * 0.06 +
-        (row.get('B_xSLG_14') or 0) * 0.08 +
-        (row.get('B_xISO_14') or 0) * 0.06 +
-        (row.get('B_xwoba_14') or 0) * 0.09 +
-        (row.get('B_xwoba_7') or 0) * 0.05 +
-        (row.get('B_xwoba_5') or 0) * 0.03 +
-        (row.get('B_xwoba_3') or 0) * 0.02 +
-        (row.get('B_sweet_spot_pct_14') or 0) * 0.03 +
-        (row.get('B_sweet_spot_pct_7') or 0) * 0.02 +
-        (row.get('B_sweet_spot_pct_5') or 0) * 0.01 +
-        (row.get('B_sweet_spot_pct_3') or 0) * 0.01 +
-        (row.get('B_hardhit_pct_14') or 0) * 0.02 +
-        (row.get('B_hardhit_pct_7') or 0) * 0.015 +
-        (row.get('B_hardhit_pct_5') or 0) * 0.01 +
-        (row.get('B_hardhit_pct_3') or 0) * 0.005
+        (row.get('B_xSLG_14') or 0) * 0.07 +
+        (row.get('B_xISO_14') or 0) * 0.04
     )
-
     pitcher_score = (
         norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
         norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
@@ -485,35 +481,72 @@ def calc_hr_score(row):
         norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
         norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
         norm_ev(row.get('P_EVAllowed_3')) * 0.01 +
-        -(row.get('P_SLG_14') or 0) * 0.04 +
-        -(row.get('P_xSLG_14') or 0) * 0.06 +
-        -(row.get('P_xISO_14') or 0) * 0.05 +
-        -(row.get('P_xwoba_14') or 0) * 0.05 +
-        -(row.get('P_xwoba_7') or 0) * 0.03 +
-        -(row.get('P_xwoba_5') or 0) * 0.02 +
-        -(row.get('P_xwoba_3') or 0) * 0.01 +
-        -(row.get('P_sweet_spot_pct_14') or 0) * 0.02 +
-        -(row.get('P_sweet_spot_pct_7') or 0) * 0.01 +
-        -(row.get('P_sweet_spot_pct_5') or 0) * 0.01 +
-        -(row.get('P_sweet_spot_pct_3') or 0) * 0.005 +
-        -(row.get('P_hardhit_pct_14') or 0) * 0.02 +
-        -(row.get('P_hardhit_pct_7') or 0) * 0.015 +
-        -(row.get('P_hardhit_pct_5') or 0) * 0.01 +
-        -(row.get('P_hardhit_pct_3') or 0) * 0.005
+        norm_xwoba(row.get('P_xwoba_14')) * -0.05 +
+        norm_xwoba(row.get('P_xwoba_7')) * -0.03 +
+        norm_xwoba(row.get('P_xwoba_5')) * -0.02 +
+        norm_xwoba(row.get('P_xwoba_3')) * -0.01 +
+        norm_sweetspot(row.get('P_sweet_spot_pct_14')) * -0.02 +
+        norm_sweetspot(row.get('P_sweet_spot_pct_7')) * -0.01 +
+        norm_sweetspot(row.get('P_sweet_spot_pct_5')) * -0.01 +
+        norm_sweetspot(row.get('P_sweet_spot_pct_3')) * -0.005 +
+        norm_hardhit(row.get('P_hardhit_pct_14')) * -0.02 +
+        norm_hardhit(row.get('P_hardhit_pct_7')) * -0.015 +
+        norm_hardhit(row.get('P_hardhit_pct_5')) * -0.01 +
+        norm_hardhit(row.get('P_hardhit_pct_3')) * -0.005 +
+        norm_whiff(row.get('P_WhiffRate_14')) * -0.01 +
+        norm_whiff(row.get('P_WhiffRate_7')) * -0.008 +
+        norm_whiff(row.get('P_WhiffRate_5')) * -0.006 +
+        norm_whiff(row.get('P_WhiffRate_3')) * -0.004 +
+        (row.get('P_SLG_14') or 0) * -0.04 +
+        (row.get('P_xSLG_14') or 0) * -0.05 +
+        (row.get('P_xISO_14') or 0) * -0.04
     )
+
+    # --- Pitcher Spin Drop (Fastball, signals HR risk if spin collapses) ---
+    spin_drop = 0
+    try:
+        spin_14 = row.get('P_FF_Spin_14')
+        spin_30 = row.get('P_FF_Spin_30')  # Make sure you extract/calculate this as season or 30d avg spin
+        if spin_14 and spin_30 and (spin_30 - spin_14) >= 100:
+            spin_drop = 0.01  # modest bonus for recent fastball spin dip
+    except:
+        pass
 
     park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.10
     weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
     regression_score = max(0, min((row.get('xhr_diff', 0) or 0) / 5, 0.12))
-    platoon_score = ((row.get('PlatoonWoba') or 0.320) - 0.320) * 0.1
-    pitchtype_boost = row.get("PitchMixBoost", 0)
+    platoon_score = ((row.get('PlatoonWoba') or 0.320) - 0.320) * 0.10
+    pitchtype_boost = row.get('PitchMixBoost', 0)
+    batted_ball_score = row.get('BattedBallScore', 0)
+    pitcher_bb_score = row.get('PitcherBBScore', 0)
+    custom_boost = custom_2025_boost(row)
 
     return round(
-        batter_score + pitcher_score + park_score + weather_score +
-        regression_score + row.get('BattedBallScore', 0) + row.get('PitcherBBScore', 0) +
-        platoon_score + pitchtype_boost + custom_2025_boost(row),
+        batter_score + pitcher_score + spin_drop + park_score + weather_score +
+        regression_score + batted_ball_score + pitcher_bb_score +
+        platoon_score + pitchtype_boost + custom_boost,
         3
     )
+
+# --- ML Model Integration (optional) ---
+def train_and_apply_model(df_leaderboard):
+    features = [col for col in df_leaderboard.columns if col not in [
+        'Batter', 'Pitcher', 'HR_Score', 'Rank', 'City', 'Park', 'Date', 'Time']]
+    df_ml = df_leaderboard.dropna(subset=features)
+    if 'hr_outcome' not in df_ml.columns or df_ml.shape[0] < 50:
+        st.warning("Not enough labeled data (with hr_outcome=1/0) for model. Add hr_outcome column to train ML model.")
+        return None, None
+    X = df_ml[features]
+    y = df_ml['hr_outcome']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    df_leaderboard['ML_HR_Prob'] = model.predict_proba(df_leaderboard[features].fillna(0))[:, 1]
+    importances = pd.DataFrame({
+        'feature': features,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    return df_leaderboard, importances
 
 # -------------------- Streamlit UI --------------------
 st.title("⚾ MLB HR Matchup Leaderboard – Advanced Statcast Scoring + Pitcher Trends + ML")
@@ -554,23 +587,29 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
             b_stats = get_batter_stats_multi(row['batter_id'])
             p_stats = get_pitcher_stats_multi(row['pitcher_id'])
+            b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
+            p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
+            p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
             b_bats, _ = get_handedness(row['Batter'])
             _, p_throws = get_handedness(row['Pitcher'])
             platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
             pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
             pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
             pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
-            # --- Velocity Drift Features
-            velo_trends = pitcher_velocity_location_trends(row['pitcher_id'])
             record = row.to_dict()
             record.update(weather)
             record.update(b_stats)
             record.update(p_stats)
+            record.update(b_pitch_metrics)
+            record.update(p_pitch_metrics)
+            record.update(p_spin_metrics)
             record['BatterHandedness'] = b_bats
             record['PitcherHandedness'] = p_throws
             record['PlatoonWoba'] = platoon_woba
             record['PitchMixBoost'] = pt_boost
-            record.update(velo_trends)
+            # You may want to add a 30d spin column for spin drop logic
+            p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
+            record.update(p_spin_metrics_30)
             rows.append(record)
         except Exception as e:
             error_log.append(f"Row error ({row['Batter']} vs {row['Pitcher']}): {e}")
@@ -590,7 +629,7 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
     df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-    # ML Model Integration (optional, needs 'hr_outcome' label in CSV)
+    # ML Model Integration (optional)
     df_leaderboard, importances = train_and_apply_model(df_final)
     if df_leaderboard is None:
         df_leaderboard = df_final.sort_values("HR_Score", ascending=False).reset_index(drop=True)
@@ -601,10 +640,9 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
     st.success("Leaderboard ready! Top Matchups:")
     cols_to_show = [
         'Rank', 'Batter', 'Pitcher', 'HR_Score', 'xhr_diff', 'xhr', 'hr_total', 'Park', 'City', 'Time',
-        'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xSLG_14', 'B_xISO_14',
-        'PlatoonWoba', 'PitchMixBoost', 'recent_velo', 'velo_delta', 'location_std',  # Velocity Drift
-        'P_BarrelRateAllowed_14', 'P_EVAllowed_14', 'P_SLG_14', 'P_xSLG_14', 'P_xISO_14',
-        'Temp', 'Wind', 'WindEffect', 'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost'
+        'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xSLG_14', 'B_xISO_14', 'B_xwoba_14', 'B_sweet_spot_pct_14', 'B_hardhit_pct_14',
+        'B_WhiffRate_14', 'P_BarrelRateAllowed_14', 'P_EVAllowed_14', 'P_SLG_14', 'P_xSLG_14', 'P_xISO_14', 'P_xwoba_14', 'P_sweet_spot_pct_14', 'P_hardhit_pct_14',
+        'P_WhiffRate_14', 'P_FF_Spin_14', 'P_FF_Spin_30', 'Temp', 'Wind', 'WindEffect', 'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost'
     ]
     if 'ML_HR_Prob' in df_leaderboard.columns:
         cols_to_show.append('ML_HR_Prob')
