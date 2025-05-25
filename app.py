@@ -687,6 +687,13 @@ if __name__ == "__main__":
         df_final = df_final.merge(batted, on="batter_id", how="left")
         pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
         pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
+        # Ensure pitcher_id columns match and are numeric
+df_final['pitcher_id'] = pd.to_numeric(df_final['pitcher_id'], errors='coerce')
+pitcher_bb['pitcher_id'] = pd.to_numeric(pitcher_bb['pitcher_id'], errors='coerce')
+
+# Optional: Drop any rows with missing pitcher_id, for a clean merge
+df_final = df_final[df_final['pitcher_id'].notna()]
+pitcher_bb = pitcher_bb[pitcher_bb['pitcher_id'].notna()]
         df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
         # Add HR score, batted ball scores, etc
         df_final.reset_index(drop=True, inplace=True)
