@@ -5,44 +5,81 @@ import requests
 import unicodedata
 
 def fetch_today_lineups():
-    today = datetime.now().strftime('%Y-%m-%d')
+def fetch_today_matchups():
+    """
+    Fetches today's MLB games with probable starting pitchers and lineups (if posted).
+    Returns a DataFrame with columns: Batter, Pitcher, Park, City, Date, Time, Team, BattingOrder.
+    """
+    import pytz
+    today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
     url = (
         f"https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue"
+        f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue,team,person"
     )
     resp = requests.get(url)
     if resp.status_code != 200:
-        st.error("Could not fetch today's MLB lineup data.")
-        return None
+        st.error("MLB API not available.")
+        return pd.DataFrame()
     data = resp.json()
-    if not data.get('dates'):
-        st.warning("No MLB games scheduled for today.")
-        return None
-    rows = []
-    for d in data['dates']:
-        for game in d.get('games', []):
-            park = game.get('venue', {}).get('name', '')
-            city = game.get('venue', {}).get('city', '')
-            date = today
-            time = game.get('gameDate', '')[11:16]
-            for side in ['away', 'home']:
-                team = game[f"{side}Team"]['team'].get('name', '')
-                sp = game.get(f"{side}ProbablePitcher", {})
-                pitcher = sp.get('fullName') if sp else None
-                lineup_list = game.get('lineups', {})
-                side_list = lineup_list.get(side, [])
-                if side_list:
-                    for batter in side_list:
-                        rows.append({
-                            'Batter': batter.get('fullName'),
-                            'Pitcher': pitcher,
-                            'Park': park,
-                            'City': city,
-                            'Date': date,
-                            'Time': time,
-                            'Team': team
+    games = data.get("dates", [{}])[0].get("games", [])
+    records = []
+    for game in games:
+        park = game.get("venue", {}).get("name", "")
+        city = game.get("venue", {}).get("city", "")
+        date = today
+        game_time = game.get("gameDate", "")[11:16]
+        # Get away/home info
+        for side in ["away", "home"]:
+            team = game.get(f"{side}Team", {}).get("team", {}).get("name", "")
+            probable_pitcher = game.get(f"{side}ProbablePitcher", {}).get("fullName", "")
+            # Get opposing pitcher
+            opp_side = "home" if side == "away" else "away"
+            opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
+            # Check if lineup is posted
+            lineups = (
+                game.get("lineups", {}).get(side, {})
+                or game.get("lineups", {}).get("expected", {}).get(side, {})
+            )
+            batters = []
+            # Handle new/old MLB API lineups shape
+            if isinstance(lineups, dict) and "battings" in lineups:
+                batters = [
+                    (entry.get("batter", {}).get("fullName", ""), entry.get("battingOrder", ""))
+                    for entry in lineups.get("battings", [])
+                ]
+            elif isinstance(lineups, list):
+                batters = [
+                    (b.get("batter", {}).get("fullName", ""), b.get("battingOrder", ""))
+                    for b in lineups
+                ]
+            # If lineup posted, use full order, else leave empty for team
+            if batters:
+                for batter, batting_order in batters:
+                    if batter:
+                        records.append({
+                            "Batter": batter,
+                            "Pitcher": opp_pitcher,
+                            "Park": park,
+                            "City": city,
+                            "Date": date,
+                            "Time": game_time,
+                            "Team": team,
+                            "BattingOrder": batting_order
                         })
-    return pd.DataFrame(rows)
+            else:
+                # Lineup not posted: fallback, just put team row with empty batter
+                records.append({
+                    "Batter": "",
+                    "Pitcher": opp_pitcher,
+                    "Park": park,
+                    "City": city,
+                    "Date": date,
+                    "Time": game_time,
+                    "Team": team,
+                    "BattingOrder": ""
+                })
+    df = pd.DataFrame(records)
+    return df[df["Batter"] != ""].reset_index(drop=True)
 
 # 2. Replace manual upload in your UI:
 if xhr_file and battedball_file and pitcher_battedball_file:
