@@ -83,7 +83,7 @@ def get_handedness(name):
 
 # -------------------- Constants --------------------
 ballpark_orientations = {
-    "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
+    "Sutter Health Park": "NE", "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
     "Camden Yards": "NE", "Rogers Centre": "NE", "Comerica Park": "N",
     "Progressive Field": "NE", "Target Field": "N", "Kauffman Stadium": "NE",
     "Guaranteed Rate Field": "NE", "Angel Stadium": "NE", "Minute Maid Park": "N",
@@ -96,7 +96,7 @@ ballpark_orientations = {
 }
 
 park_factors = {
-    "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
+    "Sutter Health Park": 1.12, "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
     "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.96,
     "Progressive Field": 1.01, "Target Field": 1.04, "Kauffman Stadium": 0.98,
     "Guaranteed Rate Field": 1.18, "Angel Stadium": 1.05, "Minute Maid Park": 1.06,
