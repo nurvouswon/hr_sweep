@@ -693,7 +693,7 @@ df_merged['ParkFactor'] = df_merged['Park'].map(park_factors)
 df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations)
 progress = st.progress(0)
 rows = []
-    for idx, row in df_merged.iterrows():
+for idx, row in df_merged.iterrows():
         try:
             weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
             b_stats = get_batter_stats_multi(row['batter_id'])
@@ -727,33 +727,33 @@ rows = []
         except Exception as e:
             log_error(f"Row error ({row['Batter']} vs {row['Pitcher']})", e)
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
-    df_final = pd.DataFrame(rows)
+df_final = pd.DataFrame(rows)
     # Merge batted ball CSVs
-    batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
-    df_final = df_final.merge(batted, on="batter_id", how="left")
-    pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
-    pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
-    df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
+batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
+df_final = df_final.merge(batted, on="batter_id", how="left")
+pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
+pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
+df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
     # Add HR score, batted ball scores, etc
-    df_final.reset_index(drop=True, inplace=True)
-    df_final.insert(0, "Rank", df_final.index + 1)
-    df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
-    df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
-    df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
-    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+df_final.reset_index(drop=True, inplace=True)
+df_final.insert(0, "Rank", df_final.index + 1)
+df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
+df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
+df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
+df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
     # Add percentiles and tier buckets for HR_Score
-    df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
-    df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
+df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
+df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
     # ML Model Integration (optional + feature selection)
-    df_leaderboard, importances = train_and_apply_model(df_final)
+df_leaderboard, importances = train_and_apply_model(df_final)
     if df_leaderboard is None:
         df_leaderboard = df_final.sort_values("HR_Score", ascending=False).reset_index(drop=True)
         df_leaderboard["Rank"] = df_leaderboard.index + 1
     else:
         st.write("Feature importances:", importances)
     # Visualization
-    st.success("Leaderboard ready! Top Matchups:")
-    cols_to_show = [
+st.success("Leaderboard ready! Top Matchups:")
+cols_to_show = [
         'Rank', 'Batter', 'Pitcher', 'HR_Score', 'HR_Tier', 'HR_Score_pctile', 'xhr_diff', 'xhr', 'hr_total',
         'Park', 'City', 'Time', 'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xSLG_14', 'B_xISO_14',
         'B_xwoba_14', 'B_sweet_spot_pct_14', 'B_hardhit_pct_14', 'B_WhiffRate_14',
@@ -763,15 +763,15 @@ rows = []
     ]
     if 'ML_HR_Prob' in df_leaderboard.columns:
         cols_to_show.append('ML_HR_Prob')
-    cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
-    st.dataframe(df_leaderboard[cols_to_show].head(15), use_container_width=True)
-    st.subheader("Top 5 HR Scores")
-    st.bar_chart(df_leaderboard.set_index('Batter')[['HR_Score']].head(5))
-    csv_bytes = df_leaderboard.to_csv(index=False).encode()
-    st.download_button("Download Full Leaderboard as CSV", csv_bytes, file_name="hr_leaderboard.csv")
+cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
+st.dataframe(df_leaderboard[cols_to_show].head(15), use_container_width=True)
+st.subheader("Top 5 HR Scores")
+st.bar_chart(df_leaderboard.set_index('Batter')[['HR_Score']].head(5))
+csv_bytes = df_leaderboard.to_csv(index=False).encode()
+st.download_button("Download Full Leaderboard as CSV", csv_bytes, file_name="hr_leaderboard.csv")
     if error_log:
         with st.expander("⚠️ Errors and Warnings (Click to expand)"):
             for e in error_log[-30:]:
                 st.text(e)
-else:
-    st.info("Upload all 4 files to generate the leaderboard.")
+    else:
+        st.info("Upload all 4 files to generate the leaderboard.")
