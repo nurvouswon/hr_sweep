@@ -189,38 +189,36 @@ def fetch_today_matchups():
             probable_pitcher = game.get(f"{side}ProbablePitcher", {}).get("fullName", "")
             opp_side = "home" if side == "away" else "away"
             opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
-            # Grab lineups, handling both direct and expected keys
-            lineups_obj = game.get("lineups", {})
-            # Choose the right lineup key: 'homePlayers' or 'awayPlayers'
-lineups = game.get("lineups", {})
-if side == "home":
-    batters_list = lineups.get("homePlayers", [])
-elif side == "away":
-    batters_list = lineups.get("awayPlayers", [])
-else:
-    batters_list = []
 
-# Extract batter names and order (use index+1 for batting order if not present)
-batters = [
-    (b.get("fullName", ""), str(idx + 1))
-    for idx, b in enumerate(batters_list)
-    if b.get("fullName")
-]
+            # Extract correct lineup players list
+            lineups = game.get("lineups", {})
+            if side == "home":
+                batters_list = lineups.get("homePlayers", [])
+            elif side == "away":
+                batters_list = lineups.get("awayPlayers", [])
+            else:
+                batters_list = []
+
+            # Parse each batter with batting order based on index
+            batters = [
+                (b.get("fullName", ""), str(idx + 1))
+                for idx, b in enumerate(batters_list)
+                if b.get("fullName")
+            ]
+
             if batters:
                 for batter, batting_order in batters:
-                    if batter:
-                        records.append({
-                            "Batter": batter,
-                            "Pitcher": opp_pitcher,
-                            "Park": park,
-                            "City": city,
-                            "Date": date,
-                            "Time": game_time,
-                            "Team": team,
-                            "BattingOrder": batting_order
-                        })
+                    records.append({
+                        "Batter": batter,
+                        "Pitcher": opp_pitcher,
+                        "Park": park,
+                        "City": city,
+                        "Date": date,
+                        "Time": game_time,
+                        "Team": team,
+                        "BattingOrder": batting_order
+                    })
             else:
-                # No lineup posted for this team
                 records.append({
                     "Batter": "",
                     "Pitcher": opp_pitcher,
@@ -231,8 +229,8 @@ batters = [
                     "Team": team,
                     "BattingOrder": ""
                 })
+
     df = pd.DataFrame(records)
-    # Filter only valid batter rows (lineup is available)
     df = df[df["Batter"] != ""].reset_index(drop=True)
     if df.empty:
         st.warning("No confirmed lineups found for any team. Try again later or refresh just before game time.")
