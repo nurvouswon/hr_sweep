@@ -155,7 +155,6 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 
 # -------------------- Advanced Statcast Functions --------------------
 def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
-def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
     out = {}
     if not batter_id:
         for w in windows:
