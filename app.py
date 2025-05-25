@@ -159,7 +159,9 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 
 # ============ LIVE LINEUP/PITCHER SCRAPE =============
 def fetch_today_matchups():
+def fetch_today_matchups():
     import pytz
+    from datetime import datetime
     today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
     url = (
         f"https://statsapi.mlb.com/api/v1/schedule"
@@ -169,8 +171,14 @@ def fetch_today_matchups():
     if resp.status_code != 200:
         st.error("MLB API not available.")
         return pd.DataFrame()
+
     data = resp.json()
-    games = data.get("dates", [{}])[0].get("games", [])
+    dates = data.get("dates", [])
+    if not dates or not dates[0].get("games"):
+        st.warning("No valid games returned from API. Lineups may not be available yet. Try again closer to game time.")
+        return pd.DataFrame()
+    games = dates[0]["games"]
+
     records = []
     for game in games:
         park = game.get("venue", {}).get("name", "")
@@ -182,10 +190,11 @@ def fetch_today_matchups():
             probable_pitcher = game.get(f"{side}ProbablePitcher", {}).get("fullName", "")
             opp_side = "home" if side == "away" else "away"
             opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
-            lineups = (
-                game.get("lineups", {}).get(side, {})
-                or game.get("lineups", {}).get("expected", {}).get(side, {})
-            )
+            # Grab lineups, handling both direct and expected keys
+            lineups_obj = game.get("lineups", {})
+            lineups = lineups_obj.get(side) or lineups_obj.get("expected", {}).get(side)
+            # DEBUG: You can uncomment next line for troubleshooting
+            # st.write(f"{team} lineups object:", lineups)
             batters = []
             if isinstance(lineups, dict) and "battings" in lineups:
                 batters = [
@@ -211,6 +220,7 @@ def fetch_today_matchups():
                             "BattingOrder": batting_order
                         })
             else:
+                # No lineup posted for this team
                 records.append({
                     "Batter": "",
                     "Pitcher": opp_pitcher,
@@ -222,7 +232,11 @@ def fetch_today_matchups():
                     "BattingOrder": ""
                 })
     df = pd.DataFrame(records)
-    return df[df["Batter"] != ""].reset_index(drop=True)
+    # Filter only valid batter rows (lineup is available)
+    df = df[df["Batter"] != ""].reset_index(drop=True)
+    if df.empty:
+        st.warning("No confirmed lineups found for any team. Try again later or refresh just before game time.")
+    return df
     # ============ Statcast Metric Functions ============
 
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
