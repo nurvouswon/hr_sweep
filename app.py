@@ -746,7 +746,7 @@ df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
 df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
     # ML Model Integration (optional + feature selection)
 df_leaderboard, importances = train_and_apply_model(df_final)
-    if df_leaderboard is None:
+if df_leaderboard is None:
         df_leaderboard = df_final.sort_values("HR_Score", ascending=False).reset_index(drop=True)
         df_leaderboard["Rank"] = df_leaderboard.index + 1
     else:
@@ -761,7 +761,7 @@ cols_to_show = [
         'P_sweet_spot_pct_14', 'P_hardhit_pct_14', 'P_WhiffRate_14', 'P_FF_Spin_14', 'P_FF_Spin_30',
         'Temp', 'Wind', 'WindEffect', 'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost', 'PlatoonWoba', 'PitchMixBoost'
     ]
-    if 'ML_HR_Prob' in df_leaderboard.columns:
+if 'ML_HR_Prob' in df_leaderboard.columns:
         cols_to_show.append('ML_HR_Prob')
 cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
 st.dataframe(df_leaderboard[cols_to_show].head(15), use_container_width=True)
@@ -769,7 +769,7 @@ st.subheader("Top 5 HR Scores")
 st.bar_chart(df_leaderboard.set_index('Batter')[['HR_Score']].head(5))
 csv_bytes = df_leaderboard.to_csv(index=False).encode()
 st.download_button("Download Full Leaderboard as CSV", csv_bytes, file_name="hr_leaderboard.csv")
-    if error_log:
+if error_log:
         with st.expander("⚠️ Errors and Warnings (Click to expand)"):
             for e in error_log[-30:]:
                 st.text(e)
