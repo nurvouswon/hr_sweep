@@ -3,6 +3,37 @@ import pandas as pd
 import numpy as np
 import requests
 import unicodedata
+import statsapi
+
+def fetch_today_lineups():
+    today = datetime.now().strftime('%Y-%m-%d')
+    schedule = statsapi.schedule(date=today, hydrate='probablePitcher,lineups')
+    rows = []
+    for game in schedule:
+        away = game['away_name']
+        home = game['home_name']
+        park = game['venue_name']
+        city = game.get('venue', {}).get('city', '')
+        date = today
+        time = game.get('game_time', '')
+        for side in ['away', 'home']:
+            team = game[f"{side}_name"]
+            probable_sp = game.get(f"{side}_probable_pitcher", '')
+            # Lineup can be missing if not yet announced
+            lineup = game.get(f"{side}_lineup", [])
+            if lineup:
+                for batter in lineup:
+                    rows.append({
+                        'Batter': batter['fullName'],
+                        'BattingOrder': batter.get('battingOrder'),
+                        'Pitcher': probable_sp['fullName'] if isinstance(probable_sp, dict) else probable_sp,
+                        'Park': park,
+                        'City': city,
+                        'Date': date,
+                        'Time': time,
+                        'Team': team
+                    })
+    return pd.DataFrame(rows)
 from datetime import datetime, timedelta
 from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
 from pybaseball.lahman import people
