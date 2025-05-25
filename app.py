@@ -484,7 +484,7 @@ def custom_2025_boost(row):
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
     
-    def calc_hr_score(row):
+def calc_hr_score(row):
         batter_score = (
         norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
         norm_barrel(row.get('B_BarrelRate_7')) * 0.09 +
