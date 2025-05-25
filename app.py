@@ -691,8 +691,8 @@ df_merged = df_upload.merge(
     )
 df_merged['ParkFactor'] = df_merged['Park'].map(park_factors)
 df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations)
-    progress = st.progress(0)
-    rows = []
+progress = st.progress(0)
+rows = []
     for idx, row in df_merged.iterrows():
         try:
             weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
