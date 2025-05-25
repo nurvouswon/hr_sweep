@@ -617,17 +617,16 @@ Upload the following 4 CSV files:
 - **Pitcher Batted-Ball Profile** (with `id`)
 """)
 
-uploaded_file = st.file_uploader("Matchups CSV", type=["csv"])
 xhr_file = st.file_uploader("xHR / HR Regression CSV", type=["csv"])
 battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
 pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
 
-if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
-    df_upload = pd.read_csv(uploaded_file)
-    for col in ['Batter', 'Pitcher', 'City', 'Park', 'Date', 'Time']:
-        if col not in df_upload.columns:
-            st.error(f"Missing required column: {col}")
-            st.stop()
+if xhr_file and battedball_file and pitcher_battedball_file:
+    df_upload = fetch_today_lineups()
+    if df_upload is None or df_upload.empty:
+        st.error("Could not retrieve today's matchups or lineups. Try again closer to game time.")
+        st.stop()
+    
     xhr_df = pd.read_csv(xhr_file)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
     df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
