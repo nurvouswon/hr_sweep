@@ -158,12 +158,10 @@ def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
     out = {}
     if not batter_id:
         for w in windows:
-            out[f"B_BarrelRate_{w}"] = None
-            out[f"B_EV_{w}"] = None
-            out[f"B_SLG_{w}"] = None
-            out[f"B_xSLG_{w}"] = None
-            out[f"B_xISO_{w}"] = None
+            for k in ['B_BarrelRate', 'B_EV', 'B_SLG', 'B_xSLG', 'B_xISO']:
+                out[f"{k}_{w}"] = None
         return out
+
     for w in windows:
         try:
             start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
@@ -171,62 +169,82 @@ def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
             df = cached_statcast_batter(start, end, batter_id)
             df = df[df['type'] == 'X']
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
-            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
-            ev = df['launch_speed'].mean() if len(df) > 0 else None
-            singles = df[df['events'] == 'single'].shape[0]
-            doubles = df[df['events'] == 'double'].shape[0]
-            triples = df[df['events'] == 'triple'].shape[0]
-            hrs = df[df['events'] == 'home_run'].shape[0]
-            outs = df[df['events'].isin(['field_out', 'force_out', 'other_out'])].shape[0]
-            ab = singles + doubles + triples + hrs + outs
-            slg = (singles + 2 * doubles + 3 * triples + 4 * hrs) / ab if ab > 0 else None
-            xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
-            xiso = (xslg - df['estimated_ba_using_speedangle'].mean()) if xslg and 'estimated_ba_using_speedangle' in df.columns else None
+
+            if df.empty:
+                raise ValueError("No batted ball data available")
+
             pa = df.shape[0]
-            out[f"B_BarrelRate_{w}"] = round(barrels / pa, 3) if pa else None
-            out[f"B_EV_{w}"] = round(ev, 1) if ev else None
-            out[f"B_SLG_{w}"] = round(slg, 3) if slg else None
-            out[f"B_xSLG_{w}"] = round(xslg, 3) if xslg else None
-            out[f"B_xISO_{w}"] = round(xiso, 3) if xiso else None
+            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
+            ev = df['launch_speed'].mean()
+
+            # SLG
+            events = df['events'].value_counts().to_dict()
+            ab = sum(events.get(e, 0) for e in ['single', 'double', 'triple', 'home_run', 'field_out', 'force_out', 'other_out'])
+            total_bases = (events.get('single', 0) + 2 * events.get('double', 0) +
+                           3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
+            slg = total_bases / ab if ab > 0 else None
+
+            # Estimated stats
+            xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns and not df['estimated_slg'].isnull().all() else None
+            xba = df['estimated_ba_using_speedangle'].mean() if 'estimated_ba_using_speedangle' in df.columns and not df['estimated_ba_using_speedangle'].isnull().all() else None
+            xiso = xslg - xba if xslg and xba else None
+
+            out[f'B_BarrelRate_{w}'] = round(barrels / pa, 3)
+            out[f'B_EV_{w}'] = round(ev, 1)
+            out[f'B_SLG_{w}'] = round(slg, 3) if slg is not None else None
+            out[f'B_xSLG_{w}'] = round(xslg, 3) if xslg is not None else None
+            out[f'B_xISO_{w}'] = round(xiso, 3) if xiso is not None else None
+
         except Exception as e:
-            error_log.append(f"Batter stat error ({batter_id}, {w}d): {e}")
+            error_log.append(f"Batter stats error ({batter_id}, {w}d): {e}")
+            for k in ['B_BarrelRate', 'B_EV', 'B_SLG', 'B_xSLG', 'B_xISO']:
+                out[f"{k}_{w}"] = None
+
     return out
 
 def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
     out = {}
     if not pitcher_id:
         for w in windows:
-            out[f"P_BarrelRateAllowed_{w}"] = None
-            out[f"P_EVAllowed_{w}"] = None
-            out[f"P_SLG_{w}"] = None
-            out[f"P_xSLG_{w}"] = None
-            out[f"P_xISO_{w}"] = None
+            for k in ['P_BarrelRateAllowed', 'P_EVAllowed', 'P_SLG', 'P_xSLG', 'P_xISO']:
+                out[f"{k}_{w}"] = None
         return out
+
     for w in windows:
         try:
             start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
             end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             df = cached_statcast_pitcher(start, end, pitcher_id)
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
-            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
-            ev = df['launch_speed'].mean() if len(df) > 0 else None
-            singles = df[df['events'] == 'single'].shape[0]
-            doubles = df[df['events'] == 'double'].shape[0]
-            triples = df[df['events'] == 'triple'].shape[0]
-            hrs = df[df['events'] == 'home_run'].shape[0]
-            outs = df[df['events'].isin(['field_out', 'force_out', 'other_out'])].shape[0]
-            ab = singles + doubles + triples + hrs + outs
-            slg = (singles + 2 * doubles + 3 * triples + 4 * hrs) / ab if ab > 0 else None
-            xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns else None
-            xiso = (xslg - df['estimated_ba_using_speedangle'].mean()) if xslg and 'estimated_ba_using_speedangle' in df.columns else None
+
+            if df.empty:
+                raise ValueError("No contact data available")
+
             total = len(df)
-            out[f"P_BarrelRateAllowed_{w}"] = round(barrels / total, 3) if total else None
-            out[f"P_EVAllowed_{w}"] = round(ev, 1) if ev else None
-            out[f"P_SLG_{w}"] = round(slg, 3) if slg else None
-            out[f"P_xSLG_{w}"] = round(xslg, 3) if xslg else None
-            out[f"P_xISO_{w}"] = round(xiso, 3) if xiso else None
+            barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
+            ev = df['launch_speed'].mean()
+
+            events = df['events'].value_counts().to_dict()
+            ab = sum(events.get(e, 0) for e in ['single', 'double', 'triple', 'home_run', 'field_out', 'force_out', 'other_out'])
+            total_bases = (events.get('single', 0) + 2 * events.get('double', 0) +
+                           3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
+            slg = total_bases / ab if ab > 0 else None
+
+            xslg = df['estimated_slg'].mean() if 'estimated_slg' in df.columns and not df['estimated_slg'].isnull().all() else None
+            xba = df['estimated_ba_using_speedangle'].mean() if 'estimated_ba_using_speedangle' in df.columns and not df['estimated_ba_using_speedangle'].isnull().all() else None
+            xiso = xslg - xba if xslg and xba else None
+
+            out[f'P_BarrelRateAllowed_{w}'] = round(barrels / total, 3)
+            out[f'P_EVAllowed_{w}'] = round(ev, 1)
+            out[f'P_SLG_{w}'] = round(slg, 3) if slg is not None else None
+            out[f'P_xSLG_{w}'] = round(xslg, 3) if xslg is not None else None
+            out[f'P_xISO_{w}'] = round(xiso, 3) if xiso is not None else None
+
         except Exception as e:
-            error_log.append(f"Pitcher stat error ({pitcher_id}, {w}d): {e}")
+            error_log.append(f"Pitcher stats error ({pitcher_id}, {w}d): {e}")
+            for k in ['P_BarrelRateAllowed', 'P_EVAllowed', 'P_SLG', 'P_xSLG', 'P_xISO']:
+                out[f"{k}_{w}"] = None
+
     return out
 
 # -------------------- Velocity Drift/Trend Tracking --------------------
