@@ -155,10 +155,11 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 
 # -------------------- Advanced Statcast Functions --------------------
 def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
+def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
     out = {}
     if not batter_id:
         for w in windows:
-            for k in ['B_BarrelRate', 'B_EV', 'B_SLG', 'B_xSLG', 'B_xISO']:
+            for k in ['B_BarrelRate', 'B_EV', 'B_SLG', 'B_xSLG', 'B_xISO', 'B_xwoba', 'B_sweet_spot_pct', 'B_hardhit_pct']:
                 out[f"{k}_{w}"] = None
         return out
 
@@ -171,11 +172,12 @@ def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
             if df.empty:
                 raise ValueError("No batted ball data")
+
             pa = df.shape[0]
             barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
             ev = df['launch_speed'].mean()
 
-            # --- Replicate xSLG/xISO calculation ---
+            # Derived stats
             single = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'] < 15)].shape[0]
             double = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'].between(15, 30))].shape[0]
             triple = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
@@ -185,22 +187,31 @@ def get_batter_stats_multi(batter_id, windows=[3, 5, 7, 14]):
             xba = df['estimated_ba_using_speedangle'].mean() if 'estimated_ba_using_speedangle' in df.columns else None
             xiso = (xslg - xba) if xslg and xba else None
 
-            # SLG (actual results)
+            # Actual SLG
             events = df['events'].value_counts().to_dict()
             ab2 = sum(events.get(e, 0) for e in ['single', 'double', 'triple', 'home_run', 'field_out', 'force_out', 'other_out'])
             total_bases = (events.get('single', 0) + 2 * events.get('double', 0) +
                            3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
             slg = total_bases / ab2 if ab2 > 0 else None
 
+            # New: xwOBA, sweet spot %, hard hit %
+            xwoba = df['woba_value'].mean() if 'woba_value' in df.columns else None
+            sweet_spot_pct = df[(df['launch_angle'].between(8, 32))].shape[0] / pa if pa > 0 else None
+            hard_hit_pct = df[(df['launch_speed'] >= 95)].shape[0] / pa if pa > 0 else None
+
+            # Store results
             out[f'B_BarrelRate_{w}'] = round(barrels / pa, 3)
             out[f'B_EV_{w}'] = round(ev, 1)
             out[f'B_SLG_{w}'] = round(slg, 3) if slg is not None else None
             out[f'B_xSLG_{w}'] = round(xslg, 3) if xslg is not None else None
             out[f'B_xISO_{w}'] = round(xiso, 3) if xiso is not None else None
+            out[f'B_xwoba_{w}'] = round(xwoba, 3) if xwoba is not None else None
+            out[f'B_sweet_spot_pct_{w}'] = round(sweet_spot_pct, 3) if sweet_spot_pct is not None else None
+            out[f'B_hardhit_pct_{w}'] = round(hard_hit_pct, 3) if hard_hit_pct is not None else None
 
         except Exception as e:
             error_log.append(f"Batter stats error ({batter_id}, {w}d): {e}")
-            for k in ['B_BarrelRate', 'B_EV', 'B_SLG', 'B_xSLG', 'B_xISO']:
+            for k in ['B_BarrelRate', 'B_EV', 'B_SLG', 'B_xSLG', 'B_xISO', 'B_xwoba', 'B_sweet_spot_pct', 'B_hardhit_pct']:
                 out[f"{k}_{w}"] = None
 
     return out
@@ -209,7 +220,7 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
     out = {}
     if not pitcher_id:
         for w in windows:
-            for k in ['P_BarrelRateAllowed', 'P_EVAllowed', 'P_SLG', 'P_xSLG', 'P_xISO']:
+            for k in ['P_BarrelRateAllowed', 'P_EVAllowed', 'P_SLG', 'P_xSLG', 'P_xISO', 'P_xwoba', 'P_sweet_spot_pct', 'P_hardhit_pct']:
                 out[f"{k}_{w}"] = None
         return out
 
@@ -221,11 +232,11 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
             df = df[df['launch_speed'].notnull() & df['launch_angle'].notnull()]
             if df.empty:
                 raise ValueError("No batted ball data")
-            total = len(df)
+
+            total = df.shape[0]
             barrels = df[(df['launch_speed'] > 95) & (df['launch_angle'].between(20, 35))].shape[0]
             ev = df['launch_speed'].mean()
 
-            # --- Replicate xSLG/xISO calculation ---
             single = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'] < 15)].shape[0]
             double = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'].between(15, 30))].shape[0]
             triple = df[(df.get('estimated_ba_using_speedangle', 0) >= 0.5) & (df['launch_angle'].between(30, 40))].shape[0]
@@ -235,22 +246,28 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3, 5, 7, 14]):
             xba = df['estimated_ba_using_speedangle'].mean() if 'estimated_ba_using_speedangle' in df.columns else None
             xiso = (xslg - xba) if xslg and xba else None
 
-            # SLG (actual results)
             events = df['events'].value_counts().to_dict()
             ab2 = sum(events.get(e, 0) for e in ['single', 'double', 'triple', 'home_run', 'field_out', 'force_out', 'other_out'])
             total_bases = (events.get('single', 0) + 2 * events.get('double', 0) +
                            3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
             slg = total_bases / ab2 if ab2 > 0 else None
 
+            xwoba = df['woba_value'].mean() if 'woba_value' in df.columns else None
+            sweet_spot_pct = df[(df['launch_angle'].between(8, 32))].shape[0] / total if total > 0 else None
+            hard_hit_pct = df[(df['launch_speed'] >= 95)].shape[0] / total if total > 0 else None
+
             out[f'P_BarrelRateAllowed_{w}'] = round(barrels / total, 3)
             out[f'P_EVAllowed_{w}'] = round(ev, 1)
             out[f'P_SLG_{w}'] = round(slg, 3) if slg is not None else None
             out[f'P_xSLG_{w}'] = round(xslg, 3) if xslg is not None else None
             out[f'P_xISO_{w}'] = round(xiso, 3) if xiso is not None else None
+            out[f'P_xwoba_{w}'] = round(xwoba, 3) if xwoba is not None else None
+            out[f'P_sweet_spot_pct_{w}'] = round(sweet_spot_pct, 3) if sweet_spot_pct is not None else None
+            out[f'P_hardhit_pct_{w}'] = round(hard_hit_pct, 3) if hard_hit_pct is not None else None
 
         except Exception as e:
             error_log.append(f"Pitcher stats error ({pitcher_id}, {w}d): {e}")
-            for k in ['P_BarrelRateAllowed', 'P_EVAllowed', 'P_SLG', 'P_xSLG', 'P_xISO']:
+            for k in ['P_BarrelRateAllowed', 'P_EVAllowed', 'P_SLG', 'P_xSLG', 'P_xISO', 'P_xwoba', 'P_sweet_spot_pct', 'P_hardhit_pct']:
                 out[f"{k}_{w}"] = None
 
     return out
