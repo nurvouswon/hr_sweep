@@ -485,7 +485,7 @@ def custom_2025_boost(row):
     return bonus
     
 def calc_hr_score(row):
-        batter_score = (
+    batter_score = (
         norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
         norm_barrel(row.get('B_BarrelRate_7')) * 0.09 +
         norm_barrel(row.get('B_BarrelRate_5')) * 0.07 +
@@ -515,7 +515,7 @@ def calc_hr_score(row):
         (row.get('B_xISO_14') or 0) * 0.04
     )
 
-        pitcher_score = (
+    pitcher_score = (
         norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
         norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
         norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
