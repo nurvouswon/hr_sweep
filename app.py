@@ -3,37 +3,54 @@ import pandas as pd
 import numpy as np
 import requests
 import unicodedata
-import statsapi
 
 def fetch_today_lineups():
     today = datetime.now().strftime('%Y-%m-%d')
-    schedule = statsapi.schedule(date=today, hydrate='probablePitcher,lineups')
+    url = (
+        f"https://statsapi.mlb.com/api/v1/schedule"
+        f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue"
+    )
+    resp = requests.get(url)
+    if resp.status_code != 200:
+        st.error("Could not fetch today's MLB lineup data.")
+        return None
+    data = resp.json()
+    if not data.get('dates'):
+        st.warning("No MLB games scheduled for today.")
+        return None
     rows = []
-    for game in schedule:
-        away = game['away_name']
-        home = game['home_name']
-        park = game['venue_name']
-        city = game.get('venue', {}).get('city', '')
-        date = today
-        time = game.get('game_time', '')
-        for side in ['away', 'home']:
-            team = game[f"{side}_name"]
-            probable_sp = game.get(f"{side}_probable_pitcher", '')
-            # Lineup can be missing if not yet announced
-            lineup = game.get(f"{side}_lineup", [])
-            if lineup:
-                for batter in lineup:
-                    rows.append({
-                        'Batter': batter['fullName'],
-                        'BattingOrder': batter.get('battingOrder'),
-                        'Pitcher': probable_sp['fullName'] if isinstance(probable_sp, dict) else probable_sp,
-                        'Park': park,
-                        'City': city,
-                        'Date': date,
-                        'Time': time,
-                        'Team': team
-                    })
+    for d in data['dates']:
+        for game in d.get('games', []):
+            park = game.get('venue', {}).get('name', '')
+            city = game.get('venue', {}).get('city', '')
+            date = today
+            time = game.get('gameDate', '')[11:16]
+            for side in ['away', 'home']:
+                team = game[f"{side}Team"]['team'].get('name', '')
+                sp = game.get(f"{side}ProbablePitcher", {})
+                pitcher = sp.get('fullName') if sp else None
+                lineup_list = game.get('lineups', {})
+                side_list = lineup_list.get(side, [])
+                if side_list:
+                    for batter in side_list:
+                        rows.append({
+                            'Batter': batter.get('fullName'),
+                            'Pitcher': pitcher,
+                            'Park': park,
+                            'City': city,
+                            'Date': date,
+                            'Time': time,
+                            'Team': team
+                        })
     return pd.DataFrame(rows)
+
+# 2. Replace manual upload in your UI:
+if xhr_file and battedball_file and pitcher_battedball_file:
+    df_upload = fetch_today_lineups()
+    if df_upload is None or df_upload.empty:
+        st.error("Lineups not available yet. MLB typically publishes lineups 1-3 hours before first pitch.")
+        st.stop()
+    # Proceed with your normal pipeline, using df_upload
 from datetime import datetime, timedelta
 from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
 from pybaseball.lahman import people
