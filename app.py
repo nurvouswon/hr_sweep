@@ -515,7 +515,7 @@ def calc_hr_score(row):
         (row.get('B_xISO_14') or 0) * 0.04
     )
 
-    pitcher_score = (
+        pitcher_score = (
         norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
         norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
         norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
