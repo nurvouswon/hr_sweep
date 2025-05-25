@@ -689,8 +689,8 @@ df_merged = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
     )
-    df_merged['ParkFactor'] = df_merged['Park'].map(park_factors)
-    df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations)
+df_merged['ParkFactor'] = df_merged['Park'].map(park_factors)
+df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations)
     progress = st.progress(0)
     rows = []
     for idx, row in df_merged.iterrows():
