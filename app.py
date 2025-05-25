@@ -191,7 +191,8 @@ def fetch_today_matchups():
             opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
             # Grab lineups, handling both direct and expected keys
             lineups_obj = game.get("lineups", {})
-            lineups = lineups_obj.get(side) or lineups_obj.get("expected", {}).get(side)
+            lineups = (game.get("lineups", {}).get(side) or game.get("lineups", {}).get("expected", {}).get(side) or game.get("gameInfo", {}).get("lineups", {}).get(side) or game.get("gameInfo", {}).get("expectedLineups", {}).get(side) or {}
+)
             # DEBUG: You can uncomment next line for troubleshooting
             # st.write(f"{team} lineups object:", lineups)
             batters = []
