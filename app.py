@@ -668,7 +668,7 @@ if __name__ == "__main__":
                 rows.append(record)
             except Exception as e:
                 log_error(f"Row error ({row['Batter']} vs {row['Pitcher']})", e)
-            progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
+            progress.progress(min(1.0, (idx + 1) / max(1, len(df_merged))), text=f"Processing {int(100 * (idx + 1) / max(1, len(df_merged)))}%")
         df_final = pd.DataFrame(rows)
         # Merge batted ball CSVs
         batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
