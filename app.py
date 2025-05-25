@@ -81,6 +81,9 @@ def fetch_today_matchups():
     return df[df["Batter"] != ""].reset_index(drop=True)
 
 # 2. Replace manual upload in your UI:
+xhr_file = st.file_uploader("xHR / HR Regression CSV", type=["csv"])
+battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
+pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
 if xhr_file and battedball_file and pitcher_battedball_file:
     df_upload = fetch_today_lineups()
     if df_upload is None or df_upload.empty:
