@@ -196,16 +196,16 @@ def fetch_today_matchups():
             # DEBUG: You can uncomment next line for troubleshooting
             # st.write(f"{team} lineups object:", lineups)
             batters = []
-            if isinstance(lineups, dict) and "battings" in lineups:
-                batters = [
-                    (entry.get("batter", {}).get("fullName", ""), entry.get("battingOrder", ""))
-                    for entry in lineups.get("battings", [])
-                ]
-            elif isinstance(lineups, list):
-                batters = [
-                    (b.get("batter", {}).get("fullName", ""), b.get("battingOrder", ""))
-                    for b in lineups
-                ]
+if isinstance(lineups, dict) and "battings" in lineups:
+    batters = [
+        (entry.get("batter", {}).get("fullName", ""), entry.get("battingOrder", ""))
+        for entry in lineups.get("battings", [])
+    ]
+elif isinstance(lineups, list):
+    batters = [
+        (b.get("batter", {}).get("fullName", ""), b.get("battingOrder", ""))
+        for b in lineups
+    ]
             if batters:
                 for batter, batting_order in batters:
                     if batter:
