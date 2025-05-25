@@ -4,7 +4,6 @@ import numpy as np
 import requests
 import unicodedata
 
-def fetch_today_lineups():
 def fetch_today_matchups():
     """
     Fetches today's MLB games with probable starting pitchers and lineups (if posted).
