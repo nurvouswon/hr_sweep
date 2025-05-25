@@ -12,6 +12,35 @@ from sklearn.feature_selection import SelectFromModel
 API_KEY = st.secrets["weather"]["api_key"]
 error_log = []
 
+def train_and_apply_model(df):
+    # Only use numeric columns, drop NAs
+    features = [
+        'HR_Score','B_BarrelRate_14','B_EV_14','B_SLG_14','B_xSLG_14','B_xISO_14',
+        'B_xwoba_14','B_sweet_spot_pct_14','B_hardhit_pct_14','B_WhiffRate_14',
+        'P_BarrelRateAllowed_14','P_EVAllowed_14','P_SLG_14','P_xSLG_14','P_xISO_14',
+        'P_xwoba_14','P_sweet_spot_pct_14','P_hardhit_pct_14','P_WhiffRate_14',
+        'P_FF_Spin_14','P_FF_Spin_30','Temp','Wind','ParkFactor','BattedBallScore',
+        'PitcherBBScore','CustomBoost','PlatoonWoba','PitchMixBoost'
+    ]
+    df_model = df.copy()
+    for col in features:
+        if col not in df_model.columns:
+            df_model[col] = 0
+    df_model = df_model.fillna(0)
+    X = df_model[features]
+    # Generate pseudo-labels for ranking - here, use HR_Score as target (or use real labels if you have)
+    y = df_model['HR_Score'].rank(pct=True)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.15, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train > 0.5)  # Classify top 50% as "1"
+    # Feature importances
+    importances = dict(zip(features, model.feature_importances_))
+    # Apply to all
+    df['ML_HR_Prob'] = model.predict_proba(X)[:,1]
+    leaderboard = df.sort_values('ML_HR_Prob', ascending=False).reset_index(drop=True)
+    leaderboard['Rank'] = leaderboard.index + 1
+    return leaderboard, importances
+
 # ============ Error Logging =============
 def log_error(context, exception, level="ERROR"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
