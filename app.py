@@ -159,7 +159,6 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 
 # ============ LIVE LINEUP/PITCHER SCRAPE =============
 def fetch_today_matchups():
-def fetch_today_matchups():
     import pytz
     from datetime import datetime
     today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
