@@ -464,10 +464,19 @@ def calc_hr_score(row):
         (row.get('B_xSLG_14') or 0) * 0.08 +
         (row.get('B_xISO_14') or 0) * 0.06 +
         (row.get('B_xwoba_14') or 0) * 0.09 +
+        (row.get('B_xwoba_7') or 0) * 0.05 +
+        (row.get('B_xwoba_5') or 0) * 0.03 +
+        (row.get('B_xwoba_3') or 0) * 0.02 +
         (row.get('B_sweet_spot_pct_14') or 0) * 0.03 +
-        (row.get('B_gbfb_14') or 0) * 0.01 +
-        (row.get('B_hardhit_pct_14') or 0) * 0.02
+        (row.get('B_sweet_spot_pct_7') or 0) * 0.02 +
+        (row.get('B_sweet_spot_pct_5') or 0) * 0.01 +
+        (row.get('B_sweet_spot_pct_3') or 0) * 0.01 +
+        (row.get('B_hardhit_pct_14') or 0) * 0.02 +
+        (row.get('B_hardhit_pct_7') or 0) * 0.015 +
+        (row.get('B_hardhit_pct_5') or 0) * 0.01 +
+        (row.get('B_hardhit_pct_3') or 0) * 0.005
     )
+
     pitcher_score = (
         norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
         norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
@@ -481,15 +490,25 @@ def calc_hr_score(row):
         -(row.get('P_xSLG_14') or 0) * 0.06 +
         -(row.get('P_xISO_14') or 0) * 0.05 +
         -(row.get('P_xwoba_14') or 0) * 0.05 +
+        -(row.get('P_xwoba_7') or 0) * 0.03 +
+        -(row.get('P_xwoba_5') or 0) * 0.02 +
+        -(row.get('P_xwoba_3') or 0) * 0.01 +
         -(row.get('P_sweet_spot_pct_14') or 0) * 0.02 +
-        -(row.get('P_gbfb_14') or 0) * 0.01 +
-        -(row.get('P_hardhit_pct_14') or 0) * 0.02
+        -(row.get('P_sweet_spot_pct_7') or 0) * 0.01 +
+        -(row.get('P_sweet_spot_pct_5') or 0) * 0.01 +
+        -(row.get('P_sweet_spot_pct_3') or 0) * 0.005 +
+        -(row.get('P_hardhit_pct_14') or 0) * 0.02 +
+        -(row.get('P_hardhit_pct_7') or 0) * 0.015 +
+        -(row.get('P_hardhit_pct_5') or 0) * 0.01 +
+        -(row.get('P_hardhit_pct_3') or 0) * 0.005
     )
+
     park_score = norm_park(row.get('ParkFactor', 1.0)) * 0.10
     weather_score = norm_weather(row.get('Temp'), row.get('Wind'), row.get('WindEffect')) * 0.15
     regression_score = max(0, min((row.get('xhr_diff', 0) or 0) / 5, 0.12))
     platoon_score = ((row.get('PlatoonWoba') or 0.320) - 0.320) * 0.1
     pitchtype_boost = row.get("PitchMixBoost", 0)
+
     return round(
         batter_score + pitcher_score + park_score + weather_score +
         regression_score + row.get('BattedBallScore', 0) + row.get('PitcherBBScore', 0) +
