@@ -382,6 +382,7 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
 # --- Custom 2025 Environment Boosts ---
 def custom_2025_boost(row):
     bonus = 0
+    if row.get('Park') == 'Sutter Health Park' and row.get('WindEffect') == 'out': bonus += 0.02
     if row.get('Park') == 'Citi Field': bonus += 0.025
     if row.get('Park') == 'Comerica Park': bonus += 0.02
     if row.get('Park') == 'Wrigley Field' and row.get('WindEffect') == 'out': bonus += 0.03
