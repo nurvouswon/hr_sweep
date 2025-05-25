@@ -681,7 +681,7 @@ if df_upload is None or df_upload.empty:
         st.stop()
     
 xhr_df = pd.read_csv(xhr_file)
-    xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
+xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
     df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
     df_upload['batter_id'] = df_upload['Batter'].apply(get_player_id)
     df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
