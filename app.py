@@ -91,6 +91,8 @@ def get_player_id(name):
         info = cached_playerid_lookup(last, first)
         if not info.empty:
             return int(info.iloc[0]['key_mlbam'])
+        else:
+            log_error("Player ID lookup", f"No match found for: {first} {last}")
     except Exception as e:
         log_error("Player ID lookup", e)
     return None
