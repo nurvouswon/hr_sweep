@@ -221,51 +221,74 @@ def fetch_today_matchups():
         if records:
             return pd.DataFrame(records)
     except Exception as e:
-        print(f"MLB API schedule fetch failed: {e}")
-
-    # 2. Fallback: Scrape MLB.com lineups page for today (slower, but works when API fails)
+      def fetch_today_matchups():
+    import pytz
+    from datetime import datetime
+    today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
+    url = (
+        f"https://statsapi.mlb.com/api/v1/schedule"
+        f"?sportId=1&date={today}&hydrate=probablePitcher,team,venue,lineups"
+    )
     try:
-        # MLB.com lineups page lists all games; parse for today
-        lineups_url = "https://www.mlb.com/lineups"
-        soup = BeautifulSoup(requests.get(lineups_url, timeout=10).text, "html.parser")
-        game_blocks = soup.find_all("div", class_="lineup__game")
-        for block in game_blocks:
-            teams = block.find_all("span", class_="lineup__abbr")
-            parks = block.find_all("span", class_="lineup__venue")
-            times = block.find_all("span", class_="lineup__time")
-            lineups = block.find_all("ul", class_="lineup__list")
-            if len(teams) == 2 and len(lineups) == 2:
-                for idx, (team_tag, lineup_tag) in enumerate(zip(teams, lineups)):
-                    team = team_tag.get_text(strip=True)
-                    park = parks[0].get_text(strip=True) if parks else ""
-                    city = ""
-                    game_time = times[0].get_text(strip=True) if times else ""
-                    batters = [
-                        (li.get_text(strip=True), str(i+1))
-                        for i, li in enumerate(lineup_tag.find_all("li"))
-                    ]
-                    pitcher = ""  # MLB.com lineups page doesn’t always post pitchers
-                    opp_idx = 1 - idx
-                    opp_pitcher = ""
-                    for batter, batting_order in batters:
+        resp = requests.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        st.error(f"Failed to fetch MLB schedule: {e}")
+        return pd.DataFrame()
+
+    games = data.get("dates", [{}])[0].get("games", [])
+    if not games:
+        st.warning("No games found for today. Try again later.")
+        return pd.DataFrame()
+
+    records = []
+    for game in games:
+        park = game.get("venue", {}).get("name", "")
+        city = game.get("venue", {}).get("city", "")
+        date = today
+        game_time = game.get("gameDate", "")[11:16]
+        for side in ["away", "home"]:
+            team_data = game.get(f"{side}Team", {})
+            pitcher_data = game.get(f"{side}ProbablePitcher", {})
+            team = team_data.get("team", {}).get("name", "")
+            pitcher = pitcher_data.get("fullName", "")
+            # Try to get the lineup if present
+            lineups = game.get("lineups", {}).get(side, {}).get("battings", [])
+
+            if lineups:
+                for entry in lineups:
+                    batter = entry.get("batter", {}).get("fullName", "")
+                    batting_order = entry.get("battingOrder", "")
+                    if batter:
                         records.append({
                             "Batter": batter,
-                            "Pitcher": opp_pitcher,
+                            "Pitcher": pitcher,
                             "Park": park,
                             "City": city,
-                            "Date": today,
+                            "Date": date,
                             "Time": game_time,
                             "Team": team,
                             "BattingOrder": batting_order
                         })
-        if records:
-            return pd.DataFrame(records)
-    except Exception as e:
-        print(f"MLB.com fallback fetch failed: {e}")
+            else:
+                # No lineup posted, still include the team and pitcher for debugging
+                records.append({
+                    "Batter": "",
+                    "Pitcher": pitcher,
+                    "Park": park,
+                    "City": city,
+                    "Date": date,
+                    "Time": game_time,
+                    "Team": team,
+                    "BattingOrder": ""
+                })
 
-    # 3. If both fail, return empty DataFrame
-    return pd.DataFrame(columns=["Batter","Pitcher","Park","City","Date","Time","Team","BattingOrder"])
-
+    df = pd.DataFrame(records)
+    df = df[df["Batter"] != ""].reset_index(drop=True)
+    if df.empty:
+        st.warning("Lineups not yet available. Try again closer to game time.")
+    return df
 # ---- ADVANCED STATCAST/STAT METRICS ----
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
