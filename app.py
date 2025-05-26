@@ -676,7 +676,10 @@ if __name__ == "__main__":
     xhr_df = pd.read_csv(xhr_file)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
     df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
-    df_upload['batter_id'] = df_upload['Batter'].apply(get_player_id)
+    df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
+    df_upload['norm_pitcher'] = df_upload['Pitcher'].apply(normalize_name)
+    df_upload['batter_id'] = df_upload['norm_batter'].apply(get_player_id)
+    df_upload['pitcher_id'] = df_upload['norm_pitcher'].apply(get_player_id)
     df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
 
     df_merged = df_upload.merge(
