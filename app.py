@@ -741,10 +741,10 @@ if __name__ == "__main__":
         missing_pitchers = df_final[df_final['pitcher_id'].isnull()]
         missing_batters = df_final[df_final['batter_id'].isnull()]
         st.warning(f"Missing pitcher IDs: {len(missing_pitchers)} | Missing batter IDs: {len(missing_batters)}")
-        if not missing_pitchers.empty:
+            if not missing_pitchers.empty:
         st.subheader("Pitchers not matched:")
         st.dataframe(missing_pitchers[['Pitcher']].drop_duplicates(), use_container_width=True)
-        if not missing_batters.empty:
+            if not missing_batters.empty:
         st.subheader("Batters not matched:")
         st.dataframe(missing_batters[['Batter']].drop_duplicates(), use_container_width=True)
         # Merge batted ball CSVs
