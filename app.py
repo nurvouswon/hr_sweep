@@ -166,12 +166,10 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 def fetch_today_matchups():
     import pytz
     from datetime import datetime
-    import time
-
     today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
     url = (
         f"https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={today}&hydrate=probablePitcher(lineups,person,stats),lineups,team,venue"
+        f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue,team,person"
     )
     resp = requests.get(url)
     if resp.status_code != 200:
@@ -181,7 +179,7 @@ def fetch_today_matchups():
     data = resp.json()
     dates = data.get("dates", [])
     if not dates or not dates[0].get("games"):
-        st.warning("No valid games returned from API. Lineups may not be available yet. Try again closer to game time.")
+        st.warning("No valid games returned from API. Try again closer to game time.")
         return pd.DataFrame()
     games = dates[0]["games"]
 
@@ -189,81 +187,65 @@ def fetch_today_matchups():
     for game in games:
         park = game.get("venue", {}).get("name", "")
         city = game.get("venue", {}).get("city", "")
-        date_str = today
+        date = today
         game_time = game.get("gameDate", "")[11:16]
-        # Get probable pitchers
-        home_pitcher = (game.get("teams", {})
-                        .get("home", {}).get("probablePitcher", {})
-                        .get("fullName", ""))
-        away_pitcher = (game.get("teams", {})
-                        .get("away", {}).get("probablePitcher", {})
-                        .get("fullName", ""))
-        # Home/away teams
-        home_team = game.get("teams", {}).get("home", {}).get("team", {}).get("name", "")
-        away_team = game.get("teams", {}).get("away", {}).get("team", {}).get("name", "")
-        # Try to get posted lineups, else fallback to expected players
-        for side, pitcher, team in [
-            ("home", away_pitcher, home_team),
-            ("away", home_pitcher, away_team)
-        ]:
-            lineup_players = []
-            # Confirmed lineups
-            try:
-                players = (game.get("lineups", {})
-                           .get(side, {}).get("players", []))
-                if not players:  # Fallback: expectedLineups (API sometimes uses this)
-                    players = (game.get("expectedLineups", {})
-                               .get(side, {}).get("players", []))
-                if not players:  # Sometimes it's a list not a dict
-                    players = (game.get("lineups", {}).get(side) or
-                               game.get("expectedLineups", {}).get(side) or [])
-                # players may still be an empty list
-                if isinstance(players, dict):
-                    players = list(players.values())
-                lineup_players = [
-                    (b.get("fullName", ""), str(b.get("battingOrder", idx + 1)))
-                    for idx, b in enumerate(players)
-                    if b.get("fullName")
+        for side in ["away", "home"]:
+            team = game.get(f"{side}Team", {}).get("team", {}).get("name", "")
+            probable_pitcher = game.get(f"{side}ProbablePitcher", {}).get("fullName", "")
+            opp_side = "home" if side == "away" else "away"
+            opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
+            # Try ALL places for lineups
+            lineups_obj = (
+                game.get("lineups", {}).get(side)
+                or game.get("lineups", {}).get("expected", {}).get(side)
+                or game.get("gameInfo", {}).get("lineups", {}).get(side)
+                or game.get("gameInfo", {}).get("expectedLineups", {}).get(side)
+                or {}
+            )
+            # Try new/old styles
+            batters = []
+            if isinstance(lineups_obj, dict) and "battings" in lineups_obj:
+                batters = [
+                    (entry.get("batter", {}).get("fullName", ""), entry.get("battingOrder", ""))
+                    for entry in lineups_obj.get("battings", [])
                 ]
-            except Exception:
-                lineup_players = []
-
-            # If no lineup, try team roster for placeholder (rare)
-            if not lineup_players:
-                # fallback, but don't recommend for production: leave blank or set dummy
-                lineup_players = []
-
-            # Add rows
-            if lineup_players:
-                for batter, batting_order in lineup_players:
-                    records.append({
-                        "Batter": batter,
-                        "Pitcher": pitcher,
-                        "Park": park,
-                        "City": city,
-                        "Date": date_str,
-                        "Time": game_time,
-                        "Team": team,
-                        "BattingOrder": batting_order
-                    })
+            elif isinstance(lineups_obj, list):
+                batters = [
+                    (b.get("batter", {}).get("fullName", ""), b.get("battingOrder", ""))
+                    for b in lineups_obj
+                ]
+            # Fallback: If lineups missing, use empty batter and just post matchup/pitcher
+            if batters:
+                for batter, batting_order in batters:
+                    if batter:
+                        records.append({
+                            "Batter": batter,
+                            "Pitcher": opp_pitcher,
+                            "Park": park,
+                            "City": city,
+                            "Date": date,
+                            "Time": game_time,
+                            "Team": team,
+                            "BattingOrder": batting_order
+                        })
             else:
-                # If no batters posted, create placeholder row (so you see pitcher in output)
+                # No lineup, just fill matchup (for every spot, add empty batter)
                 records.append({
                     "Batter": "",
-                    "Pitcher": pitcher,
+                    "Pitcher": opp_pitcher,
                     "Park": park,
                     "City": city,
-                    "Date": date_str,
+                    "Date": date,
                     "Time": game_time,
                     "Team": team,
                     "BattingOrder": ""
                 })
 
     df = pd.DataFrame(records)
-    df = df[df["Batter"] != ""].reset_index(drop=True)
-    if df.empty:
-        st.warning("No confirmed lineups found for any team. Try again later or refresh just before game time.")
+    # Show even if just probable pitcher
+    df = df.reset_index(drop=True)
     return df
+
     
 # ---- ADVANCED STATCAST/STAT METRICS ----
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
