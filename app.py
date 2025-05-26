@@ -164,65 +164,6 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 
 # ---- FETCH TODAY'S MATCHUPS ----
 def fetch_today_matchups():
-    """
-    Robust MLB schedule and lineup fetch with MLB API and HTML fallback.
-    Returns DataFrame with confirmed batter-pitcher matchups for today.
-    """
-    records = []
-    today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
-
-    # 1. Try MLB stats API for schedule, probable pitchers, and lineups
-    try:
-        url = (
-            f"https://statsapi.mlb.com/api/v1/schedule"
-            f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue,team,person"
-        )
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        games = data.get("dates", [{}])[0].get("games", [])
-        for game in games:
-            park = game.get("venue", {}).get("name", "")
-            city = game.get("venue", {}).get("city", "")
-            date = today
-            game_time = game.get("gameDate", "")[11:16]
-            for side in ["home", "away"]:
-                team = game.get(f"{side}Team", {}).get("team", {}).get("name", "")
-                probable_pitcher = game.get(f"{side}ProbablePitcher", {}).get("fullName", "")
-                opp_side = "away" if side == "home" else "home"
-                opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
-                lineups = game.get("lineups", {})
-                players = []
-                # MLB API sometimes has different keys for players depending on lineup posted
-                if isinstance(lineups, dict):
-                    if side == "home":
-                        players = lineups.get("homePlayers", []) or lineups.get("home", [])
-                    else:
-                        players = lineups.get("awayPlayers", []) or lineups.get("away", [])
-                # Parse batters
-                batters = [
-                    (b.get("fullName", ""), str(idx + 1))
-                    for idx, b in enumerate(players)
-                    if b.get("fullName")
-                ]
-                # If no posted lineups, just skip
-                if batters:
-                    for batter, batting_order in batters:
-                        records.append({
-                            "Batter": batter,
-                            "Pitcher": opp_pitcher,
-                            "Park": park,
-                            "City": city,
-                            "Date": date,
-                            "Time": game_time,
-                            "Team": team,
-                            "BattingOrder": batting_order
-                        })
-        if records:
-            return pd.DataFrame(records)
-            except Exception as e:
-        
-def fetch_today_matchups():
     import pytz
     from datetime import datetime
     today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
