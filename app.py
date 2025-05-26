@@ -166,61 +166,94 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 def fetch_today_matchups():
     import pytz
     from datetime import datetime
+    import time
+
     today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
     url = (
         f"https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={today}&hydrate=probablePitcher,team,venue,lineups"
+        f"?sportId=1&date={today}&hydrate=probablePitcher(lineups,person,stats),lineups,team,venue"
     )
-    try:
-        resp = requests.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        st.error(f"Failed to fetch MLB schedule: {e}")
+    resp = requests.get(url)
+    if resp.status_code != 200:
+        st.error("MLB API not available.")
         return pd.DataFrame()
 
-    games = data.get("dates", [{}])[0].get("games", [])
-    if not games:
-        st.warning("No games found for today. Try again later.")
+    data = resp.json()
+    dates = data.get("dates", [])
+    if not dates or not dates[0].get("games"):
+        st.warning("No valid games returned from API. Lineups may not be available yet. Try again closer to game time.")
         return pd.DataFrame()
+    games = dates[0]["games"]
 
     records = []
     for game in games:
         park = game.get("venue", {}).get("name", "")
         city = game.get("venue", {}).get("city", "")
-        date = today
+        date_str = today
         game_time = game.get("gameDate", "")[11:16]
-        for side in ["away", "home"]:
-            team_data = game.get(f"{side}Team", {})
-            pitcher_data = game.get(f"{side}ProbablePitcher", {})
-            team = team_data.get("team", {}).get("name", "")
-            pitcher = pitcher_data.get("fullName", "")
-            # Try to get the lineup if present
-            lineups = game.get("lineups", {}).get(side, {}).get("battings", [])
+        # Get probable pitchers
+        home_pitcher = (game.get("teams", {})
+                        .get("home", {}).get("probablePitcher", {})
+                        .get("fullName", ""))
+        away_pitcher = (game.get("teams", {})
+                        .get("away", {}).get("probablePitcher", {})
+                        .get("fullName", ""))
+        # Home/away teams
+        home_team = game.get("teams", {}).get("home", {}).get("team", {}).get("name", "")
+        away_team = game.get("teams", {}).get("away", {}).get("team", {}).get("name", "")
+        # Try to get posted lineups, else fallback to expected players
+        for side, pitcher, team in [
+            ("home", away_pitcher, home_team),
+            ("away", home_pitcher, away_team)
+        ]:
+            lineup_players = []
+            # Confirmed lineups
+            try:
+                players = (game.get("lineups", {})
+                           .get(side, {}).get("players", []))
+                if not players:  # Fallback: expectedLineups (API sometimes uses this)
+                    players = (game.get("expectedLineups", {})
+                               .get(side, {}).get("players", []))
+                if not players:  # Sometimes it's a list not a dict
+                    players = (game.get("lineups", {}).get(side) or
+                               game.get("expectedLineups", {}).get(side) or [])
+                # players may still be an empty list
+                if isinstance(players, dict):
+                    players = list(players.values())
+                lineup_players = [
+                    (b.get("fullName", ""), str(b.get("battingOrder", idx + 1)))
+                    for idx, b in enumerate(players)
+                    if b.get("fullName")
+                ]
+            except Exception:
+                lineup_players = []
 
-            if lineups:
-                for entry in lineups:
-                    batter = entry.get("batter", {}).get("fullName", "")
-                    batting_order = entry.get("battingOrder", "")
-                    if batter:
-                        records.append({
-                            "Batter": batter,
-                            "Pitcher": pitcher,
-                            "Park": park,
-                            "City": city,
-                            "Date": date,
-                            "Time": game_time,
-                            "Team": team,
-                            "BattingOrder": batting_order
-                        })
+            # If no lineup, try team roster for placeholder (rare)
+            if not lineup_players:
+                # fallback, but don't recommend for production: leave blank or set dummy
+                lineup_players = []
+
+            # Add rows
+            if lineup_players:
+                for batter, batting_order in lineup_players:
+                    records.append({
+                        "Batter": batter,
+                        "Pitcher": pitcher,
+                        "Park": park,
+                        "City": city,
+                        "Date": date_str,
+                        "Time": game_time,
+                        "Team": team,
+                        "BattingOrder": batting_order
+                    })
             else:
-                # No lineup posted, still include the team and pitcher for debugging
+                # If no batters posted, create placeholder row (so you see pitcher in output)
                 records.append({
                     "Batter": "",
                     "Pitcher": pitcher,
                     "Park": park,
                     "City": city,
-                    "Date": date,
+                    "Date": date_str,
                     "Time": game_time,
                     "Team": team,
                     "BattingOrder": ""
@@ -229,8 +262,9 @@ def fetch_today_matchups():
     df = pd.DataFrame(records)
     df = df[df["Batter"] != ""].reset_index(drop=True)
     if df.empty:
-        st.warning("Lineups not yet available. Try again closer to game time.")
+        st.warning("No confirmed lineups found for any team. Try again later or refresh just before game time.")
     return df
+    
 # ---- ADVANCED STATCAST/STAT METRICS ----
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
