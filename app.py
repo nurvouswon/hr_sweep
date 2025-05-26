@@ -172,65 +172,47 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 def fetch_today_matchups():
     import pytz
     from datetime import datetime
+    import time
 
     today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
     url = (
         f"https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={today}&hydrate=game(content(media(epg)),linescore,boxscore,probablePitcher,decisions,person,team,venue,stats,officials,weather,gameInfo,tickets,feed)&fields=dates,games"
+        f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue,team,person"
     )
     resp = requests.get(url)
     if resp.status_code != 200:
         st.error("MLB API not available.")
         return pd.DataFrame()
+
     data = resp.json()
-    dates = data.get("dates", [])
-    if not dates or not dates[0].get("games"):
-        st.warning("No valid games returned from API. Lineups may not be available yet. Try again closer to game time.")
+    games = data.get("dates", [{}])[0].get("games", [])
+
+    if not games:
+        st.warning("No valid games returned from API.")
         return pd.DataFrame()
 
-    games = dates[0]["games"]
     records = []
-
     for game in games:
         park = game.get("venue", {}).get("name", "")
-        city = game.get("venue", {}).get("city", "")
-        date = today
+        city = game.get("venue", {}).get("location", {}).get("city", "")
         game_time = game.get("gameDate", "")[11:16]
-        # Fallback logic for lineups, using boxscore, official starters, etc.
-        for side in ["away", "home"]:
-            team_info = game.get(f"{side}Team", {}).get("team", {})
-            team = team_info.get("name", "")
-            probable_pitcher = game.get(f"{side}ProbablePitcher", {}).get("fullName", "")
-            opp_side = "home" if side == "away" else "away"
-            opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
+        date = today
 
-            # Try to extract confirmed lineup from boxscore
-            lineup = []
-            boxscore = game.get("boxscore", {})
-            if boxscore and side in boxscore.get("teams", {}):
-                players = boxscore["teams"][side].get("players", {})
-                for p in players.values():
-                    # Only include batters in starting lineup (battingOrder present)
-                    bo = p.get("battingOrder")
-                    name = p.get("person", {}).get("fullName")
-                    if name and bo:
-                        lineup.append((name, str(bo)))
-            # If boxscore is missing or lineup is empty, fallback to roster/expected lineup
-            if not lineup:
-                roster = game.get(f"{side}Team", {}).get("roster", {}).get("roster", [])
-                for idx, player in enumerate(roster):
-                    name = player.get("person", {}).get("fullName", "")
-                    if name:
-                        lineup.append((name, str(idx + 1)))
-            # If still nothing, just record the team with no lineup
-            if not lineup:
-                lineup = [("", "")]
+        for side in ["home", "away"]:
+            team = game.get(f"{side}Team", {}).get("team", {}).get("name", "")
+            pitcher = game.get(f"{'away' if side == 'home' else 'home'}ProbablePitcher", {}).get("fullName", "")
+            lineup = (
+                game.get("lineups", {}).get(side, {}).get("battings", []) or
+                game.get("lineups", {}).get("expected", {}).get(side, {}).get("battings", [])
+            )
 
-            for batter, batting_order in lineup:
+            for entry in lineup:
+                batter = entry.get("batter", {}).get("fullName", "")
+                batting_order = entry.get("battingOrder", "")
                 if batter:
                     records.append({
                         "Batter": batter,
-                        "Pitcher": opp_pitcher,
+                        "Pitcher": pitcher,
                         "Park": park,
                         "City": city,
                         "Date": date,
@@ -238,17 +220,15 @@ def fetch_today_matchups():
                         "Team": team,
                         "BattingOrder": batting_order
                     })
+
     df = pd.DataFrame(records)
-    st.write("DEBUG: Raw lineup DataFrame columns:", df.columns.tolist())
-    st.write(df.head())
+    st.write("DEBUG: Raw matchups columns", df.columns.tolist())
     if "Batter" not in df.columns:
-        st.error("No 'Batter' column found in matchups fetch! Check the lineup API logic.")
-        st.stop()
-    df = df[df["Batter"] != ""].reset_index(drop=True)
-    
+        st.error("Lineups format may have changed again. 'Batter' column missing.")
+        return pd.DataFrame()
     df = df[df["Batter"] != ""].reset_index(drop=True)
     if df.empty:
-        st.warning("No confirmed lineups or fallback lineups found. MLB API structure may have changed.")
+        st.warning("No confirmed lineups found for any team.")
     return df
 
 # ---- ADVANCED STATCAST/STAT METRICS ----
