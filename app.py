@@ -663,54 +663,75 @@ if __name__ == "__main__":
     pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
 
     if xhr_file and battedball_file and pitcher_battedball_file:
-        df_upload = fetch_today_matchups()  # <-- Calls your live API fetch, not upload
-        if df_upload is None or df_upload.empty:
-            st.error("Could not retrieve today's matchups or lineups. Try again closer to game time.")
-            st.stop()
-        xhr_df = pd.read_csv(xhr_file)
-        xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
-        df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
-        df_upload['batter_id'] = df_upload['Batter'].apply(get_player_id)
-        df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
-        df_merged = df_upload.merge(
-            xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
-            left_on='norm_batter', right_on='player_norm', how='left'
-        )
-        df_merged['ParkFactor'] = df_merged['Park'].map(park_factors)
-        df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations)
-        progress = st.progress(0)
-        rows = []
-        for idx, row in df_merged.iterrows():
-            try:
-                weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
-                b_stats = get_batter_stats_multi(row['batter_id'])
-                p_stats = get_pitcher_stats_multi(row['pitcher_id'])
-                b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
-                p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
-                p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
-                b_bats, _ = get_handedness(row['Batter'])
-                _, p_throws = get_handedness(row['Pitcher'])
-                platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
-                pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
-                pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
-                pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
-                record = row.to_dict()
-                record.update(weather)
-                record.update(b_stats)
-                record.update(p_stats)
-                record.update(b_pitch_metrics)
-                record.update(p_pitch_metrics)
-                record.update(p_spin_metrics)
-                record['BatterHandedness'] = b_bats
-                record['PitcherHandedness'] = p_throws
-                record['PlatoonWoba'] = platoon_woba
-                record['PitchMixBoost'] = pt_boost
-                p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
-                record.update(p_spin_metrics_30)
-                rows.append(record)
-            except Exception as e:
-                log_error(f"Row error ({row['Batter']} vs {row['Pitcher']})", e)
-            progress.progress(min(1.0, (idx + 1) / max(1, len(df_merged))), text=f"Processing {int(100 * (idx + 1) / max(1, len(df_merged)))}%")
+    df_upload = fetch_today_matchups()
+    if df_upload is None or df_upload.empty:
+        st.error("Could not retrieve today's matchups or lineups. Try again closer to game time.")
+        st.stop()
+
+    st.write("Raw Matchups Fetched:")
+    st.dataframe(df_upload)
+
+    xhr_df = pd.read_csv(xhr_file)
+    xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
+    df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
+    df_upload['batter_id'] = df_upload['Batter'].apply(get_player_id)
+    df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
+
+    df_merged = df_upload.merge(
+        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
+        left_on='norm_batter', right_on='player_norm', how='left'
+    )
+
+    df_merged['ParkFactor'] = df_merged['Park'].map(park_factors)
+    df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations)
+
+    progress = st.progress(0)
+    rows = []
+    for idx, row in df_merged.iterrows():
+        try:
+            if not row['batter_id'] or not row['pitcher_id']:
+                log_error("Row skipped", f"Missing player ID: {row['Batter']} vs {row['Pitcher']}")
+                continue
+
+            weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
+            b_stats = get_batter_stats_multi(row['batter_id'])
+            p_stats = get_pitcher_stats_multi(row['pitcher_id'])
+            b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
+            p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
+            p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
+            b_bats, _ = get_handedness(row['Batter'])
+            _, p_throws = get_handedness(row['Pitcher'])
+            platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
+            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
+            pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
+            pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
+
+            record = row.to_dict()
+            record.update(weather)
+            record.update(b_stats)
+            record.update(p_stats)
+            record.update(b_pitch_metrics)
+            record.update(p_pitch_metrics)
+            record.update(p_spin_metrics)
+            record['BatterHandedness'] = b_bats
+            record['PitcherHandedness'] = p_throws
+            record['PlatoonWoba'] = platoon_woba
+            record['PitchMixBoost'] = pt_boost
+
+            p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
+            record.update(p_spin_metrics_30)
+
+            rows.append(record)
+        except Exception as e:
+            log_error(f"Row error ({row['Batter']} vs {row['Pitcher']})", e)
+
+        progress.progress(min(1.0, (idx + 1) / max(1, len(df_merged))), text=f"Processing {int(100 * (idx + 1) / max(1, len(df_merged)))}%")
+    df_final = pd.DataFrame(rows)
+    if df_final.empty:
+        st.error("No valid player matchups could be processed. Check player names and Statcast availability.")
+        st.stop()
+
+    # You can keep the rest of your merging and model logic unchanged after this point)
         df_final = pd.DataFrame(rows)
         # Merge batted ball CSVs
         batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
