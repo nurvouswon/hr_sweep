@@ -738,6 +738,15 @@ if __name__ == "__main__":
 
     # You can keep the rest of your merging and model logic unchanged after this point)
         df_final = pd.DataFrame(rows)
+        missing_pitchers = df_final[df_final['pitcher_id'].isnull()]
+        missing_batters = df_final[df_final['batter_id'].isnull()]
+        st.warning(f"Missing pitcher IDs: {len(missing_pitchers)} | Missing batter IDs: {len(missing_batters)}")
+        if not missing_pitchers.empty:
+        st.subheader("Pitchers not matched:")
+        st.dataframe(missing_pitchers[['Pitcher']].drop_duplicates(), use_container_width=True)
+        if not missing_batters.empty:
+        st.subheader("Batters not matched:")
+        st.dataframe(missing_batters[['Batter']].drop_duplicates(), use_container_width=True)
         # Merge batted ball CSVs
         batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
         df_final = df_final.merge(batted, on="batter_id", how="left")
