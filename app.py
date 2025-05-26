@@ -13,7 +13,7 @@ API_KEY = st.secrets["weather"]["api_key"]
 error_log = []
 
 def train_and_apply_model(df):
-    # Only use numeric columns, drop NAs
+def train_and_apply_model(df):
     features = [
         'HR_Score','B_BarrelRate_14','B_EV_14','B_SLG_14','B_xSLG_14','B_xISO_14',
         'B_xwoba_14','B_sweet_spot_pct_14','B_hardhit_pct_14','B_WhiffRate_14',
@@ -28,14 +28,16 @@ def train_and_apply_model(df):
             df_model[col] = 0
     df_model = df_model.fillna(0)
     X = df_model[features]
-    # Generate pseudo-labels for ranking - here, use HR_Score as target (or use real labels if you have)
     y = df_model['HR_Score'].rank(pct=True)
+    # Check for minimum rows (e.g., 10 rows needed for a split)
+    if len(df_model) < 10:
+        return None, None
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import train_test_split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.15, random_state=42)
     model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train > 0.5)  # Classify top 50% as "1"
-    # Feature importances
+    model.fit(X_train, y_train > 0.5)
     importances = dict(zip(features, model.feature_importances_))
-    # Apply to all
     df['ML_HR_Prob'] = model.predict_proba(X)[:,1]
     leaderboard = df.sort_values('ML_HR_Prob', ascending=False).reset_index(drop=True)
     leaderboard['Rank'] = leaderboard.index + 1
