@@ -13,7 +13,6 @@ API_KEY = st.secrets["weather"]["api_key"]
 error_log = []
 
 def train_and_apply_model(df):
-def train_and_apply_model(df):
     features = [
         'HR_Score','B_BarrelRate_14','B_EV_14','B_SLG_14','B_xSLG_14','B_xISO_14',
         'B_xwoba_14','B_sweet_spot_pct_14','B_hardhit_pct_14','B_WhiffRate_14',
