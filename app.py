@@ -5,6 +5,9 @@ import requests
 import unicodedata
 from datetime import datetime, timedelta
 from pybaseball import statcast_batter, statcast_pitcher, playerid_lookup
+from datetime import datetime
+import pytz
+from bs4 import BeautifulSoup
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
@@ -161,74 +164,107 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 
 # ---- FETCH TODAY'S MATCHUPS ----
 def fetch_today_matchups():
-    import pytz
-    from datetime import datetime
-    today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
-    url = (
-        f"https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue,team,person"
-    )
-    resp = requests.get(url)
-    if resp.status_code != 200:
-        st.error("MLB API not available.")
-        return pd.DataFrame()
-    data = resp.json()
-    dates = data.get("dates", [])
-    if not dates or not dates[0].get("games"):
-        st.warning("No valid games returned from API. Lineups may not be available yet. Try again closer to game time.")
-        return pd.DataFrame()
-    games = dates[0]["games"]
+    """
+    Robust MLB schedule and lineup fetch with MLB API and HTML fallback.
+    Returns DataFrame with confirmed batter-pitcher matchups for today.
+    """
     records = []
-    for game in games:
-        park = game.get("venue", {}).get("name", "")
-        city = game.get("venue", {}).get("city", "")
-        date = today
-        game_time = game.get("gameDate", "")[11:16]
-        for side in ["away", "home"]:
-            team = game.get(f"{side}Team", {}).get("team", {}).get("name", "")
-            probable_pitcher = game.get(f"{side}ProbablePitcher", {}).get("fullName", "")
-            opp_side = "home" if side == "away" else "away"
-            opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
-            lineups = game.get("lineups", {})
-            if side == "home":
-                batters_list = lineups.get("homePlayers", [])
-            elif side == "away":
-                batters_list = lineups.get("awayPlayers", [])
-            else:
-                batters_list = []
-            batters = [
-                (b.get("fullName", ""), str(idx + 1))
-                for idx, b in enumerate(batters_list)
-                if b.get("fullName")
-            ]
-            if batters:
-                for batter, batting_order in batters:
-                    records.append({
-                        "Batter": batter,
-                        "Pitcher": opp_pitcher,
-                        "Park": park,
-                        "City": city,
-                        "Date": date,
-                        "Time": game_time,
-                        "Team": team,
-                        "BattingOrder": batting_order
-                    })
-            else:
-                records.append({
-                    "Batter": "",
-                    "Pitcher": opp_pitcher,
-                    "Park": park,
-                    "City": city,
-                    "Date": date,
-                    "Time": game_time,
-                    "Team": team,
-                    "BattingOrder": ""
-                })
-    df = pd.DataFrame(records)
-    df = df[df["Batter"] != ""].reset_index(drop=True)
-    if df.empty:
-        st.warning("No confirmed lineups found for any team. Try again later or refresh just before game time.")
-    return df
+    today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
+
+    # 1. Try MLB stats API for schedule, probable pitchers, and lineups
+    try:
+        url = (
+            f"https://statsapi.mlb.com/api/v1/schedule"
+            f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue,team,person"
+        )
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        games = data.get("dates", [{}])[0].get("games", [])
+        for game in games:
+            park = game.get("venue", {}).get("name", "")
+            city = game.get("venue", {}).get("city", "")
+            date = today
+            game_time = game.get("gameDate", "")[11:16]
+            for side in ["home", "away"]:
+                team = game.get(f"{side}Team", {}).get("team", {}).get("name", "")
+                probable_pitcher = game.get(f"{side}ProbablePitcher", {}).get("fullName", "")
+                opp_side = "away" if side == "home" else "home"
+                opp_pitcher = game.get(f"{opp_side}ProbablePitcher", {}).get("fullName", "")
+                lineups = game.get("lineups", {})
+                players = []
+                # MLB API sometimes has different keys for players depending on lineup posted
+                if isinstance(lineups, dict):
+                    if side == "home":
+                        players = lineups.get("homePlayers", []) or lineups.get("home", [])
+                    else:
+                        players = lineups.get("awayPlayers", []) or lineups.get("away", [])
+                # Parse batters
+                batters = [
+                    (b.get("fullName", ""), str(idx + 1))
+                    for idx, b in enumerate(players)
+                    if b.get("fullName")
+                ]
+                # If no posted lineups, just skip
+                if batters:
+                    for batter, batting_order in batters:
+                        records.append({
+                            "Batter": batter,
+                            "Pitcher": opp_pitcher,
+                            "Park": park,
+                            "City": city,
+                            "Date": date,
+                            "Time": game_time,
+                            "Team": team,
+                            "BattingOrder": batting_order
+                        })
+        if records:
+            return pd.DataFrame(records)
+    except Exception as e:
+        print(f"MLB API schedule fetch failed: {e}")
+
+    # 2. Fallback: Scrape MLB.com lineups page for today (slower, but works when API fails)
+    try:
+        # MLB.com lineups page lists all games; parse for today
+        lineups_url = "https://www.mlb.com/lineups"
+        soup = BeautifulSoup(requests.get(lineups_url, timeout=10).text, "html.parser")
+        game_blocks = soup.find_all("div", class_="lineup__game")
+        for block in game_blocks:
+            teams = block.find_all("span", class_="lineup__abbr")
+            parks = block.find_all("span", class_="lineup__venue")
+            times = block.find_all("span", class_="lineup__time")
+            lineups = block.find_all("ul", class_="lineup__list")
+            if len(teams) == 2 and len(lineups) == 2:
+                for idx, (team_tag, lineup_tag) in enumerate(zip(teams, lineups)):
+                    team = team_tag.get_text(strip=True)
+                    park = parks[0].get_text(strip=True) if parks else ""
+                    city = ""
+                    game_time = times[0].get_text(strip=True) if times else ""
+                    batters = [
+                        (li.get_text(strip=True), str(i+1))
+                        for i, li in enumerate(lineup_tag.find_all("li"))
+                    ]
+                    pitcher = ""  # MLB.com lineups page doesn’t always post pitchers
+                    opp_idx = 1 - idx
+                    opp_pitcher = ""
+                    for batter, batting_order in batters:
+                        records.append({
+                            "Batter": batter,
+                            "Pitcher": opp_pitcher,
+                            "Park": park,
+                            "City": city,
+                            "Date": today,
+                            "Time": game_time,
+                            "Team": team,
+                            "BattingOrder": batting_order
+                        })
+        if records:
+            return pd.DataFrame(records)
+    except Exception as e:
+        print(f"MLB.com fallback fetch failed: {e}")
+
+    # 3. If both fail, return empty DataFrame
+    return pd.DataFrame(columns=["Batter","Pitcher","Park","City","Date","Time","Team","BattingOrder"])
 
 # ---- ADVANCED STATCAST/STAT METRICS ----
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
