@@ -239,6 +239,13 @@ def fetch_today_matchups():
                         "BattingOrder": batting_order
                     })
     df = pd.DataFrame(records)
+    st.write("DEBUG: Raw lineup DataFrame columns:", df.columns.tolist())
+    st.write(df.head())
+    if "Batter" not in df.columns:
+        st.error("No 'Batter' column found in matchups fetch! Check the lineup API logic.")
+        st.stop()
+    df = df[df["Batter"] != ""].reset_index(drop=True)
+    
     df = df[df["Batter"] != ""].reset_index(drop=True)
     if df.empty:
         st.warning("No confirmed lineups or fallback lineups found. MLB API structure may have changed.")
