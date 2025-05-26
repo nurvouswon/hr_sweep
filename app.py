@@ -220,7 +220,7 @@ def fetch_today_matchups():
                         })
         if records:
             return pd.DataFrame(records)
-    except Exception as e:
+        except Exception as e:
         
 def fetch_today_matchups():
     import pytz
