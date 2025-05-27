@@ -586,33 +586,67 @@ Upload the following 4 CSV files:
 - **Pitcher Batted-Ball Profile** (with `id`)
 """)
 
-uploaded_file = st.file_uploader("Matchups CSV", type=["csv"])
+lineup_file = st.file_uploader("Lineups/Matchups CSV (with MLB IDs)", type=["csv"])
 xhr_file = st.file_uploader("xHR / HR Regression CSV", type=["csv"])
 battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
 pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
 
-if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
-    df_upload = pd.read_csv(uploaded_file)
-    for col in ['Batter', 'Pitcher', 'City', 'Park', 'Date', 'Time']:
-        if col not in df_upload.columns:
-            st.error(f"Missing required column: {col}")
-            st.stop()
+    if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
+    # Read and standardize the new lineup/matchup CSV
+    df_upload = pd.read_csv(lineup_file)
+    # Standardize column names
+    df_upload.rename(columns={
+        "player name": "Batter",
+        "mlb id": "batter_id",
+        "team code": "Team",
+        "game_date": "Date",
+        "batting order": "BattingOrder"
+    }, inplace=True)
+    df_upload = df_upload[df_upload["confirmed"] == "Y"]
+    # If you have pitcher info, add/rename those columns here
+    # e.g., df_upload['Pitcher'] = ... df_upload['pitcher_id'] = ...
+    # If not, you may need to merge on opponent team or use old get_player_id for pitcher
+
+    # Normalize batter names (optional, for downstream matching)
+    df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
+    # Batter MLB ID is already present
+    df_upload['batter_id'] = pd.to_numeric(df_upload['batter_id'], errors='coerce')
+
+    # If you have a pitcher name/ID in your CSV, also do:
+    # df_upload['norm_pitcher'] = df_upload['Pitcher'].apply(normalize_name)
+    # df_upload['pitcher_id'] = pd.to_numeric(df_upload['pitcher_id'], errors='coerce')
+    # ELSE: keep using your old get_player_id for pitcher for now:
+    if 'Pitcher' in df_upload.columns:
+        df_upload['norm_pitcher'] = df_upload['Pitcher'].apply(normalize_name)
+        if 'pitcher_id' not in df_upload.columns:
+            df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
+        else:
+            df_upload['pitcher_id'] = pd.to_numeric(df_upload['pitcher_id'], errors='coerce')
+    else:
+        st.error("Pitcher info required (add pitcher name and/or ID column to lineup file).")
+        st.stop()
+
     xhr_df = pd.read_csv(xhr_file)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
-    df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
-    df_upload['batter_id'] = df_upload['Batter'].apply(get_player_id)
-    df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
+    # Join HR/xHR regression to batter using norm_batter
     df_merged = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
     )
-    df_merged['ParkFactor'] = df_merged['Park'].map(park_factors)
-    df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations)
+    # Optional: If Park, City, Date, Time are not present, merge/assign as needed
+    df_merged['ParkFactor'] = df_merged['Park'].map(park_factors) if 'Park' in df_merged.columns else 1.0
+    df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations) if 'Park' in df_merged.columns else None
+
     progress = st.progress(0)
     rows = []
     for idx, row in df_merged.iterrows():
         try:
-            weather = get_weather(row['City'], row['Date'], row['ParkOrientation'], row['Time'])
+            weather = get_weather(
+                row.get('City', ''),
+                row.get('Date', ''),
+                row.get('ParkOrientation', ''),
+                row.get('Time', '')
+            )
             b_stats = get_batter_stats_multi(row['batter_id'])
             p_stats = get_pitcher_stats_multi(row['pitcher_id'])
             b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
@@ -638,14 +672,13 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             # Spin drop logic for 30d spin
             p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
             record.update(p_spin_metrics_30)
-            # Optionally: bullpen context stub
-            # record['BullpenHR9'] = get_bullpen_hr_rate(row['PitcherTeam']) # If you have team column
             rows.append(record)
         except Exception as e:
             log_error(f"Row error ({row['Batter']} vs {row['Pitcher']})", e)
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
     df_final = pd.DataFrame(rows)
-    # Merge batted ball CSVs
+
+    # Merge batted ball CSVs as before
     batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
     df_final = df_final.merge(batted, on="batter_id", how="left")
     pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
