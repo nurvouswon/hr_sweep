@@ -593,9 +593,10 @@ pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv
 
 if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
     # Read and standardize the new lineup/matchup CSV
-df_upload = pd.read_csv(lineup_file)
+    df_upload = pd.read_csv(lineup_file)
+
     # Standardize column names
-df_upload.rename(columns={
+    df_upload.rename(columns={
         "player name": "Batter",
         "mlb id": "batter_id",
         "team code": "Team",
