@@ -603,28 +603,6 @@ pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv
         "batting order": "BattingOrder"
     }, inplace=True)
     df_upload = df_upload[df_upload["confirmed"] == "Y"]
-    # If you have pitcher info, add/rename those columns here
-    # e.g., df_upload['Pitcher'] = ... df_upload['pitcher_id'] = ...
-    # If not, you may need to merge on opponent team or use old get_player_id for pitcher
-
-    # Normalize batter names (optional, for downstream matching)
-    df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
-    # Batter MLB ID is already present
-    df_upload['batter_id'] = pd.to_numeric(df_upload['batter_id'], errors='coerce')
-
-    # If you have a pitcher name/ID in your CSV, also do:
-    # df_upload['norm_pitcher'] = df_upload['Pitcher'].apply(normalize_name)
-    # df_upload['pitcher_id'] = pd.to_numeric(df_upload['pitcher_id'], errors='coerce')
-    # ELSE: keep using your old get_player_id for pitcher for now:
-    if 'Pitcher' in df_upload.columns:
-        df_upload['norm_pitcher'] = df_upload['Pitcher'].apply(normalize_name)
-        if 'pitcher_id' not in df_upload.columns:
-            df_upload['pitcher_id'] = df_upload['Pitcher'].apply(get_player_id)
-        else:
-            df_upload['pitcher_id'] = pd.to_numeric(df_upload['pitcher_id'], errors='coerce')
-    else:
-        st.error("Pitcher info required (add pitcher name and/or ID column to lineup file).")
-        st.stop()
 
     xhr_df = pd.read_csv(xhr_file)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
