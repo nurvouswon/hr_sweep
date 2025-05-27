@@ -595,15 +595,20 @@ if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
     # Read and standardize the new lineup/matchup CSV
     df_upload = pd.read_csv(lineup_file)
 
-    # Standardize column names
+    # Standardize column names (lowercase, underscores)
+    df_upload.columns = [c.strip().lower().replace(' ', '_') for c in df_upload.columns]
+
+# Filter only confirmed starters (Y or y)
+    df_upload = df_upload[df_upload["confirmed"].str.lower() == "y"]
+
+# Rename columns to match expected pipeline inputs
     df_upload.rename(columns={
-        "player name": "Batter",
-        "mlb id": "batter_id",
-        "team code": "Team",
-        "game_date": "Date",
-        "batting order": "BattingOrder"
-    }, inplace=True)
-    df_upload = df_upload[df_upload["confirmed"] == "Y"]
+    "player_name": "Batter",
+    "mlb_id": "batter_id",
+    "team_code": "Team",
+    "game_date": "Date",
+    "batting_order": "BattingOrder"
+    }, inplace=True) == "Y"]
 
     xhr_df = pd.read_csv(xhr_file)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
