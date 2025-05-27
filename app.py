@@ -172,12 +172,11 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 def fetch_today_matchups():
     import pytz
     from datetime import datetime
-    import time
 
     today = datetime.now(pytz.timezone("US/Eastern")).strftime('%Y-%m-%d')
     url = (
         f"https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={today}&hydrate=lineups,probablePitcher,venue,team,person"
+        f"?sportId=1&date={today}&hydrate=lineups,expectedLineups,probablePitcher,venue,team,person,gameInfo,teams,players"
     )
     resp = requests.get(url)
     if resp.status_code != 200:
@@ -186,33 +185,86 @@ def fetch_today_matchups():
 
     data = resp.json()
     games = data.get("dates", [{}])[0].get("games", [])
-
     if not games:
-        st.warning("No valid games returned from API.")
+        st.warning("No games returned for today.")
         return pd.DataFrame()
 
     records = []
     for game in games:
         park = game.get("venue", {}).get("name", "")
-        city = game.get("venue", {}).get("location", {}).get("city", "")
+        city = game.get("venue", {}).get("city", "")
         game_time = game.get("gameDate", "")[11:16]
         date = today
 
         for side in ["home", "away"]:
             team = game.get(f"{side}Team", {}).get("team", {}).get("name", "")
-            pitcher = game.get(f"{'away' if side == 'home' else 'home'}ProbablePitcher", {}).get("fullName", "")
-            lineup = (
-                game.get("lineups", {}).get(side, {}).get("battings", []) or
-                game.get("lineups", {}).get("expected", {}).get(side, {}).get("battings", [])
-            )
+            opponent_side = "away" if side == "home" else "home"
+            opp_pitcher = game.get(f"{opponent_side}ProbablePitcher", {}).get("fullName", "")
+            batters = []
 
-            for entry in lineup:
-                batter = entry.get("batter", {}).get("fullName", "")
-                batting_order = entry.get("battingOrder", "")
-                if batter:
+            # 1. Confirmed lineups (current MLB API)
+            battings = game.get("lineups", {}).get(side, {}).get("battings")
+            if battings:
+                batters = [
+                    (entry.get("batter", {}).get("fullName", ""), str(entry.get("battingOrder", "")))
+                    for entry in battings
+                    if entry.get("batter", {}).get("fullName")
+                ]
+            # 2. Expected lineups
+            if not batters:
+                battings = game.get("expectedLineups", {}).get(side, {}).get("battings")
+                if battings:
+                    batters = [
+                        (entry.get("batter", {}).get("fullName", ""), str(entry.get("battingOrder", "")))
+                        for entry in battings
+                        if entry.get("batter", {}).get("fullName")
+                    ]
+            # 3. Game info fallbacks
+            if not batters:
+                # Check both direct and expected
+                for key in ["gameInfo", "lineups", "expectedLineups"]:
+                    obj = game.get(key, {}).get(side, {})
+                    if obj and isinstance(obj, list):
+                        batters = [
+                            (b.get("batter", {}).get("fullName", ""), str(b.get("battingOrder", "")))
+                            for b in obj
+                            if b.get("batter", {}).get("fullName")
+                        ]
+                        if batters:
+                            break
+            # 4. teams->{side}->lineup (if present)
+            if not batters:
+                team_obj = game.get("teams", {}).get(side, {})
+                lineup = team_obj.get("lineup", [])
+                if lineup:
+                    batters = [
+                        (b.get("fullName", ""), str(idx + 1))
+                        for idx, b in enumerate(lineup)
+                        if b.get("fullName")
+                    ]
+            # 5. teams->{side}->players (fallback: may include whole roster!)
+            if not batters:
+                players = game.get("teams", {}).get(side, {}).get("players", [])
+                if players and isinstance(players, list):
+                    batters = [
+                        (p.get("fullName", ""), str(idx + 1))
+                        for idx, p in enumerate(players)
+                        if p.get("fullName")
+                    ]
+                elif players and isinstance(players, dict):  # Some versions use dict of playerId: {details}
+                    # Try to only include those with 'battingOrder'
+                    all_players = list(players.values())
+                    batters = [
+                        (p.get("person", {}).get("fullName", ""), str(p.get("battingOrder", "")))
+                        for p in all_players
+                        if p.get("person", {}).get("fullName") and "battingOrder" in p
+                    ]
+            # 6. Give up for this side if still nothing
+            if batters:
+                for batter, batting_order in batters:
                     records.append({
                         "Batter": batter,
-                        "Pitcher": pitcher,
+                        "Pitcher": opp_pitcher,
                         "Park": park,
                         "City": city,
                         "Date": date,
@@ -222,13 +274,9 @@ def fetch_today_matchups():
                     })
 
     df = pd.DataFrame(records)
-    st.write("DEBUG: Raw matchups columns", df.columns.tolist())
-    if "Batter" not in df.columns:
-        st.error("Lineups format may have changed again. 'Batter' column missing.")
+    if df.empty or "Batter" not in df.columns:
+        st.error("No lineups found using any MLB API structure. Lineup format may have changed again or are not yet posted for today. Try again later.")
         return pd.DataFrame()
-    df = df[df["Batter"] != ""].reset_index(drop=True)
-    if df.empty:
-        st.warning("No confirmed lineups found for any team.")
     return df
 
 # ---- ADVANCED STATCAST/STAT METRICS ----
