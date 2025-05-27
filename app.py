@@ -10,6 +10,26 @@ import pytz
 from bs4 import BeautifulSoup
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+import re
+from pybaseball import playerid_lookup
+
+@st.cache_data
+def expand_initial_names(name):
+    """
+    Convert 'S. Ohtani' to 'Shohei Ohtani' using pybaseball.playerid_lookup.
+    Returns original name if no match found.
+    """
+    if not isinstance(name, str) or not re.match(r"^[A-Z]\.? [A-Za-z'`-]+$", name.strip()):
+        return name
+
+    initial, last = re.split(r"\.?\s+", name.strip(), maxsplit=1)
+    matches = playerid_lookup(last, None)  # Only filter by last name
+    if not matches.empty:
+        for _, row in matches.iterrows():
+            first = row.get("name_first", "")
+            if first and first[0].upper() == initial[0].upper():
+                return f"{first} {last}"
+    return name
 
 # ---- CONFIG ----
 API_KEY = st.secrets["weather"]["api_key"]
