@@ -170,9 +170,6 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 
 # ---- FETCH TODAY'S MATCHUPS ----
 @st.cache_data
-import requests
-import pandas as pd
-
 def fetch_today_lineups():
     url = "https://site.api.rotoql.com/mlb/lineups.json"
     try:
