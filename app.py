@@ -595,9 +595,17 @@ if __name__ == "__main__":
 
     if xhr_file and battedball_file and pitcher_battedball_file:
         df_upload = fetch_rotowire_lineups()
-        if df_upload is None or df_upload.empty:
-            st.error("Could not retrieve today's matchups or lineups. Try again closer to game time.")
-            st.stop()
+
+if (df_upload is None or df_upload.empty) and matchup_file:
+    try:
+        df_upload = pd.read_csv(matchup_file)
+        st.success("Using manually uploaded matchup file.")
+    except Exception as e:
+        st.error(f"Failed to load uploaded matchup file: {e}")
+        st.stop()
+elif df_upload is None or df_upload.empty:
+    st.error("Could not retrieve today's matchups or lineups, and no manual upload provided.")
+    st.stop()
 
         st.write("Raw Matchups Fetched:")
         st.dataframe(df_upload)
