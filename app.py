@@ -578,7 +578,6 @@ def hr_score_tier(score):
     else: return "E (Low)"
 
 # === MAIN STREAMLIT APP ===
-
 if __name__ == "__main__":
     st.title("⚾ MLB HR Matchup Leaderboard – Advanced Statcast Scoring + Pitcher Trends + ML")
     st.markdown("""
@@ -591,21 +590,24 @@ if __name__ == "__main__":
     xhr_file = st.file_uploader("xHR / HR Regression CSV", type=["csv"])
     battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
     pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
-    matchup_file = st.file_uploader("Optional: Upload Daily Matchup CSV (Batter, Pitcher, Park, City, Date, Time, Team, BattingOrder)", type=["csv"])
+    matchup_file = st.file_uploader(
+        "Optional: Upload Daily Matchup CSV (Batter, Pitcher, Park, City, Date, Time, Team, BattingOrder)", type=["csv"]
+    )
 
     if xhr_file and battedball_file and pitcher_battedball_file:
+        # Try to fetch auto lineups first
         df_upload = fetch_rotowire_lineups()
-
-if (df_upload is None or df_upload.empty) and matchup_file:
-    try:
-        df_upload = pd.read_csv(matchup_file)
-        st.success("Using manually uploaded matchup file.")
-    except Exception as e:
-        st.error(f"Failed to load uploaded matchup file: {e}")
-        st.stop()
-elif df_upload is None or df_upload.empty:
-        st.error("Could not retrieve today's matchups or lineups, and no manual upload provided.")
-        st.stop()
+        # If failed or empty, try manual upload
+        if (df_upload is None or df_upload.empty) and matchup_file:
+            try:
+                df_upload = pd.read_csv(matchup_file)
+                st.success("Using manually uploaded matchup file.")
+            except Exception as e:
+                st.error(f"Failed to load uploaded matchup file: {e}")
+                st.stop()
+        elif df_upload is None or df_upload.empty:
+            st.error("Could not retrieve today's matchups or lineups, and no manual upload provided.")
+            st.stop()
 
         st.write("Raw Matchups Fetched:")
         st.dataframe(df_upload)
@@ -684,7 +686,11 @@ elif df_upload is None or df_upload.empty:
         df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
         df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
         # ML Model Integration (optional + feature selection)
-        df_leaderboard, importances = train_and_apply_model(df_final)
+        try:
+            df_leaderboard, importances = train_and_apply_model(df_final)
+        except Exception as e:
+            df_leaderboard, importances = None, None
+            log_error("train_and_apply_model error", e)
         if df_leaderboard is None:
             df_leaderboard = df_final.sort_values("HR_Score", ascending=False).reset_index(drop=True)
             df_leaderboard["Rank"] = df_leaderboard.index + 1
@@ -703,7 +709,6 @@ elif df_upload is None or df_upload.empty:
         if 'ML_HR_Prob' in df_leaderboard.columns:
             cols_to_show.append('ML_HR_Prob')
         cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
-
         st.dataframe(df_leaderboard[cols_to_show].head(15), use_container_width=True)
         st.subheader("Top 5 HR Scores")
         st.bar_chart(df_leaderboard.set_index('Batter')[['HR_Score']].head(5))
@@ -716,5 +721,5 @@ elif df_upload is None or df_upload.empty:
             with st.expander("⚠️ Errors and Warnings (Click to expand)"):
                 for e in error_log[-40:]:
                     st.text(e)
-        else:
-            st.info("Upload all 3 files (xHR, Batter BB, Pitcher BB) to generate today's leaderboard.")
+    else:
+        st.info("Upload all 3 files (xHR, Batter BB, Pitcher BB) to generate today's leaderboard.")
