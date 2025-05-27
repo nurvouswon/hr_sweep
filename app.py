@@ -717,4 +717,4 @@ elif df_upload is None or df_upload.empty:
                 for e in error_log[-40:]:
                     st.text(e)
         else:
-        st.info("Upload all 3 files (xHR, Batter BB, Pitcher BB) to generate today's leaderboard.")
+            st.info("Upload all 3 files (xHR, Batter BB, Pitcher BB) to generate today's leaderboard.")
