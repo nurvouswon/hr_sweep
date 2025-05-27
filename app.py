@@ -170,40 +170,37 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
 
 # ---- FETCH TODAY'S MATCHUPS ----
 @st.cache_data
-def fetch_today_matchups():
-    from rotowire_api_client import MLB
-    import pandas as pd
+import requests
+import pandas as pd
 
-    mlb = MLB()
+def fetch_today_lineups():
+    url = "https://site.api.rotoql.com/mlb/lineups.json"
     try:
-        lineups = mlb.get_lineups()
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
+        records = []
+        for team in data:
+            if not team.get('confirmed'):
+                continue
+            pitcher = team.get('opposing_pitcher', {}).get('full_name', '')
+            park = team.get('venue', {}).get('name', '')
+            city = team.get('venue', {}).get('city', '')
+            time = team.get('game_start_time', '')[-5:]
+            for player in team.get('players', []):
+                records.append({
+                    "Batter": player.get("full_name"),
+                    "Pitcher": pitcher,
+                    "Park": park,
+                    "City": city,
+                    "Date": pd.Timestamp.now().strftime('%Y-%m-%d'),
+                    "Time": time,
+                    "Team": player.get("team_abbreviation"),
+                    "BattingOrder": player.get("batting_order")
+                })
+        return pd.DataFrame(records)
     except Exception as e:
-        st.error(f"Lineup fetch failed: {e}")
+        print(f"Error fetching lineups: {e}")
         return pd.DataFrame()
-
-    records = []
-    for team in lineups:
-        if not team.get('confirmed', False):
-            continue
-        pitcher = team.get('opposing_pitcher', {}).get('full_name', '')
-        park = team.get('venue', {}).get('name', '')
-        city = team.get('venue', {}).get('city', '')
-        game_time = team.get('game_start_time', '')[-5:]
-
-        for player in team.get('players', []):
-            records.append({
-                'Batter': player.get('full_name'),
-                'Pitcher': pitcher,
-                'Park': park,
-                'City': city,
-                'Date': pd.Timestamp.now().strftime('%Y-%m-%d'),
-                'Time': game_time,
-                'Team': player.get('team_abbreviation'),
-                'BattingOrder': player.get('batting_order')
-            })
-
-    df = pd.DataFrame(records)
-    return df[df["Batter"].notnull() & (df["Batter"] != "")].reset_index(drop=True)
 
 # ---- ADVANCED STATCAST/STAT METRICS ----
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
