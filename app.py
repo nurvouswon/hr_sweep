@@ -608,7 +608,7 @@ if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
     "team_code": "Team",
     "game_date": "Date",
     "batting_order": "BattingOrder"
-    }, inplace=True) == "Y"]
+    }, inplace=True) == "y"]
 
     xhr_df = pd.read_csv(xhr_file)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
