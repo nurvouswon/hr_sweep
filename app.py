@@ -604,8 +604,8 @@ if (df_upload is None or df_upload.empty) and matchup_file:
         st.error(f"Failed to load uploaded matchup file: {e}")
         st.stop()
 elif df_upload is None or df_upload.empty:
-    st.error("Could not retrieve today's matchups or lineups, and no manual upload provided.")
-    st.stop()
+        st.error("Could not retrieve today's matchups or lineups, and no manual upload provided.")
+        st.stop()
 
         st.write("Raw Matchups Fetched:")
         st.dataframe(df_upload)
