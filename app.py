@@ -591,6 +591,7 @@ if __name__ == "__main__":
     xhr_file = st.file_uploader("xHR / HR Regression CSV", type=["csv"])
     battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
     pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
+    matchup_file = st.file_uploader("Optional: Upload Daily Matchup CSV (Batter, Pitcher, Park, City, Date, Time, Team, BattingOrder)", type=["csv"])
 
     if xhr_file and battedball_file and pitcher_battedball_file:
         df_upload = fetch_rotowire_lineups()
