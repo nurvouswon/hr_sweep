@@ -621,6 +621,11 @@ if __name__ == "__main__":
         if (df_upload is None or df_upload.empty) and matchup_file:
             try:
                 df_upload = pd.read_csv(matchup_file)
+                # Expand abbreviated player names to full names
+if "Batter" in df_upload.columns:
+    df_upload["Batter"] = df_upload["Batter"].apply(expand_initial_names)
+if "Pitcher" in df_upload.columns:
+    df_upload["Pitcher"] = df_upload["Pitcher"].apply(expand_initial_names)
                 st.success("Using manually uploaded matchup file.")
             except Exception as e:
                 st.error(f"Failed to load uploaded matchup file: {e}")
