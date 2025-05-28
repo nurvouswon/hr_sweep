@@ -13,12 +13,12 @@ from sklearn.feature_selection import SelectFromModel
 API_KEY = st.secrets["weather"]["api_key"]
 error_log = []
 
-# ============ Error Logging ============
+# ========== Error Logging ==========
 def log_error(context, exception, level="ERROR"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     error_log.append(f"[{timestamp}] [{level}] {context}: {exception}")
 
-# ============ Caching & Utility ============
+# ========== Caching ==========
 @st.cache_data
 def cached_statcast_batter(start, end, batter_id):
     return statcast_batter(start, end, batter_id)
@@ -44,8 +44,10 @@ def cached_weather_api(city, date, api_key):
         log_error("Weather API call", e)
         return {}
 
+# ========== Helpers ==========
 def normalize_name(name):
-    if not isinstance(name, str): return ""
+    if not isinstance(name, str):
+        return ""
     name = ''.join(c for c in unicodedata.normalize('NFD', name) if unicodedata.category(c) != 'Mn')
     name = name.lower().replace('.', '').replace('-', ' ').replace("’", "'").strip()
     if ',' in name:
@@ -90,30 +92,26 @@ def get_handedness(name):
         log_error("Handedness lookup", e)
     return None, None
 
-# ============ Ballpark Dictionaries ============
+# ========== Ballpark Dictionaries ==========
 ballpark_orientations = {
-    "Sutter Health Park": "NE", "Yankee Stadium": "N", "Fenway Park": "N", "Tropicana Field": "N",
-    "Camden Yards": "NE", "Rogers Centre": "NE", "Comerica Park": "N",
-    "Progressive Field": "NE", "Target Field": "N", "Kauffman Stadium": "NE",
-    "Guaranteed Rate Field": "NE", "Angel Stadium": "NE", "Minute Maid Park": "N",
-    "Oakland Coliseum": "N", "T-Mobile Park": "N", "Globe Life Field": "NE",
-    "Dodger Stadium": "NE", "Chase Field": "N", "Coors Field": "N",
-    "Oracle Park": "E", "Wrigley Field": "NE", "Great American Ball Park": "N",
-    "American Family Field": "NE", "PNC Park": "NE", "Busch Stadium": "NE",
-    "Truist Park": "N", "LoanDepot Park": "N", "Citi Field": "N",
-    "Nationals Park": "NE", "Petco Park": "N", "Citizens Bank Park": "NE"
+    "sutter_health_park": "NE", "yankee_stadium": "N", "fenway_park": "N", "tropicana_field": "N",
+    "camden_yards": "NE", "rogers_centre": "NE", "comerica_park": "N", "progressive_field": "NE",
+    "target_field": "N", "kauffman_stadium": "NE", "guaranteed_rate_field": "NE", "angel_stadium": "NE",
+    "minute_maid_park": "N", "oakland_coliseum": "N", "t-mobile_park": "N", "globe_life_field": "NE",
+    "dodger_stadium": "NE", "chase_field": "N", "coors_field": "N", "oracle_park": "E", "wrigley_field": "NE",
+    "great_american_ball_park": "N", "american_family_field": "NE", "pnc_park": "NE", "busch_stadium": "NE",
+    "truist_park": "N", "loandepot_park": "N", "citi_field": "N", "nationals_park": "NE", "petco_park": "N",
+    "citizens_bank_park": "NE"
 }
 park_factors = {
-    "Sutter Health Park": 1.12, "Yankee Stadium": 1.19, "Fenway Park": 0.97, "Tropicana Field": 0.85,
-    "Camden Yards": 1.13, "Rogers Centre": 1.10, "Comerica Park": 0.96,
-    "Progressive Field": 1.01, "Target Field": 1.04, "Kauffman Stadium": 0.98,
-    "Guaranteed Rate Field": 1.18, "Angel Stadium": 1.05, "Minute Maid Park": 1.06,
-    "Oakland Coliseum": 0.82, "T-Mobile Park": 0.86, "Globe Life Field": 1.00,
-    "Dodger Stadium": 1.10, "Chase Field": 1.06, "Coors Field": 1.30,
-    "Oracle Park": 0.82, "Wrigley Field": 1.12, "Great American Ball Park": 1.26,
-    "American Family Field": 1.17, "PNC Park": 0.87, "Busch Stadium": 0.87,
-    "Truist Park": 1.06, "LoanDepot Park": 0.86, "Citi Field": 1.05,
-    "Nationals Park": 1.05, "Petco Park": 0.85, "Citizens Bank Park": 1.19
+    "sutter_health_park": 1.12, "yankee_stadium": 1.19, "fenway_park": 0.97, "tropicana_field": 0.85,
+    "camden_yards": 1.13, "rogers_centre": 1.10, "comerica_park": 0.96, "progressive_field": 1.01,
+    "target_field": 1.04, "kauffman_stadium": 0.98, "guaranteed_rate_field": 1.18, "angel_stadium": 1.05,
+    "minute_maid_park": 1.06, "oakland_coliseum": 0.82, "t-mobile_park": 0.86, "globe_life_field": 1.00,
+    "dodger_stadium": 1.10, "chase_field": 1.06, "coors_field": 1.30, "oracle_park": 0.82, "wrigley_field": 1.12,
+    "great_american_ball_park": 1.26, "american_family_field": 1.17, "pnc_park": 0.87, "busch_stadium": 0.87,
+    "truist_park": 1.06, "loandepot_park": 0.86, "citi_field": 1.05, "nationals_park": 1.05, "petco_park": 0.85,
+    "citizens_bank_park": 1.19
 }
 compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 
@@ -158,7 +156,7 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         log_error("Weather", e)
         return {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
 
-# ============ Normalization Functions ============
+# ========== Normalization Functions ==========
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
 def norm_park(x): return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
@@ -178,7 +176,7 @@ def norm_hardhit(x):
 def norm_whiff(x):
     return max(0, min((x - 0.15) / (0.40 - 0.15), 1)) if pd.notnull(x) else 0
 
-# ============ Statcast Functions ============
+# ========== Statcast Feature Functions ==========
 def get_batter_stats_multi(batter_id, windows=[3,5,7,14]):
     out = {}
     if not batter_id:
@@ -207,8 +205,7 @@ def get_batter_stats_multi(batter_id, windows=[3,5,7,14]):
             xiso = (xslg - xba) if xslg and xba else None
             events = df['events'].value_counts().to_dict()
             ab2 = sum(events.get(e, 0) for e in ['single', 'double', 'triple', 'home_run', 'field_out', 'force_out', 'other_out'])
-            total_bases = (events.get('single', 0) + 2 * events.get('double', 0) +
-                           3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
+            total_bases = (events.get('single', 0) + 2 * events.get('double', 0) + 3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
             slg = total_bases / ab2 if ab2 > 0 else None
             xwoba = df['woba_value'].mean() if 'woba_value' in df.columns else None
             sweet_spot_pct = df[(df['launch_angle'].between(8, 32))].shape[0] / pa if pa > 0 else None
@@ -254,8 +251,7 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3,5,7,14]):
             xiso = (xslg - xba) if xslg and xba else None
             events = df['events'].value_counts().to_dict()
             ab2 = sum(events.get(e, 0) for e in ['single', 'double', 'triple', 'home_run', 'field_out', 'force_out', 'other_out'])
-            total_bases = (events.get('single', 0) + 2 * events.get('double', 0) +
-                           3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
+            total_bases = (events.get('single', 0) + 2 * events.get('double', 0) + 3 * events.get('triple', 0) + 4 * events.get('home_run', 0))
             slg = total_bases / ab2 if ab2 > 0 else None
             xwoba = df['woba_value'].mean() if 'woba_value' in df.columns else None
             sweet_spot_pct = df[(df['launch_angle'].between(8, 32))].shape[0] / total if total > 0 else None
@@ -383,22 +379,21 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
         log_error("Pitch type matchup boost error", e)
         return 0
 
-# =========== Robust HR Score Calculation ===========
-
+# ========== Custom 2025 Environment Boosts ==========
 def custom_2025_boost(row):
     bonus = 0
-    if row.get('Park') == 'Sutter Health Park' and row.get('WindEffect') == 'out': bonus += 0.02
-    if row.get('Park') == 'Citi Field': bonus += 0.025
-    if row.get('Park') == 'Comerica Park': bonus += 0.02
-    if row.get('Park') == 'Wrigley Field' and row.get('WindEffect') == 'out': bonus += 0.03
-    if row.get('Park') in ['American Family Field','Citizens Bank Park'] and row.get('WindEffect') == 'out': bonus += 0.015
-    if row.get('Park') == 'Dodger Stadium' and row.get('BatterHandedness') == 'R': bonus += 0.01
+    if row.get('park') == 'sutter_health_park' and row.get('WindEffect') == 'out': bonus += 0.02
+    if row.get('park') == 'citi_field': bonus += 0.025
+    if row.get('park') == 'comerica_park': bonus += 0.02
+    if row.get('park') == 'wrigley_field' and row.get('WindEffect') == 'out': bonus += 0.03
+    if row.get('park') in ['american_family_field','citizens_bank_park'] and row.get('WindEffect') == 'out': bonus += 0.015
+    if row.get('park') == 'dodger_stadium' and row.get('BatterHandedness') == 'R': bonus += 0.01
     if row.get('Temp') and row.get('Temp') > 80: bonus += 0.01
-    if row.get('BatterHandedness') == 'R' and row.get('Park') in [
-        "Yankee Stadium","Great American Ball Park","Guaranteed Rate Field"]: bonus += 0.012
-    if row.get('Humidity') and row.get('Humidity') > 65 and row.get('Park') in ["Truist Park","LoanDepot Park"]: bonus += 0.01
-    if row.get('Park') in ["Dodger Stadium","Petco Park","Oracle Park"]:
-        game_time = row.get('Time')
+    if row.get('BatterHandedness') == 'R' and row.get('park') in [
+        "yankee_stadium","great_american_ball_park","guaranteed_rate_field"]: bonus += 0.012
+    if row.get('Humidity') and row.get('Humidity') > 65 and row.get('park') in ["truist_park","loandepot_park"]: bonus += 0.01
+    if row.get('park') in ["dodger_stadium","petco_park","oracle_park"]:
+        game_time = row.get('time')
         if game_time:
             try:
                 hour = int(str(game_time).split(":")[0])
@@ -410,6 +405,7 @@ def custom_2025_boost(row):
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
+# ========== Batted Ball Profile Scores ==========
 def calc_batted_ball_score(row):
     score = 0
     score += row.get('fb_rate', 0) * 0.09
@@ -456,6 +452,11 @@ def hr_score_tier(score):
 def get_sample_flag(val):
     return "Low" if val is not None and val < 10 else "OK"
 
+def get_bullpen_hr_rate(team):
+    bullpen_rates = {"default": 1.1}
+    return bullpen_rates.get(team, bullpen_rates["default"])
+
+# ========== Robust, Advanced HR Scoring ==========
 def calc_hr_score(row):
     batter_score = (
         norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
@@ -543,7 +544,8 @@ def calc_hr_score(row):
 
 def train_and_apply_model(df_leaderboard):
     features = [col for col in df_leaderboard.columns if col not in [
-        'Batter', 'Pitcher', 'HR_Score', 'Rank', 'City', 'Park', 'Date', 'Time', 'HR_Tier', 'HR_Score_pctile'
+        'batter', 'pitcher', 'hr_score', 'rank', 'city', 'park', 'date', 'time',
+        'hr_tier', 'hr_score_pctile'
     ]]
     df_ml = df_leaderboard.dropna(subset=features)
     if 'hr_outcome' not in df_ml.columns or df_ml.shape[0] < 50:
@@ -566,25 +568,25 @@ def train_and_apply_model(df_leaderboard):
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
 
-# ========== Streamlit UI Section ==========
+# ========== Streamlit UI ==========
 
 st.title("⚾ MLB HR Matchup Leaderboard – Advanced Statcast Scoring + Pitcher Trends + ML")
 st.markdown("""
 Upload the following 4 CSV files:
-- **Matchups**: mlb_id, player_name, confirmed, team_code, game_date, batting_order, Park, City, Date, Time, etc.
+- **Lineups/Matchups**: Must contain batter and pitcher names, MLB IDs, city, park, date, time, etc.
 - **xHR/HR Regression**: player, hr_total, xhr, xhr_diff
 - **Batter Batted-Ball Profile** (with `id`)
 - **Pitcher Batted-Ball Profile** (with `id`)
 """)
 
-uploaded_file = st.file_uploader("Lineups/Matchups CSV (with MLB IDs)", type=["csv"])
+lineup_file = st.file_uploader("Lineups/Matchups CSV (with MLB IDs)", type=["csv"])
 xhr_file = st.file_uploader("xHR / HR Regression CSV", type=["csv"])
 battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
 pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
 
-if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
-    df_upload = pd.read_csv(uploaded_file)
-    # Standardize columns for robust downstream use
+if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
+    # === Read and normalize column names on all files ===
+    df_upload = pd.read_csv(lineup_file)
     df_upload.columns = (
         df_upload.columns
             .str.strip()
@@ -592,56 +594,48 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             .str.replace(' ', '_')
             .str.replace(r'[^\w]', '', regex=True)
     )
+    # Confirm required columns present (robustness)
+    for col in ['batter', 'pitcher', 'city', 'park', 'date', 'time', 'mlb_id', 'confirmed', 'team_code', 'batting_order']:
+        if col not in df_upload.columns:
+            st.error(f"Missing required column: {col}")
+            st.stop()
+    # Only confirmed starters
     df_upload = df_upload[df_upload['confirmed'].str.lower() == 'y']
-    # Identify batter vs pitcher rows by 'batting_order'
-    batter_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() != 'sp'].copy()
-    pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() == 'sp'].copy()
-    # Map pitcher MLB IDs by team and date (handle multiple games per team per day if needed)
-    sp_map = dict(zip(
-        pitcher_rows['team_code'] + '_' + pitcher_rows['game_date'].astype(str),
-        pitcher_rows['mlb_id']
-    ))
-    # For robust merging: rename columns for pipeline
-    df_upload.rename(columns={
-        "player_name": "Batter",
-        "mlb_id": "batter_id",
-        "team_code": "Team",
-        "game_date": "Date"
-    }, inplace=True)
-    df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
-    # Assign pitcher for each batter's row
-    df_upload['pitcher_id'] = df_upload['Team'] + '_' + df_upload['Date']
-    df_upload['pitcher_id'] = df_upload['pitcher_id'].map(sp_map)
-    pitcher_name_map = dict(zip(
-        pitcher_rows['Team'] + '_' + pitcher_rows['Date'].astype(str),
-        pitcher_rows['Batter']
-    ))
-    df_upload['Pitcher'] = (df_upload['Team'] + '_' + df_upload['Date'].astype(str)).map(pitcher_name_map)
+    # Add normalized name columns for joining
+    df_upload['norm_batter'] = df_upload['batter'].apply(normalize_name)
+    df_upload['batter_id'] = df_upload['mlb_id']
+    # Identify pitcher for each team for this game (if 'batting_order' == 'sp')
+    pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() == 'sp']
+    team_pitcher_map = dict(zip(pitcher_rows['team_code'], pitcher_rows['mlb_id']))
+    pitcher_name_map = dict(zip(pitcher_rows['team_code'], pitcher_rows['batter']))
+    # For batters, map starting pitcher
+    df_upload['pitcher_id'] = df_upload['team_code'].map(team_pitcher_map)
+    df_upload['pitcher'] = df_upload['team_code'].map(pitcher_name_map)
+    # Merge xHR regression
     xhr_df = pd.read_csv(xhr_file)
+    xhr_df.columns = xhr_df.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
+    df_upload['norm_batter'] = df_upload['batter'].apply(normalize_name)
     df_merged = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
     )
-    df_merged['ParkFactor'] = df_merged['park'].map(park_factors) if 'park' in df_merged.columns else 1.0
-    df_merged['ParkOrientation'] = df_merged['park'].map(ballpark_orientations) if 'park' in df_merged.columns else None
+    # Ballpark info
+    df_merged['parkfactor'] = df_merged['park'].map(park_factors)
+    df_merged['parkorientation'] = df_merged['park'].map(ballpark_orientations)
+    # Main scoring loop
     progress = st.progress(0)
     rows = []
     for idx, row in df_merged.iterrows():
         try:
-            weather = get_weather(
-                row.get('city', ''),
-                row.get('Date', ''),
-                row.get('ParkOrientation', ''),
-                row.get('time', '')
-            )
+            weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
             b_stats = get_batter_stats_multi(row['batter_id'])
             p_stats = get_pitcher_stats_multi(row['pitcher_id'])
             b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
             p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
             p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
-            b_bats, _ = get_handedness(row['Batter'])
-            _, p_throws = get_handedness(row['Pitcher'])
+            b_bats, _ = get_handedness(row['batter'])
+            _, p_throws = get_handedness(row['pitcher'])
             platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
             pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
             pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
@@ -662,52 +656,49 @@ if uploaded_file and xhr_file and battedball_file and pitcher_battedball_file:
             record.update(p_spin_metrics_30)
             rows.append(record)
         except Exception as e:
-            log_error(f"Row error ({row.get('Batter', 'NA')} vs {row.get('Pitcher', 'NA')})", e)
+            log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
     df_final = pd.DataFrame(rows)
-
-    # Merge in batted ball profiles (batter, pitcher)
-    batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
+    # Merge batted ball CSVs
+    batted = pd.read_csv(battedball_file)
+    batted.columns = batted.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    batted = batted.rename(columns={"id": "batter_id"})
     df_final = df_final.merge(batted, on="batter_id", how="left")
-    pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
+    pitcher_bb = pd.read_csv(pitcher_battedball_file)
+    pitcher_bb.columns = pitcher_bb.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
     pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
     df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
-
     # Add HR score, batted ball scores, etc
     df_final.reset_index(drop=True, inplace=True)
-    df_final.insert(0, "Rank", df_final.index + 1)
+    df_final.insert(0, "rank", df_final.index + 1)
     df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
     df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
     df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-    # Percentile and tiers
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
-
-    # Machine Learning Model (if enough labeled data)
     df_leaderboard, importances = train_and_apply_model(df_final)
     if df_leaderboard is None:
         df_leaderboard = df_final.sort_values("HR_Score", ascending=False).reset_index(drop=True)
-        df_leaderboard["Rank"] = df_leaderboard.index + 1
+        df_leaderboard["rank"] = df_leaderboard.index + 1
     else:
         st.write("Feature importances:", importances)
-
     st.success("Leaderboard ready! Top Matchups:")
     cols_to_show = [
-        'Rank', 'Batter', 'Pitcher', 'HR_Score', 'HR_Tier', 'HR_Score_pctile', 'xhr_diff', 'xhr', 'hr_total',
+        'rank', 'batter', 'pitcher', 'HR_Score', 'HR_Tier', 'HR_Score_pctile', 'xhr_diff', 'xhr', 'hr_total',
         'park', 'city', 'time', 'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xSLG_14', 'B_xISO_14',
         'B_xwoba_14', 'B_sweet_spot_pct_14', 'B_hardhit_pct_14', 'B_WhiffRate_14',
         'P_BarrelRateAllowed_14', 'P_EVAllowed_14', 'P_SLG_14', 'P_xSLG_14', 'P_xISO_14', 'P_xwoba_14',
         'P_sweet_spot_pct_14', 'P_hardhit_pct_14', 'P_WhiffRate_14', 'P_FF_Spin_14', 'P_FF_Spin_30',
-        'Temp', 'Wind', 'WindEffect', 'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost',
-        'PlatoonWoba', 'PitchMixBoost'
+        'Temp', 'Wind', 'WindEffect', 'parkfactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost', 'PlatoonWoba', 'PitchMixBoost'
     ]
     if 'ML_HR_Prob' in df_leaderboard.columns:
         cols_to_show.append('ML_HR_Prob')
     cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
     st.dataframe(df_leaderboard[cols_to_show].head(15), use_container_width=True)
     st.subheader("Top 5 HR Scores")
-    st.bar_chart(df_leaderboard.set_index('Batter')[['HR_Score']].head(5))
+    st.bar_chart(df_leaderboard.set_index('batter')[['HR_Score']].head(5))
     csv_bytes = df_leaderboard.to_csv(index=False).encode()
     st.download_button("Download Full Leaderboard as CSV", csv_bytes, file_name="hr_leaderboard.csv")
     if error_log:
