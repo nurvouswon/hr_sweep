@@ -600,13 +600,13 @@ if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
         "mlb_id": "batter_id",
         "team_code": "Team",
         "game_date": "Date",
-        "batting_order": "BattingOrder"
+        "batting_order": "Batting_Order"
     }, inplace=True)
     # Create norm_batter for joining with xHR
     df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
 
     # ========== Identify Pitcher for Each Team ==========
-    pitcher_rows = df_upload[df_upload['battingorder'].astype(str).str.lower() == "sp"]
+    pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() == "sp"]
     team_pitcher_map = dict(zip(pitcher_rows['Team'], pitcher_rows['batter_id']))
     df_upload['pitcher_id'] = df_upload['Team'].map(team_pitcher_map)
     # For display, try to get pitcher name
