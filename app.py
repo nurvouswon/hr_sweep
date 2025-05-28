@@ -383,7 +383,7 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
         log_error("Pitch type matchup boost error", e)
         return 0
 
-# ============ Custom 2025 Environment Boosts ============
+# Custom environment, scoring, and ML below as in Block 1...
 def custom_2025_boost(row):
     bonus = 0
     if row.get('Park') == 'Sutter Health Park' and row.get('WindEffect') == 'out': bonus += 0.02
@@ -409,7 +409,6 @@ def custom_2025_boost(row):
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
-# ============ Batted Ball Profile Scores ============
 def calc_batted_ball_score(row):
     score = 0
     score += row.get('fb_rate', 0) * 0.09
@@ -460,7 +459,6 @@ def get_bullpen_hr_rate(team):
     bullpen_rates = {"default": 1.1}
     return bullpen_rates.get(team, bullpen_rates["default"])
 
-# ============ HR Score Computation ============
 def calc_hr_score(row):
     batter_score = (
         norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
@@ -571,164 +569,9 @@ def train_and_apply_model(df_leaderboard):
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
 
-# ============ Streamlit UI ============
+# ===== Streamlit UI and Pipeline End =====
 
-st.title("⚾ MLB HR Matchup Leaderboard – Advanced Statcast Scoring + Pitcher Trends + ML")
-st.markdown("""
-Upload the following 4 CSV files:
-- **Matchups**: `mlb_id`, `player_name`, `confirmed`, `team_code`, `game_date`, `batting_order`, `Park`, `City`, `Date`, `Time`, etc.
-- **xHR/HR Regression**: `player`, `hr_total`, `xhr`, `xhr_diff`
-- **Batter Batted-Ball Profile** (with `id`)
-- **Pitcher Batted-Ball Profile** (with `id`)
-""")
-
-lineup_file = st.file_uploader("Lineups/Matchups CSV (with MLB IDs)", type=["csv"])
-xhr_file = st.file_uploader("xHR / HR Regression CSV", type=["csv"])
-battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
-pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
-
-if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
-    # Read and standardize lineup file
-    df_upload = pd.read_csv(lineup_file)
-    # --- Normalize lineup CSV columns for consistent access ---
-df_upload.columns = (
-    df_upload.columns
-        .str.strip()
-        .str.lower()
-        .str.replace(' ', '_')
-        .str.replace(r'[^\w]', '', regex=True)
-)
-# Optional: Debug - See columns
-# st.write("Lineup CSV columns after normalization:", df_upload.columns.tolist())
-
-# Ensure all references are using normalized names from here on out:
-# For example, filter for confirmed batters:
-df_upload = df_upload[df_upload['confirmed'].str.lower() == 'y']
-
-# Get batter and pitcher rows by 'batting_order'
-batter_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() != 'sp'].copy()
-pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() == 'sp'].copy()
-
-# If you want to map team and date to pitcher MLB ID (for later use):
-sp_map = dict(zip(
-    pitcher_rows['team_code'] + '_' + pitcher_rows['game_date'].astype(str),
-    pitcher_rows['mlb_id']
-))
-    # Standardize column names
-    df_upload.columns = [c.strip().lower().replace(' ', '_') for c in df_upload.columns]
-    # Filter only confirmed starters (Y/y)
-    df_upload = df_upload[df_upload["confirmed"].str.lower() == "y"].copy()
-    # Rename columns to expected names
-    df_upload.rename(columns={
-        "player_name": "Batter",
-        "mlb_id": "batter_id",
-        "team_code": "Team",
-        "game_date": "Date",
-        "batting_order": "Batting_Order"
-    }, inplace=True)
-    # Create norm_batter for joining with xHR
-    df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
-
-    # ========== Identify Pitcher for Each Team ==========
-    pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() == "sp"]
-    team_pitcher_map = dict(zip(pitcher_rows['Team'], pitcher_rows['batter_id']))
-    df_upload['pitcher_id'] = df_upload['Team'].map(team_pitcher_map)
-    # For display, try to get pitcher name
-    pitcher_name_map = dict(zip(pitcher_rows['Team'], pitcher_rows['Batter']))
-    df_upload['Pitcher'] = df_upload['Team'].map(pitcher_name_map)
-
-    xhr_df = pd.read_csv(xhr_file)
-    xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
-    df_merged = df_upload.merge(
-        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
-        left_on='norm_batter', right_on='player_norm', how='left'
-    )
-
-    df_merged['ParkFactor'] = df_merged['park'].map(park_factors) if 'park' in df_merged.columns else 1.0
-    df_merged['ParkOrientation'] = df_merged['park'].map(ballpark_orientations) if 'park' in df_merged.columns else None
-
-    progress = st.progress(0)
-    rows = []
-    for idx, row in df_merged.iterrows():
-        try:
-            weather = get_weather(
-                row.get('city', ''),
-                row.get('Date', ''),
-                row.get('ParkOrientation', ''),
-                row.get('time', '')
-            )
-            b_stats = get_batter_stats_multi(row['batter_id'])
-            p_stats = get_pitcher_stats_multi(row['pitcher_id'])
-            b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
-            p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
-            p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
-            b_bats, _ = get_handedness(row['Batter'])
-            _, p_throws = get_handedness(row['Pitcher'])
-            platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
-            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
-            pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
-            pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
-            record = row.to_dict()
-            record.update(weather)
-            record.update(b_stats)
-            record.update(p_stats)
-            record.update(b_pitch_metrics)
-            record.update(p_pitch_metrics)
-            record.update(p_spin_metrics)
-            record['BatterHandedness'] = b_bats
-            record['PitcherHandedness'] = p_throws
-            record['PlatoonWoba'] = platoon_woba
-            record['PitchMixBoost'] = pt_boost
-            # Spin drop logic for 30d spin
-            p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
-            record.update(p_spin_metrics_30)
-            rows.append(record)
-        except Exception as e:
-            log_error(f"Row error ({row.get('Batter', 'NA')} vs {row.get('Pitcher', 'NA')})", e)
-        progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
-    df_final = pd.DataFrame(rows)
-
-    # Merge batted ball CSVs as before
-    batted = pd.read_csv(battedball_file).rename(columns={"id": "batter_id"})
-    df_final = df_final.merge(batted, on="batter_id", how="left")
-    pitcher_bb = pd.read_csv(pitcher_battedball_file).rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
-    pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
-    df_final = df_final.merge(pitcher_bb, on="pitcher_id", how="left")
-    # Add HR score, batted ball scores, etc
-    df_final.reset_index(drop=True, inplace=True)
-    df_final.insert(0, "Rank", df_final.index + 1)
-    df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
-    df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
-    df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
-    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-    df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
-    df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
-    df_leaderboard, importances = train_and_apply_model(df_final)
-    if df_leaderboard is None:
-        df_leaderboard = df_final.sort_values("HR_Score", ascending=False).reset_index(drop=True)
-        df_leaderboard["Rank"] = df_leaderboard.index + 1
-    else:
-        st.write("Feature importances:", importances)
-    st.success("Leaderboard ready! Top Matchups:")
-    cols_to_show = [
-        'Rank', 'Batter', 'Pitcher', 'HR_Score', 'HR_Tier', 'HR_Score_pctile', 'xhr_diff', 'xhr', 'hr_total',
-        'park', 'city', 'time', 'B_BarrelRate_14', 'B_EV_14', 'B_SLG_14', 'B_xSLG_14', 'B_xISO_14',
-        'B_xwoba_14', 'B_sweet_spot_pct_14', 'B_hardhit_pct_14', 'B_WhiffRate_14',
-        'P_BarrelRateAllowed_14', 'P_EVAllowed_14', 'P_SLG_14', 'P_xSLG_14', 'P_xISO_14', 'P_xwoba_14',
-        'P_sweet_spot_pct_14', 'P_hardhit_pct_14', 'P_WhiffRate_14', 'P_FF_Spin_14', 'P_FF_Spin_30',
-        'Temp', 'Wind', 'WindEffect', 'ParkFactor', 'BattedBallScore', 'PitcherBBScore', 'CustomBoost', 'PlatoonWoba', 'PitchMixBoost'
-    ]
-    if 'ML_HR_Prob' in df_leaderboard.columns:
-        cols_to_show.append('ML_HR_Prob')
-    cols_to_show = [col for col in cols_to_show if col in df_leaderboard.columns]
-    st.dataframe(df_leaderboard[cols_to_show].head(15), use_container_width=True)
-    st.subheader("Top 5 HR Scores")
-    st.bar_chart(df_leaderboard.set_index('Batter')[['HR_Score']].head(5))
-    csv_bytes = df_leaderboard.to_csv(index=False).encode()
-    st.download_button("Download Full Leaderboard as CSV", csv_bytes, file_name="hr_leaderboard.csv")
-    if error_log:
-        with st.expander("⚠️ Errors and Warnings (Click to expand)"):
-            for e in error_log[-30:]:
-                st.text(e)
-else:
-    st.info("Upload all 4 files to generate the leaderboard.")
+if error_log:
+    with st.expander("⚠️ Errors and Warnings (Click to expand)"):
+        for e in error_log[-30:]:
+            st.text(e)
