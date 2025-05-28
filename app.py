@@ -585,36 +585,38 @@ battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
 pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
 
 if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
-    # === Read and normalize column names on all files ===
-    # Normalize column names for robust downstream usage
-df_upload.columns = (
-    df_upload.columns
-        .str.strip()
-        .str.lower()
-        .str.replace(' ', '_')
-        .str.replace(r'[^\w]', '', regex=True)
-)
+    # 1. Read the CSV file
+    df_upload = pd.read_csv(lineup_file)
 
-# Map your file's columns to the exact app-required names
-df_upload.rename(columns={
-    'player_name': 'batter',
-    'mlb_id': 'batter_id',
-    'team_code': 'team_code',
-    'game_date': 'date',
-    'batting_order': 'batting_order',
-    'confirmed': 'confirmed',
-    'weather': 'weather',   # optional
-    'park': 'park',
-    'city': 'city',
-    'time': 'time'
-}, inplace=True)
+    # 2. Normalize column names for robust downstream usage
+    df_upload.columns = (
+        df_upload.columns
+            .str.strip()
+            .str.lower()
+            .str.replace(' ', '_')
+            .str.replace(r'[^\w]', '', regex=True)
+    )
 
-# Validate required columns
-required_cols = ['batter', 'batter_id', 'team_code', 'date', 'batting_order', 'confirmed', 'city', 'park', 'time']
-missing = [col for col in required_cols if col not in df_upload.columns]
-if missing:
-    st.error(f"Missing required columns: {missing}")
-    st.stop()
+    # 3. Map your file's columns to the exact app-required names
+    df_upload.rename(columns={
+        'player_name': 'batter',
+        'mlb_id': 'batter_id',
+        'team_code': 'team_code',
+        'game_date': 'date',
+        'batting_order': 'batting_order',
+        'confirmed': 'confirmed',
+        'weather': 'weather',   # optional
+        'park': 'park',
+        'city': 'city',
+        'time': 'time'
+    }, inplace=True)
+
+    # 4. Validate required columns
+    required_cols = ['batter', 'batter_id', 'team_code', 'date', 'batting_order', 'confirmed', 'city', 'park', 'time']
+    missing = [col for col in required_cols if col not in df_upload.columns]
+    if missing:
+        st.error(f"Missing required columns: {missing}")
+        st.stop()
     # Only confirmed starters
     df_upload = df_upload[df_upload['confirmed'].str.lower() == 'y']
     # Add normalized name columns for joining
