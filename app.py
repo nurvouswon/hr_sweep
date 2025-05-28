@@ -589,6 +589,15 @@ if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
     df_upload.columns = [c.strip().lower().replace(' ', '_') for c in df_upload.columns]
     # Filter only confirmed starters (Y/y)
     df_upload = df_upload[df_upload["confirmed"].str.lower() == "y"].copy()
+    # Identify pitchers from SP rows
+pitchers_df = df_upload[df_upload['batting_order'].str.upper() == 'SP'][['team_code', 'mlb_id', 'player_name']]
+pitchers_df.rename(columns={'mlb_id': 'pitcher_id', 'player_name': 'Pitcher'}, inplace=True)
+
+# Remove SP rows from main df to avoid including pitchers as batters
+df_upload = df_upload[df_upload['batting_order'].str.upper() != 'SP']
+
+# Merge pitcher info into batter rows by team
+df_upload = df_upload.merge(pitchers_df, on='team_code', how='left')
     # Rename columns to match expected code logic
     df_upload.rename(columns={
         "player_name": "Batter",
