@@ -590,6 +590,30 @@ pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv
 if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
     # Read and standardize lineup file
     df_upload = pd.read_csv(lineup_file)
+    # --- Normalize lineup CSV columns for consistent access ---
+df_upload.columns = (
+    df_upload.columns
+        .str.strip()
+        .str.lower()
+        .str.replace(' ', '_')
+        .str.replace(r'[^\w]', '', regex=True)
+)
+# Optional: Debug - See columns
+# st.write("Lineup CSV columns after normalization:", df_upload.columns.tolist())
+
+# Ensure all references are using normalized names from here on out:
+# For example, filter for confirmed batters:
+df_upload = df_upload[df_upload['confirmed'].str.lower() == 'y']
+
+# Get batter and pitcher rows by 'batting_order'
+batter_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() != 'sp'].copy()
+pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() == 'sp'].copy()
+
+# If you want to map team and date to pitcher MLB ID (for later use):
+sp_map = dict(zip(
+    pitcher_rows['team_code'] + '_' + pitcher_rows['game_date'].astype(str),
+    pitcher_rows['mlb_id']
+))
     # Standardize column names
     df_upload.columns = [c.strip().lower().replace(' ', '_') for c in df_upload.columns]
     # Filter only confirmed starters (Y/y)
