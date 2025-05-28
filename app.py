@@ -584,62 +584,68 @@ battedball_file = st.file_uploader("Batter batted-ball CSV", type=["csv"])
 pitcher_battedball_file = st.file_uploader("Pitcher batted-ball CSV", type=["csv"])
 
 if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
+    # Read and standardize the new lineup/matchup CSV
     df_upload = pd.read_csv(lineup_file)
-    # Standardize all column names
     df_upload.columns = [c.strip().lower().replace(' ', '_') for c in df_upload.columns]
-    # Filter only confirmed starters (Y/y)
-    df_upload = df_upload[df_upload["confirmed"].str.lower() == "y"].copy()
-    # Identify pitchers from SP rows
-pitchers_df = df_upload[df_upload['batting_order'].str.upper() == 'SP'][['team_code', 'mlb_id', 'player_name']]
-pitchers_df.rename(columns={'mlb_id': 'pitcher_id', 'player_name': 'Pitcher'}, inplace=True)
+    df_upload = df_upload[df_upload["confirmed"].str.lower() == "y"]
 
-# Remove SP rows from main df to avoid including pitchers as batters
-df_upload = df_upload[df_upload['batting_order'].str.upper() != 'SP']
+    # --- Assign correct pitcher_id to each batter ---
+    # 1. Get SPs by team (the starting pitchers)
+    pitchers_df = df_upload[df_upload['batting_order'].str.lower() == 'sp'][['team_code', 'mlb_id', 'player_name']]
+    pitchers_df = pitchers_df.rename(columns={
+        'mlb_id': 'pitcher_id',
+        'player_name': 'Pitcher'
+    })
+    # 2. Remove SP rows from batter pool
+    df_upload = df_upload[df_upload['batting_order'].str.lower() != 'sp']
+    # 3. Merge pitcher info onto batters by team
+    df_upload = df_upload.merge(pitchers_df, on='team_code', how='left')
 
-# Merge pitcher info into batter rows by team
-df_upload = df_upload.merge(pitchers_df, on='team_code', how='left')
-    # Rename columns to match expected code logic
+    # 4. Normalize batter name for merge
+    df_upload['norm_batter'] = df_upload['player_name'].apply(normalize_name)
+    df_upload['batter_id'] = df_upload['mlb_id']
+
+    # 5. Rename columns to match rest of pipeline (use whatever 'Park', 'City', etc you have)
     df_upload.rename(columns={
         "player_name": "Batter",
-        "mlb_id": "batter_id",
         "team_code": "Team",
         "game_date": "Date",
         "batting_order": "BattingOrder"
     }, inplace=True)
-    # Normalize batter names for joins
-    df_upload["norm_batter"] = df_upload["Batter"].apply(normalize_name)
 
+    # 6. Merge xHR regression
     xhr_df = pd.read_csv(xhr_file)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
-    # Join HR/xHR regression to batter using normalized names
+    df_upload['norm_batter'] = df_upload['Batter'].apply(normalize_name)
     df_merged = df_upload.merge(
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
     )
-    # Map park factors and orientations if available
-    df_merged['ParkFactor'] = df_merged['park'].map(park_factors) if 'park' in df_merged.columns else 1.0
-    df_merged['ParkOrientation'] = df_merged['park'].map(ballpark_orientations) if 'park' in df_merged.columns else None
 
+    # 7. Add park factors and orientation
+    df_merged['ParkFactor'] = df_merged['Park'].map(park_factors) if 'Park' in df_merged.columns else 1.0
+    df_merged['ParkOrientation'] = df_merged['Park'].map(ballpark_orientations) if 'Park' in df_merged.columns else None
+
+    # --- YOUR PROCESSING PIPELINE ---
     progress = st.progress(0)
     rows = []
     for idx, row in df_merged.iterrows():
         try:
             weather = get_weather(
-                row.get('city', ''),
-                row.get('date', ''),
+                row.get('City', ''),
+                row.get('Date', ''),
                 row.get('ParkOrientation', ''),
-                row.get('time', '')
+                row.get('Time', '')
             )
             b_stats = get_batter_stats_multi(row['batter_id'])
-            # For demo: fill pitcher_id as NaN (replace with your actual pitcher id logic)
-            p_stats = get_pitcher_stats_multi(row.get('pitcher_id', np.nan))
+            p_stats = get_pitcher_stats_multi(row['pitcher_id'])
             b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
-            p_pitch_metrics = get_pitcher_pitch_metrics(row.get('pitcher_id', np.nan))
-            p_spin_metrics = get_pitcher_spin_metrics(row.get('pitcher_id', np.nan))
+            p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
+            p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
             b_bats, _ = get_handedness(row['Batter'])
-            _, p_throws = get_handedness(row.get('Pitcher', ''))
+            _, p_throws = get_handedness(row['Pitcher'])
             platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
-            pitch_mix = get_pitcher_pitch_mix(row.get('pitcher_id', np.nan))
+            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
             pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
             pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
             record = row.to_dict()
@@ -653,7 +659,8 @@ df_upload = df_upload.merge(pitchers_df, on='team_code', how='left')
             record['PitcherHandedness'] = p_throws
             record['PlatoonWoba'] = platoon_woba
             record['PitchMixBoost'] = pt_boost
-            p_spin_metrics_30 = get_pitcher_spin_metrics(row.get('pitcher_id', np.nan), windows=[30])
+            # Spin drop logic for 30d spin
+            p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
             record.update(p_spin_metrics_30)
             rows.append(record)
         except Exception as e:
