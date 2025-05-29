@@ -276,6 +276,9 @@ def get_batter_pitch_metrics(batter_id, windows=[3,5,7,14]):
             start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
             end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             df = cached_statcast_batter(start, end, batter_id)
+            if 'description' not in df.columns or df.empty:
+                out[f'B_WhiffRate_{w}'] = None
+                continue
             swings = df[df['description'].str.contains('swing', na=False)]
             whiffs = swings[swings['description'].str.contains('miss', na=False)]
             whiff_rate = whiffs.shape[0] / swings.shape[0] if swings.shape[0] > 0 else None
@@ -292,6 +295,9 @@ def get_pitcher_pitch_metrics(pitcher_id, windows=[3,5,7,14]):
             start = (datetime.now() - timedelta(days=w)).strftime('%Y-%m-%d')
             end = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             df = cached_statcast_pitcher(start, end, pitcher_id)
+            if 'description' not in df.columns or df.empty:
+                out[f'P_WhiffRate_{w}'] = None
+                continue
             swings = df[df['description'].str.contains('swing', na=False)]
             whiffs = swings[swings['description'].str.contains('miss', na=False)]
             whiff_rate = whiffs.shape[0] / swings.shape[0] if swings.shape[0] > 0 else None
