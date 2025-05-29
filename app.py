@@ -477,70 +477,92 @@ def get_sample_flag(val):
 
 # ========== Robust, Advanced HR Scoring ==========
 def calc_hr_score(row):
+    # --- RECENCY-WEIGHTED: 3-day > 5-day > 7-day > 14-day ---
+    # You can tune these weights further if desired!
     batter_score = (
-        norm_barrel(row.get('B_BarrelRate_14')) * 0.12 +
-        norm_barrel(row.get('B_BarrelRate_7')) * 0.09 +
-        norm_barrel(row.get('B_BarrelRate_5')) * 0.07 +
-        norm_barrel(row.get('B_BarrelRate_3')) * 0.05 +
-        norm_ev(row.get('B_EV_14')) * 0.08 +
-        norm_ev(row.get('B_EV_7')) * 0.06 +
-        norm_ev(row.get('B_EV_5')) * 0.04 +
-        norm_ev(row.get('B_EV_3')) * 0.02 +
-        norm_xwoba(row.get('B_xwoba_14')) * 0.08 +
-        norm_xwoba(row.get('B_xwoba_7')) * 0.05 +
-        norm_xwoba(row.get('B_xwoba_5')) * 0.03 +
-        norm_xwoba(row.get('B_xwoba_3')) * 0.02 +
-        norm_sweetspot(row.get('B_sweet_spot_pct_14')) * 0.025 +
-        norm_sweetspot(row.get('B_sweet_spot_pct_7')) * 0.015 +
-        norm_sweetspot(row.get('B_sweet_spot_pct_5')) * 0.01 +
-        norm_sweetspot(row.get('B_sweet_spot_pct_3')) * 0.005 +
+        norm_barrel(row.get('B_BarrelRate_3')) * 0.12 +
+        norm_barrel(row.get('B_BarrelRate_5')) * 0.09 +
+        norm_barrel(row.get('B_BarrelRate_7')) * 0.07 +
+        norm_barrel(row.get('B_BarrelRate_14')) * 0.05 +
+
+        norm_ev(row.get('B_EV_3')) * 0.08 +
+        norm_ev(row.get('B_EV_5')) * 0.06 +
+        norm_ev(row.get('B_EV_7')) * 0.04 +
+        norm_ev(row.get('B_EV_14')) * 0.02 +
+
+        norm_xwoba(row.get('B_xwoba_3')) * 0.08 +
+        norm_xwoba(row.get('B_xwoba_5')) * 0.06 +
+        norm_xwoba(row.get('B_xwoba_7')) * 0.04 +
+        norm_xwoba(row.get('B_xwoba_14')) * 0.02 +
+
+        norm_sweetspot(row.get('B_sweet_spot_pct_3')) * 0.06 +
+        norm_sweetspot(row.get('B_sweet_spot_pct_5')) * 0.04 +
+        norm_sweetspot(row.get('B_sweet_spot_pct_7')) * 0.03 +
+        norm_sweetspot(row.get('B_sweet_spot_pct_14')) * 0.02 +
+
+        norm_hardhit(row.get('B_hardhit_pct_3')) * 0.06 +
+        norm_hardhit(row.get('B_hardhit_pct_5')) * 0.04 +
+        norm_hardhit(row.get('B_hardhit_pct_7')) * 0.03 +
         norm_hardhit(row.get('B_hardhit_pct_14')) * 0.02 +
-        norm_hardhit(row.get('B_hardhit_pct_7')) * 0.012 +
-        norm_hardhit(row.get('B_hardhit_pct_5')) * 0.008 +
-        norm_hardhit(row.get('B_hardhit_pct_3')) * 0.004 +
-        (1 - norm_whiff(row.get('B_WhiffRate_14'))) * 0.012 +
-        (1 - norm_whiff(row.get('B_WhiffRate_7'))) * 0.008 +
-        (1 - norm_whiff(row.get('B_WhiffRate_5'))) * 0.006 +
-        (1 - norm_whiff(row.get('B_WhiffRate_3'))) * 0.004 +
-        (row.get('B_SLG_14') or 0) * 0.06 +
-        (row.get('B_xSLG_14') or 0) * 0.07 +
-        (row.get('B_xISO_14') or 0) * 0.04
+
+        (1 - norm_whiff(row.get('B_WhiffRate_3'))) * 0.06 +
+        (1 - norm_whiff(row.get('B_WhiffRate_5'))) * 0.05 +
+        (1 - norm_whiff(row.get('B_WhiffRate_7'))) * 0.04 +
+        (1 - norm_whiff(row.get('B_WhiffRate_14'))) * 0.02 +
+
+        (row.get('B_SLG_3') or 0) * 0.08 +
+        (row.get('B_SLG_14') or 0) * 0.05 +
+        (row.get('B_xSLG_3') or 0) * 0.08 +
+        (row.get('B_xSLG_14') or 0) * 0.05 +
+        (row.get('B_xISO_3') or 0) * 0.04 +
+        (row.get('B_xISO_14') or 0) * 0.03
     )
+
     pitcher_score = (
-        norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.07 +
-        norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.05 +
-        norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.03 +
-        norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.02 +
-        norm_ev(row.get('P_EVAllowed_14')) * 0.05 +
-        norm_ev(row.get('P_EVAllowed_7')) * 0.03 +
-        norm_ev(row.get('P_EVAllowed_5')) * 0.02 +
-        norm_ev(row.get('P_EVAllowed_3')) * 0.01 +
-        norm_xwoba(row.get('P_xwoba_14')) * -0.05 +
-        norm_xwoba(row.get('P_xwoba_7')) * -0.03 +
-        norm_xwoba(row.get('P_xwoba_5')) * -0.02 +
-        norm_xwoba(row.get('P_xwoba_3')) * -0.01 +
-        norm_sweetspot(row.get('P_sweet_spot_pct_14')) * -0.02 +
+        norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.07 +
+        norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.05 +
+        norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.03 +
+        norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.02 +
+
+        norm_ev(row.get('P_EVAllowed_3')) * 0.05 +
+        norm_ev(row.get('P_EVAllowed_5')) * 0.03 +
+        norm_ev(row.get('P_EVAllowed_7')) * 0.02 +
+        norm_ev(row.get('P_EVAllowed_14')) * 0.01 +
+
+        norm_xwoba(row.get('P_xwoba_3')) * -0.05 +
+        norm_xwoba(row.get('P_xwoba_5')) * -0.03 +
+        norm_xwoba(row.get('P_xwoba_7')) * -0.02 +
+        norm_xwoba(row.get('P_xwoba_14')) * -0.01 +
+
+        norm_sweetspot(row.get('P_sweet_spot_pct_3')) * -0.03 +
+        norm_sweetspot(row.get('P_sweet_spot_pct_5')) * -0.02 +
         norm_sweetspot(row.get('P_sweet_spot_pct_7')) * -0.01 +
-        norm_sweetspot(row.get('P_sweet_spot_pct_5')) * -0.01 +
-        norm_sweetspot(row.get('P_sweet_spot_pct_3')) * -0.005 +
-        norm_hardhit(row.get('P_hardhit_pct_14')) * -0.02 +
-        norm_hardhit(row.get('P_hardhit_pct_7')) * -0.015 +
-        norm_hardhit(row.get('P_hardhit_pct_5')) * -0.01 +
-        norm_hardhit(row.get('P_hardhit_pct_3')) * -0.005 +
-        norm_whiff(row.get('P_WhiffRate_14')) * -0.01 +
-        norm_whiff(row.get('P_WhiffRate_7')) * -0.008 +
-        norm_whiff(row.get('P_WhiffRate_5')) * -0.006 +
-        norm_whiff(row.get('P_WhiffRate_3')) * -0.004 +
+        norm_sweetspot(row.get('P_sweet_spot_pct_14')) * -0.01 +
+
+        norm_hardhit(row.get('P_hardhit_pct_3')) * -0.03 +
+        norm_hardhit(row.get('P_hardhit_pct_5')) * -0.02 +
+        norm_hardhit(row.get('P_hardhit_pct_7')) * -0.01 +
+        norm_hardhit(row.get('P_hardhit_pct_14')) * -0.01 +
+
+        norm_whiff(row.get('P_WhiffRate_3')) * -0.01 +
+        norm_whiff(row.get('P_WhiffRate_5')) * -0.008 +
+        norm_whiff(row.get('P_WhiffRate_7')) * -0.006 +
+        norm_whiff(row.get('P_WhiffRate_14')) * -0.004 +
+
+        (row.get('P_SLG_3') or 0) * -0.07 +
         (row.get('P_SLG_14') or 0) * -0.04 +
-        (row.get('P_xSLG_14') or 0) * -0.05 +
-        (row.get('P_xISO_14') or 0) * -0.04
+        (row.get('P_xSLG_3') or 0) * -0.07 +
+        (row.get('P_xSLG_14') or 0) * -0.04 +
+        (row.get('P_xISO_3') or 0) * -0.04 +
+        (row.get('P_xISO_14') or 0) * -0.03
     )
+
     # Pitcher Spin Drop (Fastball, signals HR risk if spin collapses)
     spin_drop = 0
     try:
-        spin_14 = row.get('P_FF_Spin_14')
+        spin_3 = row.get('P_FF_Spin_3')
         spin_30 = row.get('P_FF_Spin_30')
-        if spin_14 and spin_30 and (spin_30 - spin_14) >= 100:
+        if spin_3 and spin_30 and (spin_30 - spin_3) >= 100:
             spin_drop = 0.01
     except:
         pass
