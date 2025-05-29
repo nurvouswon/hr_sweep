@@ -143,10 +143,15 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         )
         temp = weather_hour.get('temp_f')
         wind = weather_hour.get('wind_mph')
-        wind_dir = weather_hour.get('wind_dir', '')[:2].upper()
+        wind_dir_full = weather_hour.get('wind_dir', '').strip().upper()
+        # Use the full wind direction string if available
+        wind_dir = wind_dir_full if wind_dir_full in compass else wind_dir_full[:2]
         humidity = weather_hour.get('humidity')
         condition = weather_hour.get('condition', {}).get('text')
         wind_effect = is_wind_out(wind_dir, park_orientation)
+        # Log for debugging if "unknown"
+        if wind_effect == "unknown":
+            log_error("Wind Effect Debug", f"wind_dir={wind_dir}, orientation={park_orientation}")
         return {
             "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
             "Humidity": humidity, "Condition": condition
@@ -631,6 +636,7 @@ if lineup_file and xhr_file and battedball_file and pitcher_battedball_file:
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
     )
+    df_merged['park'] = df_merged['park'].str.strip().str.lower().str.replace(' ', '_')
     df_merged['parkfactor'] = df_merged['park'].map(park_factors)
     df_merged['parkorientation'] = df_merged['park'].map(ballpark_orientations)
     progress = st.progress(0)
