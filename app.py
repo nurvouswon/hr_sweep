@@ -721,35 +721,36 @@ if all_files_uploaded:
 )
 
 if all_files_uploaded:
-    # --- Load Logit Weights CSV Robustly ---
+if all_files_uploaded:
+    # --- Always define weights dict early ---
     logit_weights_dict = {}
-try:
-    logit_weights = pd.read_csv(logit_weights_file)
-    logit_weights.columns = (
-        logit_weights.columns
-            .str.strip().str.lower()
-            .str.replace(' ', '_')
-            .str.replace(r'[^\w]', '', regex=True)
-    )
-    if len(logit_weights.columns) >= 2:
-        feature_col = logit_weights.columns[0]
-        weight_col = logit_weights.columns[1]
-        for _, row in logit_weights.iterrows():
-            feature = row.get(feature_col)
-            weight = row.get(weight_col, 1.0)
-            if pd.notna(feature):
-                logit_weights_dict[feature] = weight
+
+    # --- Try loading Logistic Weights CSV ---
+    if logit_weights_file is not None:
+        try:
+            logit_weights = pd.read_csv(logit_weights_file)
+            logit_weights.columns = (
+                logit_weights.columns
+                    .str.strip().str.lower()
+                    .str.replace(' ', '_')
+                    .str.replace(r'[^\w]', '', regex=True)
+            )
+            if len(logit_weights.columns) >= 2:
+                feature_col = logit_weights.columns[0]
+                weight_col = logit_weights.columns[1]
+                for _, row in logit_weights.iterrows():
+                    feature = row.get(feature_col)
+                    weight = row.get(weight_col, 1.0)
+                    if pd.notna(feature):
+                        logit_weights_dict[feature] = weight
+            else:
+                st.warning("⚠️ Logit weights file has insufficient columns. Defaulting to all 1.0.")
+        except Exception as e:
+            st.warning(f"⚠️ Could not load logit weights: {e}")
     else:
-        st.warning("⚠️ Logit weights file has insufficient columns. Defaulting to all 1.0.")
-except Exception as e:
-    st.warning(f"⚠️ Could not load logit weights: {e}")
-    logit_weights_dict = {}
-else:
-    st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
-    # --- Build final leaderboard rows ---
-    progress = st.progress(0)
-    rows = []
-    # --- Process each matchup row and build final table ---
+        st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
+
+    # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
 if all_files_uploaded:
