@@ -713,6 +713,23 @@ if all_files_uploaded:
     park_hr = pd.read_csv(park_hr_file)
     park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
     logit_weights = pd.read_csv(logit_weights_file)
+    logit_weights.columns = (
+    logit_weights.columns
+    .str.strip().str.lower()
+    .str.replace(' ', '_')
+    .str.replace(r'[^\w]', '', regex=True)
+)
+
+# --- Save logistic weights as a dict for feature blending
+logit_weights_dict = {}
+if len(logit_weights.columns) >= 2:
+    feature_col = logit_weights.columns[0]
+    weight_col = logit_weights.columns[1]
+    for _, row in logit_weights.iterrows():
+        feature = row.get(feature_col)
+        weight = row.get(weight_col, 1.0)
+        if pd.notna(feature):
+            logit_weights_dict[feature] = weight
     logit_weights.columns = logit_weights.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
 
     # --- Apply and store HR rate and logistic weights columns
