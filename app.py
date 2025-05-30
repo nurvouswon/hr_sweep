@@ -786,38 +786,35 @@ if all_files_uploaded:
     df_final = pd.DataFrame(rows)
 
     # Add scores
-    # Inside if all_files_uploaded:
-df_final.reset_index(drop=True, inplace=True)
-df_final.insert(0, "rank", df_final.index + 1)
-df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
-df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
-df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
-df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
-df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
+    if all_files_uploaded:
+    df_final.reset_index(drop=True, inplace=True)
+    df_final.insert(0, "rank", df_final.index + 1)
+    df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
+    df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
+    df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
+    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+    df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
+    df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
+    # Save both Analyzer and default model columns
+    df_final['Analyzer_Blend'] = (
+        0.60 * df_final['HR_Score'] +
+        0.30 * df_final.get('AnalyzerLogitScore', 0) +
+        0.05 * df_final.get('HandedHRRate', 0) +
+        0.05 * df_final.get('PitchTypeHRRate', 0)
+    )
 
-# Add Analyzer blend score
-df_final['Analyzer_Blend'] = (
-    0.60 * df_final['HR_Score'] +
-    0.30 * df_final.get('AnalyzerLogitScore', 0) +
-    0.05 * df_final.get('HandedHRRate', 0) +
-    0.05 * df_final.get('PitchTypeHRRate', 0)
-)
+    # Optionally train ML
+    importances = None  # Only set this if you're running ML, otherwise leave as None
 
-# Try training ML model (if available), fallback if not
-df_leaderboard = None
-importances = None
-
-if 'train_and_apply_model' in globals():
-    try:
-        df_leaderboard, importances = train_and_apply_model(df_final)
-    except Exception as e:
-        st.warning(f"ML training failed, using fallback leaderboard: {e}")
-        df_leaderboard = None
-
-# Fallback leaderboard if ML failed
-if df_leaderboard is None or df_leaderboard.empty:
+    # Leaderboard sort and ranking by blended score (Analyzer_Blend)
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
+
+    # (Now you can display, chart, or export df_leaderboard)
+
+    # Optionally display feature importances if you have them:
+    if importances is not None:
+        st.write("Feature importances:", importances)
+
 else:
-    st.write("Feature importances:", importances)
+    st.info("Upload all 8 files to generate the leaderboard.")
