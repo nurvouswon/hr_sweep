@@ -722,7 +722,7 @@ if all_files_uploaded:
 
 if all_files_uploaded:
     # --- Clean and load logistic weights if present ---
-logit_weights_dict = {}
+    logit_weights_dict = {}
 
 try:
     logit_weights = pd.read_csv(logit_weights_file)
