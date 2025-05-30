@@ -613,156 +613,197 @@ def train_and_apply_model(df_leaderboard):
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
 
-    # ========== Streamlit UI Section ==========
+# ========== Streamlit UI Section ==========
 
-st.title("⚾ MLB HR Matchup Leaderboard – Analyzer Integration + Statcast + ML")
+st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
-Upload these 8 CSV files for full feature blending:
-1. Lineups/Matchups
-2. xHR/HR Regression
-3. Batter Batted-Ball Profile
-4. Pitcher Batted-Ball Profile
-5. Analyzer Batted-Ball Profile (Batter)
-6. Analyzer Batted-Ball Profile (Pitcher)
-7. Logistic Regression Feature Weights (Analyzer)
-8. Analyzer HR Rates (Handedness & Pitch Type)
+**Upload these 8 Analyzer CSVs for maximum prediction power:**  
+1. **Lineups/Matchups** (confirmed, with MLB IDs)  
+2. **xHR/HR Regression** (player, hr_total, xhr, xhr_diff)  
+3. **Batter Batted-Ball Profile** (with id)  
+4. **Pitcher Batted-Ball Profile** (with id)  
+5. **Handedness HR Rates** (batter_id, pitcher_hand, hr_rate, etc.)  
+6. **Pitch Type HR Rates** (batter_id, pitch_type, hr_rate, etc.)  
+7. **Park HR Rates** (park, hr_rate, etc.)  
+8. **Custom Logistic Weights** (feature, weight)  
 """)
 
-lineup_file = st.file_uploader("1️⃣ Lineups/Matchups CSV", type=["csv"])
+# --- File Uploaders for all 8 CSVs
+lineup_file = st.file_uploader("1️⃣ Lineups/Matchups CSV (with MLB IDs)", type=["csv"])
 xhr_file = st.file_uploader("2️⃣ xHR / HR Regression CSV", type=["csv"])
-battedball_file = st.file_uploader("3️⃣ Batter batted-ball CSV", type=["csv"])
-pitcher_battedball_file = st.file_uploader("4️⃣ Pitcher batted-ball CSV", type=["csv"])
-an_battedball_file = st.file_uploader("5️⃣ Analyzer Batter Profile CSV", type=["csv"])
-an_pitcherbb_file = st.file_uploader("6️⃣ Analyzer Pitcher Profile CSV", type=["csv"])
-logit_weights_file = st.file_uploader("7️⃣ Logistic Regression Feature Weights CSV", type=["csv"])
-hr_rates_file = st.file_uploader("8️⃣ Analyzer HR Rates CSV", type=["csv"])
+battedball_file = st.file_uploader("3️⃣ Batter batted-ball profile CSV", type=["csv"])
+pitcher_battedball_file = st.file_uploader("4️⃣ Pitcher batted-ball profile CSV", type=["csv"])
+handed_hr_file = st.file_uploader("5️⃣ Handedness HR Rates CSV", type=["csv"])
+pitchtype_hr_file = st.file_uploader("6️⃣ Pitch Type HR Rates CSV", type=["csv"])
+park_hr_file = st.file_uploader("7️⃣ Park HR Rates CSV", type=["csv"])
+logit_weights_file = st.file_uploader("8️⃣ Custom Logistic Weights CSV", type=["csv"])
 
-# --- Logistic Weights Dict ---
-logit_weights_dict = {}
-if logit_weights_file is not None:
-    df_logit_weights = pd.read_csv(logit_weights_file)
-    feature_col = df_logit_weights.columns[0]
-    weight_col = df_logit_weights.columns[1]
-    for _, row in df_logit_weights.iterrows():
-        f = row[feature_col]
-        w = row[weight_col] if pd.notnull(row[weight_col]) else 1.0
-        logit_weights_dict[f] = w
+# --- All files required for full Analyzer run
+csvs_uploaded = [
+    lineup_file, xhr_file, battedball_file, pitcher_battedball_file,
+    handed_hr_file, pitchtype_hr_file, park_hr_file, logit_weights_file
+]
+all_files_uploaded = all(csvs_uploaded)
 
-# --- Proceed when all 8 CSVs are uploaded ---
-if (lineup_file and xhr_file and battedball_file and pitcher_battedball_file and
-    an_battedball_file and an_pitcherbb_file and logit_weights_file and hr_rates_file):
-
-    # Load dataframes
-    df_lineup = pd.read_csv(lineup_file)
-    df_xhr = pd.read_csv(xhr_file)
-    df_battedball = pd.read_csv(battedball_file)
-    df_pitcherbb = pd.read_csv(pitcher_battedball_file)
-    df_an_battedball = pd.read_csv(an_battedball_file)
-    df_an_pitcherbb = pd.read_csv(an_pitcherbb_file)
-    df_hr_rates = pd.read_csv(hr_rates_file)
-
-    # --- Column Normalization for main input ---
-    df_lineup.columns = (
-        df_lineup.columns
-        .str.strip().str.lower().str.replace(' ', '_')
-        .str.replace(r'[^\w]', '', regex=True)
+if all_files_uploaded:
+    # --- Load all files with robust normalization
+    df_upload = pd.read_csv(lineup_file, sep=None, engine='python')
+    df_upload.columns = (
+        df_upload.columns
+            .str.strip().str.lower()
+            .str.replace(' ', '_')
+            .str.replace(r'[^\w]', '', regex=True)
     )
-    # Example renames (edit as per your actual column names)
-    df_lineup.rename(columns={
-        'mlb_id': 'batter_id',
-        'player_name': 'batter',
-        'team_code': 'team_code',
-        'game_date': 'date',
-        'batting_order': 'batting_order',
-        'confirmed': 'confirmed',
-        'city': 'city',
-        'park': 'park',
-        'time': 'time'
-    }, inplace=True)
-
-    # Filter confirmed batters
-    df_lineup = df_lineup[df_lineup['confirmed'].astype(str).str.lower() == 'y']
-
-    # --- Add pitcher columns ---
-    pitcher_rows = df_lineup[df_lineup['batting_order'].astype(str).str.lower() == 'sp']
+    # Standardize lineup columns
+    rename_dict = {
+        'team_code': 'team_code', 'game_date': 'date', 'mlb_id': 'batter_id',
+        'player_name': 'batter', 'batting_order': 'batting_order', 'confirmed': 'confirmed',
+        'weather': 'weather', 'city': 'city', 'park': 'park', 'time': 'time'
+    }
+    df_upload.rename(columns={k: v for k, v in rename_dict.items() if k in df_upload.columns}, inplace=True)
+    required_cols = ['batter', 'batter_id', 'team_code', 'date', 'batting_order', 'confirmed', 'city', 'park', 'time']
+    missing = [col for col in required_cols if col not in df_upload.columns]
+    if missing:
+        st.error(f"Missing required columns: {missing}")
+        st.stop()
+    df_upload = df_upload[df_upload['confirmed'].astype(str).str.lower() == 'y']
+    df_upload['norm_batter'] = df_upload['batter'].apply(normalize_name)
+    df_upload['batter_id'] = df_upload['batter_id'].astype(str)
+    # Assign pitcher per team (SP = starting pitcher)
+    pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() == 'sp']
     team_pitcher_map = dict(zip(pitcher_rows['team_code'], pitcher_rows['batter_id']))
     pitcher_name_map = dict(zip(pitcher_rows['team_code'], pitcher_rows['batter']))
-    df_lineup['pitcher_id'] = df_lineup['team_code'].map(team_pitcher_map)
-    df_lineup['pitcher'] = df_lineup['team_code'].map(pitcher_name_map)
+    df_upload['pitcher_id'] = df_upload['team_code'].map(team_pitcher_map)
+    df_upload['pitcher'] = df_upload['team_code'].map(pitcher_name_map)
 
-    # --- Merge xHR regression ---
-    df_xhr.columns = df_xhr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    df_xhr['player_norm'] = df_xhr['player'].apply(normalize_name)
-    df_lineup['norm_batter'] = df_lineup['batter'].apply(normalize_name)
-    df_merged = df_lineup.merge(
-        df_xhr[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
+    # --- Merge xHR regression data
+    xhr_df = pd.read_csv(xhr_file)
+    xhr_df.columns = xhr_df.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
+    df_upload['norm_batter'] = df_upload['batter'].apply(normalize_name)
+    df_merged = df_upload.merge(
+        xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
     )
-
-    # --- Merge Statcast and Batted Ball CSVs ---
     df_merged['park'] = df_merged['park'].str.strip().str.lower().str.replace(' ', '_')
+    df_merged['parkfactor'] = df_merged['park'].map(park_factors)
+    df_merged['parkorientation'] = df_merged['park'].map(ballpark_orientations)
+
+    # --- Merge batted ball profiles (batter & pitcher)
+    batted = pd.read_csv(battedball_file)
+    batted.columns = batted.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    batted = batted.rename(columns={"id": "batter_id"})
     df_merged['batter_id'] = df_merged['batter_id'].astype(str)
+    batted['batter_id'] = batted['batter_id'].astype(str)
+    df_merged = df_merged.merge(batted, on="batter_id", how="left")
+
+    pitcher_bb = pd.read_csv(pitcher_battedball_file)
+    pitcher_bb.columns = pitcher_bb.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
+    pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
     df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
-    df_battedball['batter_id'] = df_battedball['batter_id'].astype(str)
-    df_pitcherbb['pitcher_id'] = df_pitcherbb['pitcher_id'].astype(str)
+    pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
+    df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
 
-    # Merge in standard and analyzer profiles
-    df_merged = df_merged.merge(df_battedball, on="batter_id", how="left", suffixes=('', '_bb'))
-    df_merged = df_merged.merge(df_pitcherbb, on="pitcher_id", how="left", suffixes=('', '_pbb'))
-    df_an_battedball['batter_id'] = df_an_battedball['batter_id'].astype(str)
-    df_merged = df_merged.merge(df_an_battedball, on="batter_id", how="left", suffixes=('', '_anb'))
-    df_an_pitcherbb['pitcher_id'] = df_an_pitcherbb['pitcher_id'].astype(str)
-    df_merged = df_merged.merge(df_an_pitcherbb, on="pitcher_id", how="left", suffixes=('', '_anp'))
+    # --- Merge extra Analyzer CSVs (Handedness, Pitch Type, Park HR rates, Logit weights)
+    handed_hr = pd.read_csv(handed_hr_file)
+    handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    pitchtype_hr = pd.read_csv(pitchtype_hr_file)
+    pitchtype_hr.columns = pitchtype_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    park_hr = pd.read_csv(park_hr_file)
+    park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    logit_weights = pd.read_csv(logit_weights_file)
+    logit_weights.columns = logit_weights.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
 
-    # --- Merge HR Rates ---
-    hr_rate_cols = df_hr_rates.columns.str.lower().tolist()
-    if 'batter_id' in hr_rate_cols:
-        df_hr_rates['batter_id'] = df_hr_rates['batter_id'].astype(str)
-        df_merged = df_merged.merge(df_hr_rates, on='batter_id', how='left', suffixes=('', '_hrate'))
+    # --- Apply and store HR rate and logistic weights columns
+    # (If columns don't match, fillna, skip, or warn)
+    if 'hr_rate' in handed_hr.columns:
+        df_merged = df_merged.merge(
+            handed_hr[['batter_id', 'pitcher_hand', 'hr_rate']],
+            left_on=['batter_id', 'pitcher'],
+            right_on=['batter_id', 'pitcher_hand'], how='left', suffixes=('', '_handed')
+        )
+    if 'hr_rate' in pitchtype_hr.columns and 'pitch_type' in pitchtype_hr.columns:
+        df_merged = df_merged.merge(
+            pitchtype_hr[['batter_id', 'pitch_type', 'hr_rate']],
+            left_on=['batter_id'],
+            right_on=['batter_id'], how='left', suffixes=('', '_pitch')
+        )
+    if 'hr_rate' in park_hr.columns and 'park' in park_hr.columns:
+        df_merged = df_merged.merge(
+            park_hr[['park', 'hr_rate']],
+            left_on=['park'],
+            right_on=['park'], how='left', suffixes=('', '_park')
+        )
+    # Save logistic weights as a dict for feature blending
+    logit_weights_dict = {}
+    for _, row in logit_weights.iterrows():
+        logit_weights_dict[row['feature']] = row['weight'] if 'feature' in row and 'weight' in row else 1.0
 
-    # --- Logistic Regression Blended Score ---
-    analyzer_features = [c for c in df_an_battedball.columns if c in logit_weights_dict]
-    if analyzer_features:
-        df_merged['AnalyzerLogitScore'] = (
-            df_merged[analyzer_features].fillna(0) * pd.Series({k: logit_weights_dict.get(k, 1.0) for k in analyzer_features})
-        ).sum(axis=1)
-    else:
-        df_merged['AnalyzerLogitScore'] = 0
+    # --- Prepare leaderboard construction
+    progress = st.progress(0)
+    rows = []
+    for idx, row in df_merged.iterrows():
+        try:
+            weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
+            b_stats = get_batter_stats_multi(row['batter_id'])
+            p_stats = get_pitcher_stats_multi(row['pitcher_id'])
+            b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
+            p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
+            p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
+            b_bats, _ = get_handedness(row['batter'])
+            _, p_throws = get_handedness(row['pitcher'])
+            platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
+            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
+            pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
+            pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
+            record = row.to_dict()
+            record.update(weather)
+            record.update(b_stats)
+            record.update(p_stats)
+            record.update(b_pitch_metrics)
+            record.update(p_pitch_metrics)
+            record.update(p_spin_metrics)
+            record['BatterHandedness'] = b_bats
+            record['PitcherHandedness'] = p_throws
+            record['PlatoonWoba'] = platoon_woba
+            record['PitchMixBoost'] = pt_boost
+            p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
+            record.update(p_spin_metrics_30)
+            # Include analyzer CSV extra rates if available
+            record['HandedHRRate'] = row.get('hr_rate', np.nan)
+            record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
+            record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
+            # Custom logistic scoring if weights given
+            analyzer_score = 0
+            for feat, weight in logit_weights_dict.items():
+                analyzer_score += (record.get(feat, 0) or 0) * float(weight)
+            record['AnalyzerLogitScore'] = analyzer_score
+            rows.append(record)
+        except Exception as e:
+            log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
+        progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
+    df_final = pd.DataFrame(rows)
 
-    # --- HR Rates (Handed/PitchType) ---
-    df_merged['HandedHRRate'] = df_merged['HandedHRRate'] if 'HandedHRRate' in df_merged.columns else 0
-    df_merged['PitchTypeHRRate'] = df_merged['PitchTypeHRRate'] if 'PitchTypeHRRate' in df_merged.columns else 0
-
-    # --- Calculate All Scores ---
-    df_merged['HR_Score'] = df_merged.apply(calc_hr_score, axis=1)
-    df_merged['Analyzer_Blend'] = (
-        0.60 * df_merged['HR_Score'] +
-        0.30 * df_merged['AnalyzerLogitScore'] +
-        0.05 * df_merged['HandedHRRate'] +
-        0.05 * df_merged['PitchTypeHRRate']
+    # Add scores
+    df_final.reset_index(drop=True, inplace=True)
+    df_final.insert(0, "rank", df_final.index + 1)
+    df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
+    df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
+    df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
+    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+    df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
+    df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
+    # Save both Analyzer and default model columns
+    df_final['Analyzer_Blend'] = (
+        0.60 * df_final['HR_Score'] +
+        0.30 * df_final.get('AnalyzerLogitScore', 0) +
+        0.05 * df_final.get('HandedHRRate', 0) +
+        0.05 * df_final.get('PitchTypeHRRate', 0)
     )
-    df_merged['HR_Score_pctile'] = df_merged['Analyzer_Blend'].rank(pct=True)
-    df_merged['HR_Tier'] = df_merged['Analyzer_Blend'].apply(hr_score_tier)
-    df_merged.reset_index(drop=True, inplace=True)
-    df_merged['rank'] = df_merged['Analyzer_Blend'].rank(method='min', ascending=False).astype(int)
 
-    # --- Output ---
-    leaderboard_cols = [
-        'rank', 'batter', 'pitcher', 'Analyzer_Blend', 'HR_Tier', 'HR_Score_pctile',
-        'xhr_diff', 'xhr', 'hr_total', 'park', 'city', 'time',
-        'HR_Score', 'AnalyzerLogitScore', 'HandedHRRate', 'PitchTypeHRRate'
-    ] + [c for c in analyzer_features if c in df_merged.columns]
-    leaderboard_cols = [c for c in leaderboard_cols if c in df_merged.columns]
+    # Optionally train ML
+    df_leaderboard, importances = train_and_apply_model(df_final)
 
-    st.success("Leaderboard ready! Top Matchups:")
-    st.dataframe(df_merged[leaderboard_cols].sort_values('Analyzer_Blend', ascending=False).head(15), use_container_width=True)
-    st.subheader("Top 5 HR Scores")
-    st.bar_chart(df_merged.set_index('batter')[['Analyzer_Blend']].head(5))
-    csv_bytes = df_merged.sort_values('Analyzer_Blend', ascending=False).to_csv(index=False).encode()
-    st.download_button("Download Full Leaderboard as CSV", csv_bytes, file_name="hr_leaderboard.csv")
-    if error_log:
-        with st.expander("⚠️ Errors and Warnings (Click to expand)"):
-            for e in error_log[-30:]:
-                st.text(e)
-else:
-    st.info("Upload all 8 files to generate the leaderboard with analyzer integration.")
+if df_leaderboard is None:
+    df_lead
