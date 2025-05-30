@@ -795,7 +795,8 @@ if all_files_uploaded:
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
-    # Save both Analyzer and default model columns
+    
+    # Blended Analyzer score
     df_final['Analyzer_Blend'] = (
         0.60 * df_final['HR_Score'] +
         0.30 * df_final.get('AnalyzerLogitScore', 0) +
@@ -803,18 +804,11 @@ if all_files_uploaded:
         0.05 * df_final.get('PitchTypeHRRate', 0)
     )
 
-    # Optionally train ML
-    importances = None  # Only set this if you're running ML, otherwise leave as None
-
-    # Leaderboard sort and ranking by blended score (Analyzer_Blend)
+    # ML fallback / ranking
+    importances = None
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
 
-    # (Now you can display, chart, or export df_leaderboard)
-
-    # Optionally display feature importances if you have them:
+    # Optional: display importances
     if importances is not None:
         st.write("Feature importances:", importances)
-
-else:
-    st.info("Upload all 8 files to generate the leaderboard.")
