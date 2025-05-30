@@ -720,51 +720,27 @@ if all_files_uploaded:
     .str.replace(r'[^\w]', '', regex=True)
 )
 
-# --- Save logistic weights as a dict for feature blending
-logit_weights_dict = {}
-if len(logit_weights.columns) >= 2:
-    feature_col = logit_weights.columns[0]
-    weight_col = logit_weights.columns[1]
-    for _, row in logit_weights.iterrows():
-        feature = row.get(feature_col)
-        weight = row.get(weight_col, 1.0)
-        if pd.notna(feature):
-            logit_weights_dict[feature] = weight
-    logit_weights.columns = logit_weights.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+if all_files_uploaded:
+    # --- Clean and load logistic weights if present ---
+    logit_weights_dict = {}
+    if logit_weights_file is not None:
+        logit_weights = pd.read_csv(logit_weights_file)
+        logit_weights.columns = (
+            logit_weights.columns
+            .str.strip().str.lower()
+            .str.replace(' ', '_')
+            .str.replace(r'[^\w]', '', regex=True)
+        )
+        if len(logit_weights.columns) >= 2:
+            feature_col = logit_weights.columns[0]
+            weight_col = logit_weights.columns[1]
+            for _, row in logit_weights.iterrows():
+                feature = row.get(feature_col)
+                weight = row.get(weight_col, 1.0)
+                if pd.notna(feature):
+                    logit_weights_dict[feature] = weight
 
-    # --- Apply and store HR rate and logistic weights columns
-    # (If columns don't match, fillna, skip, or warn)
-    if 'hr_rate' in handed_hr.columns:
-        df_merged = df_merged.merge(
-            handed_hr[['batter_id', 'pitcher_hand', 'hr_rate']],
-            left_on=['batter_id', 'pitcher'],
-            right_on=['batter_id', 'pitcher_hand'], how='left', suffixes=('', '_handed')
-        )
-    if 'hr_rate' in pitchtype_hr.columns and 'pitch_type' in pitchtype_hr.columns:
-        df_merged = df_merged.merge(
-            pitchtype_hr[['batter_id', 'pitch_type', 'hr_rate']],
-            left_on=['batter_id'],
-            right_on=['batter_id'], how='left', suffixes=('', '_pitch')
-        )
-    if 'hr_rate' in park_hr.columns and 'park' in park_hr.columns:
-        df_merged = df_merged.merge(
-            park_hr[['park', 'hr_rate']],
-            left_on=['park'],
-            right_on=['park'], how='left', suffixes=('', '_park')
-        )
-    # Save logistic weights as a dict for feature blending
-    # Auto-detect feature and weight columns from CSV
-logit_weights_dict = {}
-if len(logit_weights.columns) >= 2:
-    feature_col = logit_weights.columns[0]
-    weight_col = logit_weights.columns[1]
-    for _, row in logit_weights.iterrows():
-        feature = row.get(feature_col)
-        weight = row.get(weight_col, 1.0)
-        if pd.notna(feature):
-            logit_weights_dict[feature] = weight
-
-    # --- Prepare leaderboard construction
+    # --- Build final leaderboard rows ---
     progress = st.progress(0)
     rows = []
     for idx, row in df_merged.iterrows():
@@ -794,11 +770,9 @@ if len(logit_weights.columns) >= 2:
             record['PitchMixBoost'] = pt_boost
             p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
             record.update(p_spin_metrics_30)
-            # Include analyzer CSV extra rates if available
             record['HandedHRRate'] = row.get('hr_rate', np.nan)
             record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
             record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
-            # Custom logistic scoring if weights given
             analyzer_score = 0
             for feat, weight in logit_weights_dict.items():
                 analyzer_score += (record.get(feat, 0) or 0) * float(weight)
@@ -807,10 +781,8 @@ if len(logit_weights.columns) >= 2:
         except Exception as e:
             log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
-    df_final = pd.DataFrame(rows)
 
-    # Add scores
-if all_files_uploaded:
+    df_final = pd.DataFrame(rows)
     df_final.reset_index(drop=True, inplace=True)
     df_final.insert(0, "rank", df_final.index + 1)
     df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
@@ -819,7 +791,7 @@ if all_files_uploaded:
     df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
-    # Save both Analyzer and default model columns
+
     df_final['Analyzer_Blend'] = (
         0.60 * df_final['HR_Score'] +
         0.30 * df_final.get('AnalyzerLogitScore', 0) +
@@ -827,15 +799,10 @@ if all_files_uploaded:
         0.05 * df_final.get('PitchTypeHRRate', 0)
     )
 
-    importances = None  # Set this if you run ML, else leave as None
-
-    # Leaderboard sort and ranking by blended score (Analyzer_Blend)
+    # Fallback sort by Analyzer_Blend
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
-
-    # Optionally display or use feature importances if you have them:
-    if importances is not None:
-        st.write("Feature importances:", importances)
+    importances = None
 
 else:
-    st.info("Upload all 8 files to generate the leaderboard.")
+    st.warning("⚠️ Upload all 8 files to compute the full leaderboard.")
