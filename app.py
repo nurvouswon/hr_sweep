@@ -801,6 +801,7 @@ for _, row in df_logit_weights.iterrows():
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
     # Save both Analyzer and default model columns
+    df_leaderboard = df_final.copy()
     df_final['Analyzer_Blend'] = (
         0.60 * df_final['HR_Score'] +
         0.30 * df_final.get('AnalyzerLogitScore', 0) +
