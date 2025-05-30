@@ -721,18 +721,16 @@ if all_files_uploaded:
 )
 
 if all_files_uploaded:
-    # --- Clean and load logistic weights if present ---
-    logit_weights_dict = {}
-
+# --- Load Logit Weights CSV Robustly ---
+logit_weights_dict = {}
 try:
     logit_weights = pd.read_csv(logit_weights_file)
     logit_weights.columns = (
         logit_weights.columns
-        .str.strip().str.lower()
-        .str.replace(' ', '_')
-        .str.replace(r'[^\w]', '', regex=True)
+            .str.strip().str.lower()
+            .str.replace(' ', '_')
+            .str.replace(r'[^\w]', '', regex=True)
     )
-
     if len(logit_weights.columns) >= 2:
         feature_col = logit_weights.columns[0]
         weight_col = logit_weights.columns[1]
@@ -742,9 +740,10 @@ try:
             if pd.notna(feature):
                 logit_weights_dict[feature] = weight
     else:
-        st.warning("⚠️ Logit weights file must have at least two columns.")
+        st.warning("⚠️ Logit weights file has insufficient columns. Defaulting to all 1.0.")
 except Exception as e:
     st.warning(f"⚠️ Could not load logit weights: {e}")
+    logit_weights_dict = {}
 else:
     st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
     # --- Build final leaderboard rows ---
