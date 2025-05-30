@@ -723,33 +723,25 @@ if all_files_uploaded:
 if all_files_uploaded:
     # --- Always define weights dict early ---
     logit_weights_dict = {}
-
 if logit_weights_file is not None:
     try:
         logit_weights = pd.read_csv(logit_weights_file)
-        if logit_weights.empty or logit_weights.shape[1] < 2:
-            st.warning("⚠️ Logit weights file is empty or has fewer than 2 columns. Using default weights of 1.0.")
-        else:
-            # Clean and standardize column names
-            logit_weights.columns = (
-                logit_weights.columns
-                    .str.strip().str.lower()
-                    .str.replace(' ', '_')
-                    .str.replace(r'[^\w]', '', regex=True)
-            )
-
+        if len(logit_weights.columns) >= 2:
             feature_col = logit_weights.columns[0]
             weight_col = logit_weights.columns[1]
-
             for _, row in logit_weights.iterrows():
-                feature = row.get(feature_col)
-                weight = row.get(weight_col, 1.0)
+                feature = row[feature_col]
+                weight = row[weight_col]
                 if pd.notna(feature):
                     logit_weights_dict[feature] = weight
+        else:
+            st.warning("⚠️ Logit weights file has insufficient columns. Defaulting to all 1.0.")
     except Exception as e:
         st.warning(f"⚠️ Could not load logit weights: {e}")
+        logit_weights_dict = {}
 else:
-    st.info("📂 No Logistic Weights CSV uploaded. Using default weights.")
+    st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
+    logit_weights_dict = {}
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
