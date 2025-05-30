@@ -804,5 +804,9 @@ if all_files_uploaded:
 
     # Optionally train ML
     df_leaderboard, importances = train_and_apply_model(df_final)
-    if df_leaderboard is None:
-        
+
+if df_leaderboard is None:
+    df_leaderboard = df_final.sort_values("HR_Score", ascending=False).reset_index(drop=True)
+    df_leaderboard["rank"] = df_leaderboard.index + 1
+else:
+    st.write("Feature importances:", importances)
