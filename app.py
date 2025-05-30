@@ -751,6 +751,8 @@ else:
     # --- Process each matchup row and build final table ---
     progress = st.progress(0)
     rows = []
+if all_files_uploaded:
+    rows = []
     for idx, row in df_merged.iterrows():
         try:
             weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
@@ -816,7 +818,6 @@ else:
     importances = None  # Set/import if using ML, otherwise leave as None
 
     # Optionally display or use feature importances
-if all_files_uploaded:
     if importances is not None:
         st.write("Feature importances:", importances)
 
