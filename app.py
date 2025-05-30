@@ -736,9 +736,16 @@ if all_files_uploaded:
             right_on=['park'], how='left', suffixes=('', '_park')
         )
     # Save logistic weights as a dict for feature blending
-    logit_weights_dict = {}
+    # Auto-detect feature and weight columns from CSV
+logit_weights_dict = {}
+if len(logit_weights.columns) >= 2:
+    feature_col = logit_weights.columns[0]
+    weight_col = logit_weights.columns[1]
     for _, row in logit_weights.iterrows():
-        logit_weights_dict[row['feature']] = row['weight'] if 'feature' in row and 'weight' in row else 1.0
+        feature = row.get(feature_col)
+        weight = row.get(weight_col, 1.0)
+        if pd.notna(feature):
+            logit_weights_dict[feature] = weight
 
     # --- Prepare leaderboard construction
     progress = st.progress(0)
