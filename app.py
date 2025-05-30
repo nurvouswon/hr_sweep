@@ -721,8 +721,8 @@ if all_files_uploaded:
 )
 
 if all_files_uploaded:
-# --- Load Logit Weights CSV Robustly ---
-logit_weights_dict = {}
+    # --- Load Logit Weights CSV Robustly ---
+    logit_weights_dict = {}
 try:
     logit_weights = pd.read_csv(logit_weights_file)
     logit_weights.columns = (
