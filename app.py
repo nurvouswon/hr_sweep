@@ -823,5 +823,5 @@ else:
     st.success("Leaderboard ready! Top HR Matchups below.")
     st.dataframe(df_leaderboard.head(20), use_container_width=True)
 
-else:
+    else:
     st.info("📂 Upload all 8 files to generate the leaderboard.")
