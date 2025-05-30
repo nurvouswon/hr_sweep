@@ -803,7 +803,9 @@ if all_files_uploaded:
     )
 
     # Optionally train ML
-df_leaderboard, importances = train_and_apply_model(df_final) if 'train_and_apply_model' in globals() else (None, None)
+df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
+df_leaderboard["rank"] = df_leaderboard.index + 1
+importances = None
 
 # Robust fallback to avoid NameError and ensure df_leaderboard always exists
 if df_leaderboard is None or df_leaderboard.empty:
