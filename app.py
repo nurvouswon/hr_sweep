@@ -723,9 +723,24 @@ if all_files_uploaded:
 if all_files_uploaded:
     # --- Always define weights dict early ---
     logit_weights_dict = {}
+
 if logit_weights_file is not None:
     try:
+        # Ensure file isn't empty
+        content = logit_weights_file.read()
+        if not content.strip():
+            raise ValueError("Uploaded logistic weights file is empty.")
+        logit_weights_file.seek(0)  # reset pointer after reading
+
+        # Load and clean
         logit_weights = pd.read_csv(logit_weights_file)
+        logit_weights.columns = (
+            logit_weights.columns
+                .str.strip().str.lower()
+                .str.replace(' ', '_')
+                .str.replace(r'[^\w]', '', regex=True)
+        )
+
         if len(logit_weights.columns) >= 2:
             feature_col = logit_weights.columns[0]
             weight_col = logit_weights.columns[1]
@@ -735,7 +750,8 @@ if logit_weights_file is not None:
                 if pd.notna(feature):
                     logit_weights_dict[feature] = weight
         else:
-            st.warning("⚠️ Logit weights file has insufficient columns. Defaulting to all 1.0.")
+            st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
+
     except Exception as e:
         st.warning(f"⚠️ Could not load logit weights: {e}")
         logit_weights_dict = {}
