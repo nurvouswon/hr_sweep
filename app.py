@@ -816,7 +816,7 @@ else:
     importances = None  # Set/import if using ML, otherwise leave as None
 
     # Optionally display or use feature importances
-    if all_files_uploaded:
+if all_files_uploaded:
     if importances is not None:
         st.write("Feature importances:", importances)
 
