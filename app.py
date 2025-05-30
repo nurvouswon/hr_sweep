@@ -748,6 +748,9 @@ else:
     # --- Build final leaderboard rows ---
     progress = st.progress(0)
     rows = []
+    # --- Process each matchup row and build final table ---
+    progress = st.progress(0)
+    rows = []
     for idx, row in df_merged.iterrows():
         try:
             weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
@@ -775,9 +778,11 @@ else:
             record['PitchMixBoost'] = pt_boost
             p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
             record.update(p_spin_metrics_30)
+            # Analyzer extra rates
             record['HandedHRRate'] = row.get('hr_rate', np.nan)
             record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
             record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
+            # Custom logistic scoring if weights given
             analyzer_score = 0
             for feat, weight in logit_weights_dict.items():
                 analyzer_score += (record.get(feat, 0) or 0) * float(weight)
@@ -787,6 +792,7 @@ else:
             log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
 
+    # --- Score & leaderboard construction ---
     df_final = pd.DataFrame(rows)
     df_final.reset_index(drop=True, inplace=True)
     df_final.insert(0, "rank", df_final.index + 1)
@@ -804,19 +810,18 @@ else:
         0.05 * df_final.get('PitchTypeHRRate', 0)
     )
 
-    # Fallback sort by Analyzer_Blend
+    # Final leaderboard sort and rank
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
-    importances = None  # Set this if you run ML, else leave as None
+    importances = None  # Set/import if using ML, otherwise leave as None
 
-    # Leaderboard sort and ranking by blended score (Analyzer_Blend)
-    df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
-    df_leaderboard["rank"] = df_leaderboard.index + 1
-
-    # Optionally display or use feature importances if you have them:
+    # Optionally display or use feature importances
     if importances is not None:
         st.write("Feature importances:", importances)
 
-# Optional: if you want a fallback display when not all files are uploaded
-if not all_files_uploaded:
+    # Show the top leaderboard table
+    st.success("Leaderboard ready! Top HR Matchups below.")
+    st.dataframe(df_leaderboard.head(20), use_container_width=True)
+
+else:
     st.info("📂 Upload all 8 files to generate the leaderboard.")
