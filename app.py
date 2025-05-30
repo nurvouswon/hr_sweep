@@ -807,7 +807,16 @@ else:
     # Fallback sort by Analyzer_Blend
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
-    importances = None
+    importances = None  # Set this if you run ML, else leave as None
 
-else:
-    st.warning("⚠️ Upload all 8 files to compute the full leaderboard.")
+    # Leaderboard sort and ranking by blended score (Analyzer_Blend)
+    df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
+    df_leaderboard["rank"] = df_leaderboard.index + 1
+
+    # Optionally display or use feature importances if you have them:
+    if importances is not None:
+        st.write("Feature importances:", importances)
+
+# Optional: if you want a fallback display when not all files are uploaded
+if not all_files_uploaded:
+    st.info("📂 Upload all 8 files to generate the leaderboard.")
