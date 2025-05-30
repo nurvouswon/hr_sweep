@@ -726,13 +726,13 @@ if all_files_uploaded:
 
 if logit_weights_file is not None:
     try:
-        # Ensure file isn't empty
+        # Check that the file is not empty
         content = logit_weights_file.read()
-        if not content.strip():
+        if not content or not content.strip():
             raise ValueError("Uploaded logistic weights file is empty.")
-        logit_weights_file.seek(0)  # reset pointer after reading
+        logit_weights_file.seek(0)  # Critical: reset file pointer after read!
 
-        # Load and clean
+        # Now load as CSV
         logit_weights = pd.read_csv(logit_weights_file)
         logit_weights.columns = (
             logit_weights.columns
@@ -757,6 +757,7 @@ if logit_weights_file is not None:
         logit_weights_dict = {}
 else:
     st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
+
     logit_weights_dict = {}
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
