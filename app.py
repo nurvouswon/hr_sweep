@@ -721,7 +721,6 @@ if all_files_uploaded:
 )
 
 if all_files_uploaded:
-if all_files_uploaded:
     # --- Always define weights dict early ---
     logit_weights_dict = {}
 
