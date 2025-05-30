@@ -804,5 +804,5 @@ if all_files_uploaded:
 
     # Optionally train ML
     df_leaderboard, importances = train_and_apply_model(df_final)
-        if df_leaderboard is None:
+    if df_leaderboard is None:
         
