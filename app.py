@@ -752,9 +752,9 @@ else:
     st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
     logit_weights_dict = {}
     # --- Begin leaderboard row construction ---
-    progress = st.progress(0)
-    rows = []
+    # --- Begin leaderboard row construction ---
 if all_files_uploaded:
+    progress = st.progress(0)
     rows = []
     for idx, row in df_merged.iterrows():
         try:
