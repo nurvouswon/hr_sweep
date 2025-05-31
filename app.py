@@ -772,9 +772,9 @@ if all_files_uploaded:
         logit_weights_dict = {}
 
     # --- Build leaderboard rows ---
+if all_files_uploaded:
     progress = st.progress(0)
     rows = []
-
     for idx, row in df_merged.iterrows():
         try:
             weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
@@ -783,12 +783,11 @@ if all_files_uploaded:
             b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
             p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
             p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
+            
+            # Restore exact handedness logic
             b_bats, _ = get_handedness(row['batter'])
             _, p_throws = get_handedness(row['pitcher'])
-            platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
-            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
-            pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
-            pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
+
             record = row.to_dict()
             record.update(weather)
             record.update(b_stats)
@@ -798,31 +797,28 @@ if all_files_uploaded:
             record.update(p_spin_metrics)
             record['BatterHandedness'] = b_bats
             record['PitcherHandedness'] = p_throws
-            record['PlatoonWoba'] = platoon_woba
+
+            # Restore exact PlatoonWoba logic
+            if b_bats and p_throws:
+                record['PlatoonWoba'] = get_platoon_woba(row['batter_id'], p_throws)
+            else:
+                record['PlatoonWoba'] = None
+
+            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
+            pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
+            pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
             record['PitchMixBoost'] = pt_boost
             p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
             record.update(p_spin_metrics_30)
-
             # Analyzer extra rates
-            key_handed = (str(row['batter_id']), str(p_throws).upper() if p_throws else "")
-            record['HandedHRRate'] = handed_hr_dict.get(key_handed, np.nan)
-
-            main_pitch_type = row.get('pitch_type', None)
-            if main_pitch_type:
-                key_pitch = (str(row['batter_id']), str(main_pitch_type).upper())
-                record['PitchTypeHRRate'] = pitchtype_hr_dict.get(key_pitch, np.nan)
-            else:
-                record['PitchTypeHRRate'] = np.nan
-
-            park_name = str(row.get('park', '')).lower().strip().replace(" ", "_")
-            record['ParkHRRate'] = park_hr_dict.get(park_name, np.nan)
-
-            # Analyzer Logit Score
+            record['HandedHRRate'] = row.get('hr_rate', np.nan)
+            record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
+            record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
+            # Custom logistic scoring if weights given
             analyzer_score = 0
             for feat, weight in logit_weights_dict.items():
                 analyzer_score += (record.get(feat, 0) or 0) * float(weight)
             record['AnalyzerLogitScore'] = analyzer_score
-
             rows.append(record)
         except Exception as e:
             log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
@@ -850,7 +846,7 @@ if all_files_uploaded:
 
     st.success("Leaderboard ready! Top HR Matchups below.")
     st.dataframe(df_leaderboard.head(20), use_container_width=True)
-    st.write("Sample feature columns:", df_leaderboard[['AnalyzerLogitScore', 'HandedHRRate', 'PitchTypeHRRate', 'ParkHRRate']].head())
+    st.write("Sample feature columns:", df_leaderboard[['AnalyzerLogitScore', 'HandedHRRate', 'PitchTypeHRRate', 'ParkHRRate', 'PitcherHandedness', 'PlatoonWoba']].head())
 
     if error_log:
         with st.expander("⚠️ Errors and Warnings (Click to expand)"):
