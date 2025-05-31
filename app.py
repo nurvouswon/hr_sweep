@@ -690,10 +690,20 @@ if all_files_uploaded:
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
     )
-    df_merged['park'] = df_merged['park'].str.strip().str.lower().str.replace(' ', '_')
+    # --- Normalize park names and map park orientation ---
+    df_merged['park'] = df_merged['park'].astype(str).str.strip().str.lower().str.replace(' ', '_')
+
     df_merged['parkfactor'] = df_merged['park'].map(park_factors)
+
     df_merged['parkorientation'] = df_merged['park'].map(ballpark_orientations)
 
+# Diagnostic: Log parks that are not matched in the orientation dictionary
+    unmatched_parks = df_merged[df_merged['parkorientation'].isna()]['park'].unique()
+    if len(unmatched_parks) > 0:
+    log_error("Missing parkorientation mapping", unmatched_parks)
+
+# Always provide a fallback for park orientation (so wind effect doesn't break)
+    df_merged['parkorientation'] = df_merged['parkorientation'].fillna('N')
     # --- Merge batted ball profiles (batter & pitcher)
     batted = pd.read_csv(battedball_file)
     batted.columns = batted.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
