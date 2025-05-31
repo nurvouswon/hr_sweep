@@ -161,7 +161,12 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     except Exception as e:
         log_error("Weather", e)
         return {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
+weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
+record.update(weather)
 
+# Debug output for weather fields
+if weather.get("WindDir") is None or weather.get("WindEffect") is None or weather.get("Humidity") is None:
+    log_error("Missing Weather", f"{row.get('city')} | {row.get('date')} | {row.get('time')} | weather={weather}")
 # ========== Normalization Functions ==========
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
