@@ -722,141 +722,139 @@ if all_files_uploaded:
 
 if all_files_uploaded:
     # --- Robust Analyzer/Leaderboard Construction: Paste this block ---
+    # Build lookup dicts from the 3 rate CSVs
+    handed_hr_dict = {}
+    if 'batter_id' in handed_hr.columns and 'pitcher_hand' in handed_hr.columns and 'hr_rate' in handed_hr.columns:
+        handed_hr_dict = {
+            (str(row['batter_id']), str(row['pitcher_hand']).upper()): row['hr_rate']
+            for _, row in handed_hr.iterrows()
+        }
 
-# Build lookup dicts from the 3 rate CSVs
-handed_hr_dict = {}
-if 'batter_id' in handed_hr.columns and 'pitcher_hand' in handed_hr.columns and 'hr_rate' in handed_hr.columns:
-    handed_hr_dict = {
-        (str(row['batter_id']), str(row['pitcher_hand']).upper()): row['hr_rate']
-        for _, row in handed_hr.iterrows()
-    }
+    pitchtype_hr_dict = {}
+    if 'batter_id' in pitchtype_hr.columns and 'pitch_type' in pitchtype_hr.columns and 'hr_rate' in pitchtype_hr.columns:
+        pitchtype_hr_dict = {
+            (str(row['batter_id']), str(row['pitch_type']).upper()): row['hr_rate']
+            for _, row in pitchtype_hr.iterrows()
+        }
 
-pitchtype_hr_dict = {}
-if 'batter_id' in pitchtype_hr.columns and 'pitch_type' in pitchtype_hr.columns and 'hr_rate' in pitchtype_hr.columns:
-    pitchtype_hr_dict = {
-        (str(row['batter_id']), str(row['pitch_type']).upper()): row['hr_rate']
-        for _, row in pitchtype_hr.iterrows()
-    }
+    park_hr_dict = {}
+    if 'park' in park_hr.columns and 'hr_rate' in park_hr.columns:
+        park_hr_dict = {
+            str(row['park']).lower().strip().replace(" ", "_"): row['hr_rate']
+            for _, row in park_hr.iterrows()
+        }
 
-park_hr_dict = {}
-if 'park' in park_hr.columns and 'hr_rate' in park_hr.columns:
-    park_hr_dict = {
-        str(row['park']).lower().strip().replace(" ", "_"): row['hr_rate']
-        for _, row in park_hr.iterrows()
-    }
-
-# Load logit weights robustly
-logit_weights_dict = {}
-try:
-    if logit_weights_file is not None:
-        logit_weights = pd.read_csv(logit_weights_file)
-        logit_weights.columns = (
-            logit_weights.columns
-                .str.strip().str.lower()
-                .str.replace(' ', '_')
-                .str.replace(r'[^\w]', '', regex=True)
-        )
-        if len(logit_weights.columns) >= 2:
-            feature_col = logit_weights.columns[0]
-            weight_col = logit_weights.columns[1]
-            for _, row in logit_weights.iterrows():
-                feature = row[feature_col]
-                weight = row[weight_col]
-                if pd.notna(feature):
-                    logit_weights_dict[feature] = weight
-        else:
-            st.warning("⚠️ Logit weights file has insufficient columns. Defaulting to 1.0 weights.")
-    else:
-        st.info("No logit weights file provided. Default weights will be used.")
-except Exception as e:
-    st.warning(f"⚠️ Could not load logit weights: {e}")
+    # Load logit weights robustly
     logit_weights_dict = {}
-
-# --- Build leaderboard rows ---
-progress = st.progress(0)
-rows = []
-
-for idx, row in df_merged.iterrows():
     try:
-        weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
-        b_stats = get_batter_stats_multi(row['batter_id'])
-        p_stats = get_pitcher_stats_multi(row['pitcher_id'])
-        b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
-        p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
-        p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
-        b_bats, _ = get_handedness(row['batter'])
-        _, p_throws = get_handedness(row['pitcher'])
-        platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
-        pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
-        pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
-        pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
-        record = row.to_dict()
-        record.update(weather)
-        record.update(b_stats)
-        record.update(p_stats)
-        record.update(b_pitch_metrics)
-        record.update(p_pitch_metrics)
-        record.update(p_spin_metrics)
-        record['BatterHandedness'] = b_bats
-        record['PitcherHandedness'] = p_throws
-        record['PlatoonWoba'] = platoon_woba
-        record['PitchMixBoost'] = pt_boost
-        p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
-        record.update(p_spin_metrics_30)
-
-        # Analyzer extra rates
-        key_handed = (str(row['batter_id']), str(p_throws).upper() if p_throws else "")
-        record['HandedHRRate'] = handed_hr_dict.get(key_handed, np.nan)
-
-        main_pitch_type = row.get('pitch_type', None)
-        if main_pitch_type:
-            key_pitch = (str(row['batter_id']), str(main_pitch_type).upper())
-            record['PitchTypeHRRate'] = pitchtype_hr_dict.get(key_pitch, np.nan)
+        if logit_weights_file is not None:
+            logit_weights = pd.read_csv(logit_weights_file)
+            logit_weights.columns = (
+                logit_weights.columns
+                    .str.strip().str.lower()
+                    .str.replace(' ', '_')
+                    .str.replace(r'[^\w]', '', regex=True)
+            )
+            if len(logit_weights.columns) >= 2:
+                feature_col = logit_weights.columns[0]
+                weight_col = logit_weights.columns[1]
+                for _, row in logit_weights.iterrows():
+                    feature = row[feature_col]
+                    weight = row[weight_col]
+                    if pd.notna(feature):
+                        logit_weights_dict[feature] = weight
+            else:
+                st.warning("⚠️ Logit weights file has insufficient columns. Defaulting to 1.0 weights.")
         else:
-            record['PitchTypeHRRate'] = np.nan
-
-        park_name = str(row.get('park', '')).lower().strip().replace(" ", "_")
-        record['ParkHRRate'] = park_hr_dict.get(park_name, np.nan)
-
-        # Analyzer Logit Score
-        analyzer_score = 0
-        for feat, weight in logit_weights_dict.items():
-            analyzer_score += (record.get(feat, 0) or 0) * float(weight)
-        record['AnalyzerLogitScore'] = analyzer_score
-
-        rows.append(record)
+            st.info("No logit weights file provided. Default weights will be used.")
     except Exception as e:
-        log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
-    progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
+        st.warning(f"⚠️ Could not load logit weights: {e}")
+        logit_weights_dict = {}
 
-# --- Score & leaderboard construction ---
-df_final = pd.DataFrame(rows)
-df_final.reset_index(drop=True, inplace=True)
-df_final.insert(0, "rank", df_final.index + 1)
-df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
-df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
-df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
-df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
-df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
-df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
-df_final['Analyzer_Blend'] = (
-    0.60 * df_final['HR_Score'] +
-    0.30 * df_final.get('AnalyzerLogitScore', 0) +
-    0.05 * df_final.get('HandedHRRate', 0) +
-    0.05 * df_final.get('PitchTypeHRRate', 0)
-)
+    # --- Build leaderboard rows ---
+    progress = st.progress(0)
+    rows = []
 
-df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
-df_leaderboard["rank"] = df_leaderboard.index + 1
+    for idx, row in df_merged.iterrows():
+        try:
+            weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
+            b_stats = get_batter_stats_multi(row['batter_id'])
+            p_stats = get_pitcher_stats_multi(row['pitcher_id'])
+            b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
+            p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
+            p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
+            b_bats, _ = get_handedness(row['batter'])
+            _, p_throws = get_handedness(row['pitcher'])
+            platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
+            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
+            pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
+            pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
+            record = row.to_dict()
+            record.update(weather)
+            record.update(b_stats)
+            record.update(p_stats)
+            record.update(b_pitch_metrics)
+            record.update(p_pitch_metrics)
+            record.update(p_spin_metrics)
+            record['BatterHandedness'] = b_bats
+            record['PitcherHandedness'] = p_throws
+            record['PlatoonWoba'] = platoon_woba
+            record['PitchMixBoost'] = pt_boost
+            p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
+            record.update(p_spin_metrics_30)
 
-st.success("Leaderboard ready! Top HR Matchups below.")
-st.dataframe(df_leaderboard.head(20), use_container_width=True)
-st.write("Sample feature columns:", df_leaderboard[['AnalyzerLogitScore', 'HandedHRRate', 'PitchTypeHRRate', 'ParkHRRate']].head())
+            # Analyzer extra rates
+            key_handed = (str(row['batter_id']), str(p_throws).upper() if p_throws else "")
+            record['HandedHRRate'] = handed_hr_dict.get(key_handed, np.nan)
 
-if error_log:
-    with st.expander("⚠️ Errors and Warnings (Click to expand)"):
-        for e in error_log[-30:]:
-            st.text(e)
+            main_pitch_type = row.get('pitch_type', None)
+            if main_pitch_type:
+                key_pitch = (str(row['batter_id']), str(main_pitch_type).upper())
+                record['PitchTypeHRRate'] = pitchtype_hr_dict.get(key_pitch, np.nan)
+            else:
+                record['PitchTypeHRRate'] = np.nan
 
+            park_name = str(row.get('park', '')).lower().strip().replace(" ", "_")
+            record['ParkHRRate'] = park_hr_dict.get(park_name, np.nan)
+
+            # Analyzer Logit Score
+            analyzer_score = 0
+            for feat, weight in logit_weights_dict.items():
+                analyzer_score += (record.get(feat, 0) or 0) * float(weight)
+            record['AnalyzerLogitScore'] = analyzer_score
+
+            rows.append(record)
+        except Exception as e:
+            log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
+        progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
+
+    # --- Score & leaderboard construction ---
+    df_final = pd.DataFrame(rows)
+    df_final.reset_index(drop=True, inplace=True)
+    df_final.insert(0, "rank", df_final.index + 1)
+    df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
+    df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
+    df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
+    df_final['HR_Score'] = df_final.apply(calc_hr_score, axis=1)
+    df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
+    df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
+    df_final['Analyzer_Blend'] = (
+        0.60 * df_final['HR_Score'] +
+        0.30 * df_final.get('AnalyzerLogitScore', 0) +
+        0.05 * df_final.get('HandedHRRate', 0) +
+        0.05 * df_final.get('PitchTypeHRRate', 0)
+    )
+
+    df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
+    df_leaderboard["rank"] = df_leaderboard.index + 1
+
+    st.success("Leaderboard ready! Top HR Matchups below.")
+    st.dataframe(df_leaderboard.head(20), use_container_width=True)
+    st.write("Sample feature columns:", df_leaderboard[['AnalyzerLogitScore', 'HandedHRRate', 'PitchTypeHRRate', 'ParkHRRate']].head())
+
+    if error_log:
+        with st.expander("⚠️ Errors and Warnings (Click to expand)"):
+            for e in error_log[-30:]:
+                st.text(e)
 else:
     st.info("📂 Upload all 8 files to generate the leaderboard.")
