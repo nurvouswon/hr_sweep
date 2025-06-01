@@ -754,36 +754,27 @@ df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
 pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
 df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
 
-    # --- Merge extra Analyzer CSVs (Handedness, Pitch Type, Park HR rates, Logit weights)
+if all_files_uploaded:
+    # --- Normalize and load Analyzer CSVs ---
     handed_hr = pd.read_csv(handed_hr_file)
     handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+
     pitchtype_hr = pd.read_csv(pitchtype_hr_file)
     pitchtype_hr.columns = pitchtype_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+
     park_hr = pd.read_csv(park_hr_file)
     park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+
     logit_weights = pd.read_csv(logit_weights_file)
     logit_weights.columns = (
-    logit_weights.columns
-    .str.strip().str.lower()
-    .str.replace(' ', '_')
-    .str.replace(r'[^\w]', '', regex=True)
-)
+        logit_weights.columns
+        .str.strip().str.lower()
+        .str.replace(' ', '_')
+        .str.replace(r'[^\w]', '', regex=True)
+    )
 
-if all_files_uploaded:
     # --- Always define weights dict early ---
-    logit_weights_dict = {}
-
-if logit_weights_file is not None:
-    try:
-        # Always seek to start before reading with pandas
-        logit_weights_file.seek(0)
-        logit_weights = pd.read_csv(logit_weights_file)
-        logit_weights.columns = (
-            logit_weights.columns
-                .str.strip().str.lower()
-                .str.replace(' ', '_')
-                .str.replace(r'[^\w]', '', regex=True)
-        )
+    logit_weights_dict = {}       )
         if len(logit_weights.columns) >= 2:
             feature_col = logit_weights.columns[0]
             weight_col = logit_weights.columns[1]
@@ -800,7 +791,6 @@ if logit_weights_file is not None:
 else:
     st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
     logit_weights_dict = {}
-    # --- Begin leaderboard row construction ---
     # --- Begin leaderboard row construction ---
 if all_files_uploaded:
     progress = st.progress(0)
