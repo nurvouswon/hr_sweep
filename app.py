@@ -785,8 +785,6 @@ if all_files_uploaded:
     else:
             st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
 
-logit_weights_dict = {}
-
 try:
     if logit_weights_file is not None:
         logit_weights = pd.read_csv(logit_weights_file)
