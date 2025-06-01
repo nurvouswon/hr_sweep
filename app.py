@@ -738,20 +738,6 @@ df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
 pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
 df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
 
-# Merge pitcher batted ball data
-pitcher_bb = pd.read_csv(pitcher_battedball_file)
-pitcher_bb.columns = (
-    pitcher_bb.columns
-    .str.strip().str.lower()
-    .str.replace(' ', '_')
-    .str.replace(r'[^\w]', '', regex=True)
-)
-pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", "bbe": "bbe_pbb"})
-pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ["pitcher_id", "name_pbb"]})
-df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
-pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
-df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
-
 if all_files_uploaded:
     # --- Normalize and load Analyzer CSVs ---
     handed_hr = pd.read_csv(handed_hr_file)
