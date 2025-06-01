@@ -691,37 +691,68 @@ if all_files_uploaded:
         left_on='norm_batter', right_on='player_norm', how='left'
     )
     # --- Normalize park names and map park orientation ---
-    df_merged['park'] = df_merged['park'].astype(str).str.strip().str.lower().str.replace(' ', '_')
+    df_merged['park'] = (
+    df_merged['park']
+    .astype(str)
+    .str.strip()
+    .str.lower()
+    .str.replace(' ', '_')
+)
 
-    df_merged['parkfactor'] = df_merged['park'].map(park_factors)
+# Map park factors
+df_merged['parkfactor'] = df_merged['park'].map(park_factors)
 
-    df_merged['parkorientation'] = df_merged['park'].map(ballpark_orientations)
+# Map park orientations
+df_merged['parkorientation'] = df_merged['park'].map(ballpark_orientations)
 
-# Diagnostic: Log parks that are not matched in the orientation dictionary
-    unmatched_parks = df_merged[df_merged['parkorientation'].isna()]['park'].unique()
-    if len(unmatched_parks) > 0:
+# Diagnostic: Log parks that were not matched in the orientation dictionary
+unmatched_parks = df_merged[df_merged['parkorientation'].isna()]['park'].unique()
+if len(unmatched_parks) > 0:
     log_error("Missing parkorientation mapping", unmatched_parks)
 
-# Always provide a fallback for park orientation (so wind effect doesn't break)
-    df_merged['parkorientation'] = df_merged['parkorientation'].fillna('N')
-    unmatched_parks = df_merged[df_merged['parkorientation'].isna()]['park'].unique()
-    if len(unmatched_parks) > 0:
-    log_error("Missing parkorientation mapping", unmatched_parks)
-    # --- Merge batted ball profiles (batter & pitcher)
-    batted = pd.read_csv(battedball_file)
-    batted.columns = batted.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    batted = batted.rename(columns={"id": "batter_id"})
-    df_merged['batter_id'] = df_merged['batter_id'].astype(str)
-    batted['batter_id'] = batted['batter_id'].astype(str)
-    df_merged = df_merged.merge(batted, on="batter_id", how="left")
+# Fallback for missing orientation so wind effect logic doesn't break
+df_merged['parkorientation'] = df_merged['parkorientation'].fillna('N')
 
-    pitcher_bb = pd.read_csv(pitcher_battedball_file)
-    pitcher_bb.columns = pitcher_bb.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", 'bbe': 'bbe_pbb'})
-    pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ['pitcher_id', 'name_pbb']})
-    df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
-    pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
-    df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
+# --- Merge batted ball profiles (batter & pitcher) ---
+batted = pd.read_csv(battedball_file)
+batted.columns = (
+    batted.columns
+    .str.strip().str.lower()
+    .str.replace(' ', '_')
+    .str.replace(r'[^\w]', '', regex=True)
+)
+batted = batted.rename(columns={"id": "batter_id"})
+df_merged['batter_id'] = df_merged['batter_id'].astype(str)
+batted['batter_id'] = batted['batter_id'].astype(str)
+df_merged = df_merged.merge(batted, on="batter_id", how="left")
+
+# Merge pitcher batted ball data
+pitcher_bb = pd.read_csv(pitcher_battedball_file)
+pitcher_bb.columns = (
+    pitcher_bb.columns
+    .str.strip().str.lower()
+    .str.replace(' ', '_')
+    .str.replace(r'[^\w]', '', regex=True)
+)
+pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", "bbe": "bbe_pbb"})
+pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ["pitcher_id", "name_pbb"]})
+df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
+pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
+df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
+
+# Merge pitcher batted ball data
+pitcher_bb = pd.read_csv(pitcher_battedball_file)
+pitcher_bb.columns = (
+    pitcher_bb.columns
+    .str.strip().str.lower()
+    .str.replace(' ', '_')
+    .str.replace(r'[^\w]', '', regex=True)
+)
+pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", "bbe": "bbe_pbb"})
+pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ["pitcher_id", "name_pbb"]})
+df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
+pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
+df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
 
     # --- Merge extra Analyzer CSVs (Handedness, Pitch Type, Park HR rates, Logit weights)
     handed_hr = pd.read_csv(handed_hr_file)
