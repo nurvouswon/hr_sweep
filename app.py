@@ -704,6 +704,9 @@ if all_files_uploaded:
 
 # Always provide a fallback for park orientation (so wind effect doesn't break)
     df_merged['parkorientation'] = df_merged['parkorientation'].fillna('N')
+    unmatched_parks = df_merged[df_merged['parkorientation'].isna()]['park'].unique()
+    if len(unmatched_parks) > 0:
+    log_error("Missing parkorientation mapping", unmatched_parks)
     # --- Merge batted ball profiles (batter & pitcher)
     batted = pd.read_csv(battedball_file)
     batted.columns = batted.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
