@@ -782,7 +782,7 @@ if all_files_uploaded:
                 weight = row[weight_col]
                 if pd.notna(feature):
                     logit_weights_dict[feature] = weight
-        else:
+    else:
             st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
     except Exception as e:
         st.warning(f"⚠️ Could not load logit weights: {e}")
