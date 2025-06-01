@@ -161,8 +161,6 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     except Exception as e:
         log_error("Weather", e)
         return {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
-weather = get_weather(row.get('city',''), row.get('date',''), row.get('parkorientation',''), row.get('time',''))
-record.update(weather)
 
 # Debug output for weather fields
 if weather.get("WindDir") is None or weather.get("WindEffect") is None or weather.get("Humidity") is None:
