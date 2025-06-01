@@ -774,7 +774,6 @@ if all_files_uploaded:
     )
 
     # --- Always define weights dict early ---
-    logit_weights_dict = {}       )
         if len(logit_weights.columns) >= 2:
             feature_col = logit_weights.columns[0]
             weight_col = logit_weights.columns[1]
