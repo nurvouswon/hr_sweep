@@ -784,12 +784,8 @@ if all_files_uploaded:
                     logit_weights_dict[feature] = weight
     else:
             st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
-    except Exception as e:
-        st.warning(f"⚠️ Could not load logit weights: {e}")
-        logit_weights_dict = {}
-else:
-    st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
-    logit_weights_dict = {}
+
+logit_weights_dict = {}
 
 try:
     if logit_weights_file is not None:
