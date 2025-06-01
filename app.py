@@ -790,27 +790,53 @@ if all_files_uploaded:
 else:
     st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
     logit_weights_dict = {}
-    # --- Begin leaderboard row construction ---
+
+try:
+    if logit_weights_file is not None:
+        logit_weights = pd.read_csv(logit_weights_file)
+        logit_weights.columns = (
+            logit_weights.columns
+            .str.strip().str.lower()
+            .str.replace(' ', '_')
+            .str.replace(r'[^\w]', '', regex=True)
+        )
+
+        if len(logit_weights.columns) >= 2:
+            feature_col = logit_weights.columns[0]
+            weight_col = logit_weights.columns[1]
+            for _, row in logit_weights.iterrows():
+                feature = row[feature_col]
+                weight = row[weight_col]
+                if pd.notna(feature):
+                    logit_weights_dict[feature] = weight
+        else:
+            st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
+    else:
+        st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
+except Exception as e:
+    st.warning(f"⚠️ Could not load logit weights: {e}")
+    logit_weights_dict = {}
+
+# --- Begin leaderboard row construction ---
 if all_files_uploaded:
     progress = st.progress(0)
     rows = []
-    for idx, row in df_merged.iterrows():
-    try:
-        # Defensive: ensure city, date, and parkorientation are valid
-        city = str(row.get('city', '') or '').strip()
-        date = str(row.get('date', '') or '').strip()
-        parkorientation = str(row.get('parkorientation', '') or 'N').strip()
-        time = str(row.get('time', '') or '14:00').strip()
 
-        # If any required weather field is blank, fill with None and log
-        if not city or city.lower() in ["", "nan", "none"] or not date or date.lower() in ["", "nan", "none"]:
-            weather = {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
-            log_error("Missing Weather Input", f"city={city}, date={date}, parkorientation={parkorientation}")
-        else:
-            weather = get_weather(city, date, parkorientation, time)
-            # Optionally log for review:
-            if any(weather.get(k) is None for k in ["WindDir", "WindEffect", "Humidity"]):
-                log_error("Partial Weather Missing", f"{city} | {date} | {parkorientation} | {weather}")
+    for idx, row in df_merged.iterrows():
+        try:
+            # Defensive weather logic
+            city = str(row.get('city', '') or '').strip()
+            date = str(row.get('date', '') or '').strip()
+            parkorientation = str(row.get('parkorientation', '') or 'N').strip()
+            time = str(row.get('time', '') or '14:00').strip()
+
+            if not city or city.lower() in ["", "nan", "none"] or not date or date.lower() in ["", "nan", "none"]:
+                weather = {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
+                log_error("Missing Weather Input", f"city={city}, date={date}, parkorientation={parkorientation}")
+            else:
+                weather = get_weather(city, date, parkorientation, time)
+                if any(weather.get(k) is None for k in ["WindDir", "WindEffect", "Humidity"]):
+                    log_error("Partial Weather Missing", f"{city} | {date} | {parkorientation} | {weather}")
 
         b_stats = get_batter_stats_multi(row['batter_id'])
         p_stats = get_pitcher_stats_multi(row['pitcher_id'])
