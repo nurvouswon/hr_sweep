@@ -795,7 +795,7 @@ except Exception as e:
     st.warning(f"⚠️ Could not load logit weights: {e}")
     logit_weights_dict = {}
 
-# --- Begin leaderboard row construction ---
+    # --- Begin leaderboard row construction ---
 if all_files_uploaded:
     progress = st.progress(0)
     rows = []
@@ -816,42 +816,45 @@ if all_files_uploaded:
                 if any(weather.get(k) is None for k in ["WindDir", "WindEffect", "Humidity"]):
                     log_error("Partial Weather Missing", f"{city} | {date} | {parkorientation} | {weather}")
 
-        b_stats = get_batter_stats_multi(row['batter_id'])
-        p_stats = get_pitcher_stats_multi(row['pitcher_id'])
-        b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
-        p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
-        p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
-        b_bats, _ = get_handedness(row['batter'])
-        _, p_throws = get_handedness(row['pitcher'])
-        platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
-        pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
-        pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
-        pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
-        record = row.to_dict()
-        record.update(weather)
-        record.update(b_stats)
-        record.update(p_stats)
-        record.update(b_pitch_metrics)
-        record.update(p_pitch_metrics)
-        record.update(p_spin_metrics)
-        record['BatterHandedness'] = b_bats
-        record['PitcherHandedness'] = p_throws
-        record['PlatoonWoba'] = platoon_woba
-        record['PitchMixBoost'] = pt_boost
-        p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
-        record.update(p_spin_metrics_30)
-        record['HandedHRRate'] = row.get('hr_rate', np.nan)
-        record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
-        record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
-        analyzer_score = 0
-        for feat, weight in logit_weights_dict.items():
-            analyzer_score += (record.get(feat, 0) or 0) * float(weight)
-        record['AnalyzerLogitScore'] = analyzer_score
-        rows.append(record)
-    except Exception as e:
-        log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
-    progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
+            b_stats = get_batter_stats_multi(row['batter_id'])
+            p_stats = get_pitcher_stats_multi(row['pitcher_id'])
+            b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
+            p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
+            p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
+            b_bats, _ = get_handedness(row['batter'])
+            _, p_throws = get_handedness(row['pitcher'])
+            platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
+            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
+            pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
+            pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
+            record = row.to_dict()
+            record.update(weather)
+            record.update(b_stats)
+            record.update(p_stats)
+            record.update(b_pitch_metrics)
+            record.update(p_pitch_metrics)
+            record.update(p_spin_metrics)
+            record['BatterHandedness'] = b_bats
+            record['PitcherHandedness'] = p_throws
+            record['PlatoonWoba'] = platoon_woba
+            record['PitchMixBoost'] = pt_boost
+            p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
+            record.update(p_spin_metrics_30)
+            record['HandedHRRate'] = row.get('hr_rate', np.nan)
+            record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
+            record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
 
+            analyzer_score = 0
+            for feat, weight in logit_weights_dict.items():
+                analyzer_score += (record.get(feat, 0) or 0) * float(weight)
+            record['AnalyzerLogitScore'] = analyzer_score
+
+            rows.append(record)
+
+        except Exception as e:
+            log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
+
+        progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
     # --- Score & leaderboard construction ---
     df_final = pd.DataFrame(rows)
     df_final.reset_index(drop=True, inplace=True)
