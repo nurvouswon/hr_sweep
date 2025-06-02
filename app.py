@@ -1,5 +1,3 @@
-# ===================== CHUNK 1: Imports, Config, Logging, Stat Functions ======================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -14,14 +12,12 @@ from sklearn.feature_selection import SelectFromModel
 API_KEY = st.secrets["weather"]["api_key"]
 error_log = []
 
-# ========= Error Logging =========
 def log_error(context, exception, level="ERROR"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = f"[{timestamp}] [{level}] {context}: {exception}"
     error_log.append(msg)
     print(msg)
 
-# ========= Caching for APIs =========
 @st.cache_data
 def cached_statcast_batter(start, end, batter_id):
     return statcast_batter(start, end, batter_id)
@@ -47,7 +43,6 @@ def cached_weather_api(city, date, api_key):
         log_error("Weather API call", e)
         return {}
 
-# ========= Name & Handedness Helpers =========
 def normalize_name(name):
     if not isinstance(name, str):
         return ""
@@ -95,7 +90,6 @@ def get_handedness(name):
         log_error("Handedness lookup", e)
     return None, None
 
-# ========= Ballpark Dictionaries & Helpers =========
 ballpark_orientations = {
     "sutter_health_park": "NE", "yankee_stadium": "N", "fenway_park": "N", "tropicana_field": "N",
     "camden_yards": "NE", "rogers_centre": "NE", "comerica_park": "N", "progressive_field": "NE",
@@ -161,11 +155,7 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     except Exception as e:
         log_error("Weather", e)
         return {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
-
-# Debug output for weather fields
-if weather.get("WindDir") is None or weather.get("WindEffect") is None or weather.get("Humidity") is None:
-    log_error("Missing Weather", f"{row.get('city')} | {row.get('date')} | {row.get('time')} | weather={weather}")
-# ========== Normalization Functions ==========
+        # ========== Normalization Functions ==========
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
 def norm_park(x): return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
@@ -176,7 +166,7 @@ def norm_weather(temp, wind, wind_effect):
         if wind_effect == "out": score += 0.07
         elif wind_effect == "in": score -= 0.07
     return max(0.8, min(score, 1.2))
-def norm_xwoba(x): 
+def norm_xwoba(x):
     return max(0, min((x - 0.250) / (0.400 - 0.250), 1)) if pd.notnull(x) else 0
 def norm_sweetspot(x):
     return max(0, min((x - 0.25) / (0.45 - 0.25), 1)) if pd.notnull(x) else 0
@@ -184,10 +174,6 @@ def norm_hardhit(x):
     return max(0, min((x - 0.25) / (0.60 - 0.25), 1)) if pd.notnull(x) else 0
 def norm_whiff(x):
     return max(0, min((x - 0.15) / (0.40 - 0.15), 1)) if pd.notnull(x) else 0
-
-# All core Statcast feature/stat functions follow in CHUNK 2!
-
-# ===================== CHUNK 2: Statcast, Batted Ball, Boosts, HR Score, Model ======================
 
 # --- Statcast Feature Functions: Batter ---
 def get_batter_stats_multi(batter_id, windows=[3,5,7,14]):
@@ -408,7 +394,7 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
             boost += (woba - 0.320) * pitch_pct
             total_weight += pitch_pct
         return round(boost * 0.15, 3) if total_weight > 0 else 0
-    except Exception as e:
+        except Exception as e:
         log_error("Pitch type matchup boost error", e)
         return 0
 
@@ -571,7 +557,7 @@ def calc_hr_score(row):
         spin_30 = row.get('P_FF_Spin_30')
         if spin_3 and spin_30 and (spin_30 - spin_3) >= 100:
             spin_drop = 0.01
-    except:
+    except Exception:
         pass
 
     park_score = norm_park(row.get('parkfactor', 1.0)) * 0.10
@@ -615,8 +601,7 @@ def train_and_apply_model(df_leaderboard):
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
-
-# ========== Streamlit UI Section ==========
+    # ========== Streamlit UI Section ==========
 
 st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
@@ -641,21 +626,22 @@ pitchtype_hr_file = st.file_uploader("6️⃣ Pitch Type HR Rates CSV", type=["c
 park_hr_file = st.file_uploader("7️⃣ Park HR Rates CSV", type=["csv"])
 logit_weights_file = st.file_uploader("8️⃣ Custom Logistic Weights CSV", type=["csv"])
 
-# --- All files required for full Analyzer run
 csvs_uploaded = [
     lineup_file, xhr_file, battedball_file, pitcher_battedball_file,
     handed_hr_file, pitchtype_hr_file, park_hr_file, logit_weights_file
 ]
 all_files_uploaded = all(csvs_uploaded)
 
+logit_weights_dict = {}
+
 if all_files_uploaded:
-    # --- Load all files with robust normalization
+    # --- Load and clean all uploaded data
     df_upload = pd.read_csv(lineup_file, sep=None, engine='python')
     df_upload.columns = (
         df_upload.columns
-            .str.strip().str.lower()
-            .str.replace(' ', '_')
-            .str.replace(r'[^\w]', '', regex=True)
+        .str.strip().str.lower()
+        .str.replace(' ', '_')
+        .str.replace(r'[^\w]', '', regex=True)
     )
     # Standardize lineup columns
     rename_dict = {
@@ -679,7 +665,7 @@ if all_files_uploaded:
     df_upload['pitcher_id'] = df_upload['team_code'].map(team_pitcher_map)
     df_upload['pitcher'] = df_upload['team_code'].map(pitcher_name_map)
 
-    # --- Merge xHR regression data
+    # Merge xHR regression data
     xhr_df = pd.read_csv(xhr_file)
     xhr_df.columns = xhr_df.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
     xhr_df['player_norm'] = xhr_df['player'].apply(normalize_name)
@@ -688,67 +674,57 @@ if all_files_uploaded:
         xhr_df[['player_norm', 'hr_total', 'xhr', 'xhr_diff']],
         left_on='norm_batter', right_on='player_norm', how='left'
     )
-    # --- Normalize park names and map park orientation ---
+    # Normalize park fields
     df_merged['park'] = (
-    df_merged['park']
-    .astype(str)
-    .str.strip()
-    .str.lower()
-    .str.replace(' ', '_')
-)
+        df_merged['park']
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .str.replace(' ', '_')
+    )
+    df_merged['parkfactor'] = df_merged['park'].map(park_factors)
+    df_merged['parkorientation'] = df_merged['park'].map(ballpark_orientations)
+    unmatched_parks = df_merged[df_merged['parkorientation'].isna()]['park'].unique()
+    if len(unmatched_parks) > 0:
+        log_error("Missing parkorientation mapping", unmatched_parks)
+    df_merged['parkorientation'] = df_merged['parkorientation'].fillna('N')
 
-# Map park factors
-df_merged['parkfactor'] = df_merged['park'].map(park_factors)
+    # Merge batter batted ball data
+    batted = pd.read_csv(battedball_file)
+    batted.columns = (
+        batted.columns
+        .str.strip().str.lower()
+        .str.replace(' ', '_')
+        .str.replace(r'[^\w]', '', regex=True)
+    )
+    batted = batted.rename(columns={"id": "batter_id"})
+    df_merged['batter_id'] = df_merged['batter_id'].astype(str)
+    batted['batter_id'] = batted['batter_id'].astype(str)
+    df_merged = df_merged.merge(batted, on="batter_id", how="left")
 
-# Map park orientations
-df_merged['parkorientation'] = df_merged['park'].map(ballpark_orientations)
+    # Merge pitcher batted ball data
+    pitcher_bb = pd.read_csv(pitcher_battedball_file)
+    pitcher_bb.columns = (
+        pitcher_bb.columns
+        .str.strip().str.lower()
+        .str.replace(' ', '_')
+        .str.replace(r'[^\w]', '', regex=True)
+    )
+    pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", "bbe": "bbe_pbb"})
+    pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ["pitcher_id", "name_pbb"]})
+    df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
+    pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
+    df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
 
-# Diagnostic: Log parks that were not matched in the orientation dictionary
-unmatched_parks = df_merged[df_merged['parkorientation'].isna()]['park'].unique()
-if len(unmatched_parks) > 0:
-    log_error("Missing parkorientation mapping", unmatched_parks)
-
-# Fallback for missing orientation so wind effect logic doesn't break
-df_merged['parkorientation'] = df_merged['parkorientation'].fillna('N')
-
-# --- Merge batted ball profiles (batter & pitcher) ---
-batted = pd.read_csv(battedball_file)
-batted.columns = (
-    batted.columns
-    .str.strip().str.lower()
-    .str.replace(' ', '_')
-    .str.replace(r'[^\w]', '', regex=True)
-)
-batted = batted.rename(columns={"id": "batter_id"})
-df_merged['batter_id'] = df_merged['batter_id'].astype(str)
-batted['batter_id'] = batted['batter_id'].astype(str)
-df_merged = df_merged.merge(batted, on="batter_id", how="left")
-
-# Merge pitcher batted ball data
-pitcher_bb = pd.read_csv(pitcher_battedball_file)
-pitcher_bb.columns = (
-    pitcher_bb.columns
-    .str.strip().str.lower()
-    .str.replace(' ', '_')
-    .str.replace(r'[^\w]', '', regex=True)
-)
-pitcher_bb = pitcher_bb.rename(columns={"id": "pitcher_id", "bbe": "bbe_pbb"})
-pitcher_bb = pitcher_bb.rename(columns={c: f"{c}_pbb" for c in pitcher_bb.columns if c not in ["pitcher_id", "name_pbb"]})
-df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
-pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
-df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
-
-if all_files_uploaded:
-    # --- Normalize and load Analyzer CSVs ---
+    # Load and normalize the other Analyzer CSVs
     handed_hr = pd.read_csv(handed_hr_file)
     handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-
     pitchtype_hr = pd.read_csv(pitchtype_hr_file)
     pitchtype_hr.columns = pitchtype_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-
     park_hr = pd.read_csv(park_hr_file)
     park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
 
+    # Load logistic weights dict
     logit_weights = pd.read_csv(logit_weights_file)
     logit_weights.columns = (
         logit_weights.columns
@@ -756,47 +732,18 @@ if all_files_uploaded:
         .str.replace(' ', '_')
         .str.replace(r'[^\w]', '', regex=True)
     )
-
-    # --- Always define weights dict early ---
     if len(logit_weights.columns) >= 2:
-            feature_col = logit_weights.columns[0]
-            weight_col = logit_weights.columns[1]
-            for _, row in logit_weights.iterrows():
-                feature = row[feature_col]
-                weight = row[weight_col]
-                if pd.notna(feature):
-                    logit_weights_dict[feature] = weight
+        feature_col = logit_weights.columns[0]
+        weight_col = logit_weights.columns[1]
+        for _, row in logit_weights.iterrows():
+            feature = row[feature_col]
+            weight = row[weight_col]
+            if pd.notna(feature):
+                logit_weights_dict[feature] = weight
     else:
-            st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
-
-try:
-    if logit_weights_file is not None:
-        logit_weights = pd.read_csv(logit_weights_file)
-        logit_weights.columns = (
-            logit_weights.columns
-            .str.strip().str.lower()
-            .str.replace(' ', '_')
-            .str.replace(r'[^\w]', '', regex=True)
-        )
-
-        if len(logit_weights.columns) >= 2:
-            feature_col = logit_weights.columns[0]
-            weight_col = logit_weights.columns[1]
-            for _, row in logit_weights.iterrows():
-                feature = row[feature_col]
-                weight = row[weight_col]
-                if pd.notna(feature):
-                    logit_weights_dict[feature] = weight
-        else:
-            st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
-    else:
-        st.warning("⚠️ No Logistic Weights CSV uploaded. Using default weights.")
-except Exception as e:
-    st.warning(f"⚠️ Could not load logit weights: {e}")
-    logit_weights_dict = {}
+        st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
 
     # --- Begin leaderboard row construction ---
-if all_files_uploaded:
     progress = st.progress(0)
     rows = []
 
@@ -855,6 +802,7 @@ if all_files_uploaded:
             log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
 
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
+
     # --- Score & leaderboard construction ---
     df_final = pd.DataFrame(rows)
     df_final.reset_index(drop=True, inplace=True)
@@ -873,7 +821,6 @@ if all_files_uploaded:
         0.05 * df_final.get('PitchTypeHRRate', 0)
     )
 
-     # Final leaderboard sort and rank
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
     importances = None  # Set/import if using ML, otherwise leave as None
@@ -882,7 +829,6 @@ if all_files_uploaded:
     if importances is not None:
         st.write("Feature importances:", importances)
 
-    # Show the top leaderboard table
     st.success("Leaderboard ready! Top HR Matchups below.")
     st.dataframe(df_leaderboard.head(20), use_container_width=True)
 
