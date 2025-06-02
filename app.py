@@ -155,7 +155,7 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     except Exception as e:
         log_error("Weather", e)
         return {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
-        # ========== Normalization Functions ==========
+# ========= Normalization Functions =========
 def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
 def norm_ev(x): return max(0, min((x - 80) / (105 - 80), 1)) if pd.notnull(x) else 0
 def norm_park(x): return max(0, min((x - 0.8) / (1.3 - 0.8), 1)) if pd.notnull(x) else 0
@@ -166,14 +166,10 @@ def norm_weather(temp, wind, wind_effect):
         if wind_effect == "out": score += 0.07
         elif wind_effect == "in": score -= 0.07
     return max(0.8, min(score, 1.2))
-def norm_xwoba(x):
-    return max(0, min((x - 0.250) / (0.400 - 0.250), 1)) if pd.notnull(x) else 0
-def norm_sweetspot(x):
-    return max(0, min((x - 0.25) / (0.45 - 0.25), 1)) if pd.notnull(x) else 0
-def norm_hardhit(x):
-    return max(0, min((x - 0.25) / (0.60 - 0.25), 1)) if pd.notnull(x) else 0
-def norm_whiff(x):
-    return max(0, min((x - 0.15) / (0.40 - 0.15), 1)) if pd.notnull(x) else 0
+def norm_xwoba(x): return max(0, min((x - 0.250) / (0.400 - 0.250), 1)) if pd.notnull(x) else 0
+def norm_sweetspot(x): return max(0, min((x - 0.25) / (0.45 - 0.25), 1)) if pd.notnull(x) else 0
+def norm_hardhit(x): return max(0, min((x - 0.25) / (0.60 - 0.25), 1)) if pd.notnull(x) else 0
+def norm_whiff(x): return max(0, min((x - 0.15) / (0.40 - 0.15), 1)) if pd.notnull(x) else 0
 
 # --- Statcast Feature Functions: Batter ---
 def get_batter_stats_multi(batter_id, windows=[3,5,7,14]):
@@ -223,7 +219,6 @@ def get_batter_stats_multi(batter_id, windows=[3,5,7,14]):
                 out[f"{k}_{w}"] = None
     return out
 
-# --- Statcast Feature Functions: Pitcher ---
 def get_pitcher_stats_multi(pitcher_id, windows=[3,5,7,14]):
     out = {}
     if not pitcher_id:
@@ -270,7 +265,7 @@ def get_pitcher_stats_multi(pitcher_id, windows=[3,5,7,14]):
                 out[f"{k}_{w}"] = None
     return out
 
-# --- Statcast Whiff, Spin, Pitch Mix, Platoon, Pitchtype Functions ---
+# --- Whiff, Spin, Mix, Platoon, etc ---
 def get_batter_pitch_metrics(batter_id, windows=[3,5,7,14]):
     out = {}
     for w in windows:
@@ -394,11 +389,11 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
             boost += (woba - 0.320) * pitch_pct
             total_weight += pitch_pct
         return round(boost * 0.15, 3) if total_weight > 0 else 0
-        except Exception as e:
+    except Exception as e:
         log_error("Pitch type matchup boost error", e)
         return 0
 
-# --- Custom 2025 Boosts, Batted Ball Profile Score, HR Score, Model Trainer ---
+# --- Custom 2025 Ballpark/Weather/Handedness Boosts ---
 def custom_2025_boost(row):
     bonus = 0
     if row.get('park') == 'sutter_health_park' and row.get('WindEffect') == 'out': bonus += 0.02
@@ -424,7 +419,7 @@ def custom_2025_boost(row):
     if row.get('PitcherHandedness') == 'L': bonus += 0.01
     return bonus
 
-# ========== Batted Ball Profile Scores ==========
+# ========== Batted Ball Profile Score Functions ==========
 def calc_batted_ball_score(row):
     score = 0
     score += row.get('fb_rate', 0) * 0.09
@@ -478,32 +473,26 @@ def calc_hr_score(row):
         norm_barrel(row.get('B_BarrelRate_5')) * 0.09 +
         norm_barrel(row.get('B_BarrelRate_7')) * 0.07 +
         norm_barrel(row.get('B_BarrelRate_14')) * 0.05 +
-
         norm_ev(row.get('B_EV_3')) * 0.08 +
         norm_ev(row.get('B_EV_5')) * 0.06 +
         norm_ev(row.get('B_EV_7')) * 0.04 +
         norm_ev(row.get('B_EV_14')) * 0.02 +
-
         norm_xwoba(row.get('B_xwoba_3')) * 0.08 +
         norm_xwoba(row.get('B_xwoba_5')) * 0.06 +
         norm_xwoba(row.get('B_xwoba_7')) * 0.04 +
         norm_xwoba(row.get('B_xwoba_14')) * 0.02 +
-
         norm_sweetspot(row.get('B_sweet_spot_pct_3')) * 0.06 +
         norm_sweetspot(row.get('B_sweet_spot_pct_5')) * 0.04 +
         norm_sweetspot(row.get('B_sweet_spot_pct_7')) * 0.03 +
         norm_sweetspot(row.get('B_sweet_spot_pct_14')) * 0.02 +
-
         norm_hardhit(row.get('B_hardhit_pct_3')) * 0.06 +
         norm_hardhit(row.get('B_hardhit_pct_5')) * 0.04 +
         norm_hardhit(row.get('B_hardhit_pct_7')) * 0.03 +
         norm_hardhit(row.get('B_hardhit_pct_14')) * 0.02 +
-
         (1 - norm_whiff(row.get('B_WhiffRate_3'))) * 0.06 +
         (1 - norm_whiff(row.get('B_WhiffRate_5'))) * 0.05 +
         (1 - norm_whiff(row.get('B_WhiffRate_7'))) * 0.04 +
         (1 - norm_whiff(row.get('B_WhiffRate_14'))) * 0.02 +
-
         (row.get('B_SLG_3') or 0) * 0.08 +
         (row.get('B_SLG_14') or 0) * 0.05 +
         (row.get('B_xSLG_3') or 0) * 0.08 +
@@ -511,38 +500,31 @@ def calc_hr_score(row):
         (row.get('B_xISO_3') or 0) * 0.04 +
         (row.get('B_xISO_14') or 0) * 0.03
     )
-
     pitcher_score = (
         norm_barrel(row.get('P_BarrelRateAllowed_3')) * 0.07 +
         norm_barrel(row.get('P_BarrelRateAllowed_5')) * 0.05 +
         norm_barrel(row.get('P_BarrelRateAllowed_7')) * 0.03 +
         norm_barrel(row.get('P_BarrelRateAllowed_14')) * 0.02 +
-
         norm_ev(row.get('P_EVAllowed_3')) * 0.05 +
         norm_ev(row.get('P_EVAllowed_5')) * 0.03 +
         norm_ev(row.get('P_EVAllowed_7')) * 0.02 +
         norm_ev(row.get('P_EVAllowed_14')) * 0.01 +
-
         norm_xwoba(row.get('P_xwoba_3')) * -0.05 +
         norm_xwoba(row.get('P_xwoba_5')) * -0.03 +
         norm_xwoba(row.get('P_xwoba_7')) * -0.02 +
         norm_xwoba(row.get('P_xwoba_14')) * -0.01 +
-
         norm_sweetspot(row.get('P_sweet_spot_pct_3')) * -0.03 +
         norm_sweetspot(row.get('P_sweet_spot_pct_5')) * -0.02 +
         norm_sweetspot(row.get('P_sweet_spot_pct_7')) * -0.01 +
         norm_sweetspot(row.get('P_sweet_spot_pct_14')) * -0.01 +
-
         norm_hardhit(row.get('P_hardhit_pct_3')) * -0.03 +
         norm_hardhit(row.get('P_hardhit_pct_5')) * -0.02 +
         norm_hardhit(row.get('P_hardhit_pct_7')) * -0.01 +
         norm_hardhit(row.get('P_hardhit_pct_14')) * -0.01 +
-
         norm_whiff(row.get('P_WhiffRate_3')) * -0.01 +
         norm_whiff(row.get('P_WhiffRate_5')) * -0.008 +
         norm_whiff(row.get('P_WhiffRate_7')) * -0.006 +
         norm_whiff(row.get('P_WhiffRate_14')) * -0.004 +
-
         (row.get('P_SLG_3') or 0) * -0.07 +
         (row.get('P_SLG_14') or 0) * -0.04 +
         (row.get('P_xSLG_3') or 0) * -0.07 +
@@ -550,7 +532,6 @@ def calc_hr_score(row):
         (row.get('P_xISO_3') or 0) * -0.04 +
         (row.get('P_xISO_14') or 0) * -0.03
     )
-
     spin_drop = 0
     try:
         spin_3 = row.get('P_FF_Spin_3')
@@ -568,7 +549,6 @@ def calc_hr_score(row):
     batted_ball_score = row.get('BattedBallScore', 0)
     pitcher_bb_score = row.get('PitcherBBScore', 0)
     custom_boost = custom_2025_boost(row)
-
     return round(
         batter_score + pitcher_score + spin_drop + park_score + weather_score +
         regression_score + batted_ball_score + pitcher_bb_score +
@@ -601,7 +581,7 @@ def train_and_apply_model(df_leaderboard):
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
-    # ========== Streamlit UI Section ==========
+# ====================== STREAMLIT UI & LEADERBOARD ========================
 
 st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
