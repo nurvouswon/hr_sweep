@@ -835,10 +835,11 @@ else:
     df_leaderboard["rank"] = df_leaderboard.index + 1
     importances = None  # Set/import if using ML, otherwise leave as None
 
-    # Optionally display or use feature importances
+     # Optionally display or use feature importances
     if importances is not None:
         st.write("Feature importances:", importances)
 
+    # Show the top leaderboard table
     st.success("Leaderboard ready! Top HR Matchups below.")
     st.dataframe(df_leaderboard.head(20), use_container_width=True)
 
