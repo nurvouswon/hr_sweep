@@ -754,7 +754,7 @@ else:
     park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
 
     # --- Begin leaderboard row construction ---
-    progress = st.progress(0)
+progress = st.progress(0)
     rows = []
 
     for idx, row in df_merged.iterrows():
