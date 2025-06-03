@@ -768,126 +768,126 @@ if all_files_uploaded:
         
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
-rows = []
+    rows = []
 
-# --- Define key HR features and normalization functions (edit/expand as you want) ---
-feature_weights = {
-    'B_BarrelRate_3': 0.12, 'B_BarrelRate_5': 0.09, 'B_BarrelRate_7': 0.07, 'B_BarrelRate_14': 0.05,
-    'B_EV_3': 0.08, 'B_EV_5': 0.06, 'B_EV_7': 0.04, 'B_EV_14': 0.02,
-    'B_xwoba_3': 0.08, 'B_xwoba_5': 0.06, 'B_xwoba_7': 0.04, 'B_xwoba_14': 0.02,
-    'B_sweet_spot_pct_3': 0.06, 'B_sweet_spot_pct_5': 0.04, 'B_sweet_spot_pct_7': 0.03, 'B_sweet_spot_pct_14': 0.02,
-    'B_hardhit_pct_3': 0.06, 'B_hardhit_pct_5': 0.04, 'B_hardhit_pct_7': 0.03, 'B_hardhit_pct_14': 0.02,
-}
-norm_funcs = {
-    'B_BarrelRate_3': norm_barrel, 'B_BarrelRate_5': norm_barrel, 'B_BarrelRate_7': norm_barrel, 'B_BarrelRate_14': norm_barrel,
-    'B_EV_3': norm_ev, 'B_EV_5': norm_ev, 'B_EV_7': norm_ev, 'B_EV_14': norm_ev,
-    'B_xwoba_3': norm_xwoba, 'B_xwoba_5': norm_xwoba, 'B_xwoba_7': norm_xwoba, 'B_xwoba_14': norm_xwoba,
-    'B_sweet_spot_pct_3': norm_sweetspot, 'B_sweet_spot_pct_5': norm_sweetspot, 'B_sweet_spot_pct_7': norm_sweetspot, 'B_sweet_spot_pct_14': norm_sweetspot,
-    'B_hardhit_pct_3': norm_hardhit, 'B_hardhit_pct_5': norm_hardhit, 'B_hardhit_pct_7': norm_hardhit, 'B_hardhit_pct_14': norm_hardhit,
-}
+    # --- Define key HR features and normalization functions (edit/expand as you want) ---
+    feature_weights = {
+        'B_BarrelRate_3': 0.12, 'B_BarrelRate_5': 0.09, 'B_BarrelRate_7': 0.07, 'B_BarrelRate_14': 0.05,
+        'B_EV_3': 0.08, 'B_EV_5': 0.06, 'B_EV_7': 0.04, 'B_EV_14': 0.02,
+        'B_xwoba_3': 0.08, 'B_xwoba_5': 0.06, 'B_xwoba_7': 0.04, 'B_xwoba_14': 0.02,
+        'B_sweet_spot_pct_3': 0.06, 'B_sweet_spot_pct_5': 0.04, 'B_sweet_spot_pct_7': 0.03, 'B_sweet_spot_pct_14': 0.02,
+        'B_hardhit_pct_3': 0.06, 'B_hardhit_pct_5': 0.04, 'B_hardhit_pct_7': 0.03, 'B_hardhit_pct_14': 0.02,
+    }
+    norm_funcs = {
+        'B_BarrelRate_3': norm_barrel, 'B_BarrelRate_5': norm_barrel, 'B_BarrelRate_7': norm_barrel, 'B_BarrelRate_14': norm_barrel,
+        'B_EV_3': norm_ev, 'B_EV_5': norm_ev, 'B_EV_7': norm_ev, 'B_EV_14': norm_ev,
+        'B_xwoba_3': norm_xwoba, 'B_xwoba_5': norm_xwoba, 'B_xwoba_7': norm_xwoba, 'B_xwoba_14': norm_xwoba,
+        'B_sweet_spot_pct_3': norm_sweetspot, 'B_sweet_spot_pct_5': norm_sweetspot, 'B_sweet_spot_pct_7': norm_sweetspot, 'B_sweet_spot_pct_14': norm_sweetspot,
+        'B_hardhit_pct_3': norm_hardhit, 'B_hardhit_pct_5': norm_hardhit, 'B_hardhit_pct_7': norm_hardhit, 'B_hardhit_pct_14': norm_hardhit,
+    }
 
-def robust_calc_hr_score(row, feature_weights, norm_funcs, min_features=0.7):
-    score = 0
-    total_weight = 0
-    used_features = 0
-    for feat, weight in feature_weights.items():
-        value = row.get(feat, None)
-        if value is not None and pd.notna(value):
-            norm_val = norm_funcs.get(feat, lambda x: x)(value)
-            score += norm_val * weight
-            total_weight += weight
-            used_features += 1
-    completeness = used_features / len(feature_weights) if feature_weights else 0
-    flag = "Low Data" if completeness < min_features else "OK"
-    if total_weight == 0:
-        return 0, flag
-    return score / total_weight, flag
+    def robust_calc_hr_score(row, feature_weights, norm_funcs, min_features=0.7):
+        score = 0
+        total_weight = 0
+        used_features = 0
+        for feat, weight in feature_weights.items():
+            value = row.get(feat, None)
+            if value is not None and pd.notna(value):
+                norm_val = norm_funcs.get(feat, lambda x: x)(value)
+                score += norm_val * weight
+                total_weight += weight
+                used_features += 1
+        completeness = used_features / len(feature_weights) if feature_weights else 0
+        flag = "Low Data" if completeness < min_features else "OK"
+        if total_weight == 0:
+            return 0, flag
+        return score / total_weight, flag
 
-for idx, row in df_merged.iterrows():
-    try:
-        # Defensive weather logic
-        city = str(row.get('city', '') or '').strip()
-        date = str(row.get('date', '') or '').strip()
-        parkorientation = str(row.get('parkorientation', '') or 'N').strip()
-        time = str(row.get('time', '') or '14:00').strip()
+    for idx, row in df_merged.iterrows():
+        try:
+            # Defensive weather logic
+            city = str(row.get('city', '') or '').strip()
+            date = str(row.get('date', '') or '').strip()
+            parkorientation = str(row.get('parkorientation', '') or 'N').strip()
+            time = str(row.get('time', '') or '14:00').strip()
 
-        if not city or city.lower() in ["", "nan", "none"] or not date or date.lower() in ["", "nan", "none"]:
-            weather = {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
-            log_error("Missing Weather Input", f"city={city}, date={date}, parkorientation={parkorientation}")
-        else:
-            weather = get_weather(city, date, parkorientation, time)
-            if any(weather.get(k) is None for k in ["WindDir", "WindEffect", "Humidity"]):
-                log_error("Partial Weather Missing", f"{city} | {date} | {parkorientation} | {weather}")
+            if not city or city.lower() in ["", "nan", "none"] or not date or date.lower() in ["", "nan", "none"]:
+                weather = {"Temp": None, "Wind": None, "WindDir": None, "WindEffect": None, "Humidity": None, "Condition": None}
+                log_error("Missing Weather Input", f"city={city}, date={date}, parkorientation={parkorientation}")
+            else:
+                weather = get_weather(city, date, parkorientation, time)
+                if any(weather.get(k) is None for k in ["WindDir", "WindEffect", "Humidity"]):
+                    log_error("Partial Weather Missing", f"{city} | {date} | {parkorientation} | {weather}")
 
-        b_stats = get_batter_stats_multi(row['batter_id'])
-        p_stats = get_pitcher_stats_multi(row['pitcher_id'])
-        b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
-        p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
-        p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
-        b_bats, _ = get_handedness(row['batter'])
-        _, p_throws = get_handedness(row['pitcher'])
-        platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
-        pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
-        pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
-        pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
-        record = row.to_dict()
-        record.update(weather)
-        record.update(b_stats)
-        record.update(p_stats)
-        record.update(b_pitch_metrics)
-        record.update(p_pitch_metrics)
-        record.update(p_spin_metrics)
-        record['BatterHandedness'] = b_bats
-        record['PitcherHandedness'] = p_throws
-        record['PlatoonWoba'] = platoon_woba
-        record['PitchMixBoost'] = pt_boost
-        p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
-        record.update(p_spin_metrics_30)
-        record['HandedHRRate'] = row.get('hr_rate', np.nan)
-        record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
-        record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
+            b_stats = get_batter_stats_multi(row['batter_id'])
+            p_stats = get_pitcher_stats_multi(row['pitcher_id'])
+            b_pitch_metrics = get_batter_pitch_metrics(row['batter_id'])
+            p_pitch_metrics = get_pitcher_pitch_metrics(row['pitcher_id'])
+            p_spin_metrics = get_pitcher_spin_metrics(row['pitcher_id'])
+            b_bats, _ = get_handedness(row['batter'])
+            _, p_throws = get_handedness(row['pitcher'])
+            platoon_woba = get_platoon_woba(row['batter_id'], p_throws) if b_bats and p_throws else None
+            pitch_mix = get_pitcher_pitch_mix(row['pitcher_id'])
+            pitch_woba = get_batter_pitchtype_woba(row['batter_id'])
+            pt_boost = calc_pitchtype_boost(pitch_woba, pitch_mix)
+            record = row.to_dict()
+            record.update(weather)
+            record.update(b_stats)
+            record.update(p_stats)
+            record.update(b_pitch_metrics)
+            record.update(p_pitch_metrics)
+            record.update(p_spin_metrics)
+            record['BatterHandedness'] = b_bats
+            record['PitcherHandedness'] = p_throws
+            record['PlatoonWoba'] = platoon_woba
+            record['PitchMixBoost'] = pt_boost
+            p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
+            record.update(p_spin_metrics_30)
+            record['HandedHRRate'] = row.get('hr_rate', np.nan)
+            record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
+            record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
 
-        analyzer_score = 0
-        for feat, weight in logit_weights_dict.items():
-            analyzer_score += (record.get(feat, 0) or 0) * float(weight)
-        record['AnalyzerLogitScore'] = analyzer_score
+            analyzer_score = 0
+            for feat, weight in logit_weights_dict.items():
+                analyzer_score += (record.get(feat, 0) or 0) * float(weight)
+            record['AnalyzerLogitScore'] = analyzer_score
 
-        # --- NEW: Robust HR_Score and DataFlag for missing data ---
-        record['HR_Score'], record['DataFlag'] = robust_calc_hr_score(record, feature_weights, norm_funcs, min_features=0.7)
+            # --- NEW: Robust HR_Score and DataFlag for missing data ---
+            record['HR_Score'], record['DataFlag'] = robust_calc_hr_score(record, feature_weights, norm_funcs, min_features=0.7)
 
-        rows.append(record)
+            rows.append(record)
 
-    except Exception as e:
-        log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
+        except Exception as e:
+            log_error(f"Row error ({row.get('batter','NA')} vs {row.get('pitcher','NA')})", e)
 
-    progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
+        progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
 
-# --- Score & leaderboard construction ---
-df_final = pd.DataFrame(rows)
-df_final.reset_index(drop=True, inplace=True)
-df_final.insert(0, "rank", df_final.index + 1)
-df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
-df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
-df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
-df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
-df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
+    # --- Score & leaderboard construction ---
+    df_final = pd.DataFrame(rows)
+    df_final.reset_index(drop=True, inplace=True)
+    df_final.insert(0, "rank", df_final.index + 1)
+    df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
+    df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
+    df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
+    df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
+    df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
 
-df_final['Analyzer_Blend'] = (
-    0.60 * df_final['HR_Score'] +
-    0.30 * df_final.get('AnalyzerLogitScore', 0) +
-    0.05 * df_final.get('HandedHRRate', 0) +
-    0.05 * df_final.get('PitchTypeHRRate', 0)
-)
+    df_final['Analyzer_Blend'] = (
+        0.60 * df_final['HR_Score'] +
+        0.30 * df_final.get('AnalyzerLogitScore', 0) +
+        0.05 * df_final.get('HandedHRRate', 0) +
+        0.05 * df_final.get('PitchTypeHRRate', 0)
+    )
 
-df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
-df_leaderboard["rank"] = df_leaderboard.index + 1
+    df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
+    df_leaderboard["rank"] = df_leaderboard.index + 1
 
-# --- Show the top leaderboard table, including DataFlag
-st.success("Leaderboard ready! Top HR Matchups below.")
-st.dataframe(
-    df_leaderboard[['rank', 'batter', 'pitcher', 'HR_Score', 'Analyzer_Blend', 'DataFlag'] + 
-                   [c for c in df_leaderboard.columns if c not in ['rank', 'batter', 'pitcher', 'HR_Score', 'Analyzer_Blend', 'DataFlag']]]
-    .head(20), use_container_width=True
-)
+    # --- Show the top leaderboard table, including DataFlag
+    st.success("Leaderboard ready! Top HR Matchups below.")
+    st.dataframe(
+        df_leaderboard[['rank', 'batter', 'pitcher', 'HR_Score', 'Analyzer_Blend', 'DataFlag'] +
+                       [c for c in df_leaderboard.columns if c not in ['rank', 'batter', 'pitcher', 'HR_Score', 'Analyzer_Blend', 'DataFlag']]]
+        .head(20), use_container_width=True
+        )
 else:
     st.info("📂 Upload all 8 files to generate the leaderboard.")
