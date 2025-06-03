@@ -582,7 +582,6 @@ def train_and_apply_model(df_leaderboard):
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
 # ====================== STREAMLIT UI & LEADERBOARD ========================
-
 st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
 **Upload these 8 Analyzer CSVs for maximum prediction power:**  
@@ -695,9 +694,57 @@ if all_files_uploaded:
     df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
     pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
     df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
-    # === Load, clean, and merge Analyzer HR rates & logistic weights ===
-    # Park HR Rate
 
+    # === Load, clean, and merge Analyzer HR rates & logistic weights ===
+
+    # Park HR Rate
+    park_hr = pd.read_csv(park_hr_file)
+    park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    if 'home_team' in park_hr.columns:
+        park_hr = park_hr.rename(columns={'home_team': 'park'})
+    if 'hr_outcome' in park_hr.columns:
+        park_hr = park_hr.rename(columns={'hr_outcome': 'hr_rate_park'})
+    df_merged = df_merged.merge(park_hr[['park', 'hr_rate_park']], on='park', how='left')
+
+    # Pitch Type HR Rate
+    pitchtype_hr = pd.read_csv(pitchtype_hr_file)
+    pitchtype_hr.columns = pitchtype_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    if 'hr_outcome' in pitchtype_hr.columns:
+        pitchtype_hr = pitchtype_hr.rename(columns={'hr_outcome': 'hr_rate_pitch'})
+    if 'pitch_type' in df_merged.columns and 'pitch_type' in pitchtype_hr.columns:
+        df_merged = df_merged.merge(pitchtype_hr[['pitch_type', 'hr_rate_pitch']], on='pitch_type', how='left')
+
+    # Handedness HR Rate
+    handed_hr = pd.read_csv(handed_hr_file)
+    handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    if 'hr_outcome' in handed_hr.columns:
+        handed_hr = handed_hr.rename(columns={'hr_outcome': 'hr_rate'})
+    if 'BatterHandedness' in df_merged.columns and 'PitcherHandedness' in df_merged.columns:
+        df_merged = df_merged.merge(
+            handed_hr[['batter_hand', 'pitcher_hand', 'hr_rate']],
+            left_on=['BatterHandedness', 'PitcherHandedness'],
+            right_on=['batter_hand', 'pitcher_hand'],
+            how='left'
+        )
+    if 'batter_hand' in df_merged.columns:
+        df_merged = df_merged.drop(columns=['batter_hand'], errors='ignore')
+    if 'pitcher_hand' in df_merged.columns:
+        df_merged = df_merged.drop(columns=['pitcher_hand'], errors='ignore')
+
+    # Logit Feature Weights
+    logit_weights = pd.read_csv(logit_weights_file)
+    logit_weights.columns = logit_weights.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    logit_weights_dict = {}
+    if len(logit_weights.columns) >= 2:
+        feature_col = logit_weights.columns[0]
+        weight_col = logit_weights.columns[1]
+        for _, row in logit_weights.iterrows():
+            feature = row[feature_col]
+            weight = row[weight_col]
+            if pd.notna(feature):
+                logit_weights_dict[feature] = weight
+    else:
+        st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
 
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
@@ -776,6 +823,7 @@ if all_files_uploaded:
         0.05 * df_final.get('HandedHRRate', 0) +
         0.05 * df_final.get('PitchTypeHRRate', 0)
     )
+
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
     importances = None  # Set/import if using ML, otherwise leave as None
