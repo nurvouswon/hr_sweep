@@ -833,7 +833,7 @@ else:
 
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
-    importances = None  # Set/import if using ML, otherwise leave as None
+importances = None  # Set/import if using ML, otherwise leave as None
 
     # Optionally display or use feature importances
     if importances is not None:
