@@ -698,73 +698,74 @@ if all_files_uploaded:
     # === Load, clean, and robustly merge Analyzer HR rates & logistic weights ===
     # 1. Team to Park Mapping (handles Oakland/Sutter Health Park!)
     team_to_park = {
-    'PHI': 'citizens_bank_park', 'ATL': 'truist_park', 'NYM': 'citi_field', 'BOS': 'fenway_park',
-    'NYY': 'yankee_stadium', 'CHC': 'wrigley_field', 'LAD': 'dodger_stadium',
-    'OAK': 'sutter_health_park',  # <- Oakland A's new park!
-    'CIN': 'great_american_ball_park', 'DET': 'comerica_park', 'HOU': 'minute_maid_park',
-    'MIA': 'loandepot_park', 'TB': 'tropicana_field', 'MIL': 'american_family_field',
-    'SD': 'petco_park', 'SF': 'oracle_park', 'TOR': 'rogers_centre', 'CLE': 'progressive_field',
-    'MIN': 'target_field', 'KC': 'kauffman_stadium', 'CWS': 'guaranteed_rate_field',
-    'LAA': 'angel_stadium', 'SEA': 't-mobile_park', 'TEX': 'globe_life_field',
-    'ARI': 'chase_field', 'COL': 'coors_field', 'PIT': 'pnc_park', 'STL': 'busch_stadium',
-    'BAL': 'camden_yards', 'WSH': 'nationals_park'
-}
+        'PHI': 'citizens_bank_park', 'ATL': 'truist_park', 'NYM': 'citi_field', 'BOS': 'fenway_park',
+        'NYY': 'yankee_stadium', 'CHC': 'wrigley_field', 'LAD': 'dodger_stadium',
+        'OAK': 'sutter_health_park',  # <- Oakland A's new park!
+        'CIN': 'great_american_ball_park', 'DET': 'comerica_park', 'HOU': 'minute_maid_park',
+        'MIA': 'loandepot_park', 'TB': 'tropicana_field', 'MIL': 'american_family_field',
+        'SD': 'petco_park', 'SF': 'oracle_park', 'TOR': 'rogers_centre', 'CLE': 'progressive_field',
+        'MIN': 'target_field', 'KC': 'kauffman_stadium', 'CWS': 'guaranteed_rate_field',
+        'LAA': 'angel_stadium', 'SEA': 't-mobile_park', 'TEX': 'globe_life_field',
+        'ARI': 'chase_field', 'COL': 'coors_field', 'PIT': 'pnc_park', 'STL': 'busch_stadium',
+        'BAL': 'camden_yards', 'WSH': 'nationals_park'
+    }
 
-# Assign/normalize park using team_code if needed
-if 'park' not in df_merged.columns or df_merged['park'].isnull().any():
-    if 'team_code' in df_merged.columns:
-        df_merged['park'] = df_merged['team_code'].map(team_to_park)
+    # Assign/normalize park using team_code if needed
+    if 'park' not in df_merged.columns or df_merged['park'].isnull().any():
+        if 'team_code' in df_merged.columns:
+            df_merged['park'] = df_merged['team_code'].map(team_to_park)
 
-# Park HR Rate
-park_hr = pd.read_csv(park_hr_file)
-park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-if 'home_team' in park_hr.columns:
-    park_hr['park'] = park_hr['home_team'].map(team_to_park)
-if 'hr_outcome' in park_hr.columns:
-    park_hr = park_hr.rename(columns={'hr_outcome': 'hr_rate_park'})
-park_hr = park_hr.dropna(subset=['park'])
-df_merged = df_merged.merge(park_hr[['park', 'hr_rate_park']], on='park', how='left')
+    # Park HR Rate
+    park_hr = pd.read_csv(park_hr_file)
+    park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    if 'home_team' in park_hr.columns:
+        park_hr['park'] = park_hr['home_team'].map(team_to_park)
+    if 'hr_outcome' in park_hr.columns:
+        park_hr = park_hr.rename(columns={'hr_outcome': 'hr_rate_park'})
+    park_hr = park_hr.dropna(subset=['park'])
+    df_merged = df_merged.merge(park_hr[['park', 'hr_rate_park']], on='park', how='left')
 
-# Pitch Type HR Rate
-pitchtype_hr = pd.read_csv(pitchtype_hr_file)
-pitchtype_hr.columns = pitchtype_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-if 'hr_outcome' in pitchtype_hr.columns:
-    pitchtype_hr = pitchtype_hr.rename(columns={'hr_outcome': 'hr_rate_pitch'})
-if 'pitch_type' in df_merged.columns and 'pitch_type' in pitchtype_hr.columns:
-    df_merged = df_merged.merge(pitchtype_hr[['pitch_type', 'hr_rate_pitch']], on='pitch_type', how='left')
+    # Pitch Type HR Rate
+    pitchtype_hr = pd.read_csv(pitchtype_hr_file)
+    pitchtype_hr.columns = pitchtype_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    if 'hr_outcome' in pitchtype_hr.columns:
+        pitchtype_hr = pitchtype_hr.rename(columns={'hr_outcome': 'hr_rate_pitch'})
+    if 'pitch_type' in df_merged.columns and 'pitch_type' in pitchtype_hr.columns:
+        df_merged = df_merged.merge(pitchtype_hr[['pitch_type', 'hr_rate_pitch']], on='pitch_type', how='left')
 
-# Ensure handedness columns are filled
-if not ('BatterHandedness' in df_merged.columns and 'PitcherHandedness' in df_merged.columns):
-    df_merged['BatterHandedness'], _ = zip(*df_merged['batter'].apply(get_handedness))
-    _, df_merged['PitcherHandedness'] = zip(*df_merged['pitcher'].apply(get_handedness))
+    # Ensure handedness columns are filled
+    if not ('BatterHandedness' in df_merged.columns and 'PitcherHandedness' in df_merged.columns):
+        df_merged['BatterHandedness'], _ = zip(*df_merged['batter'].apply(get_handedness))
+        _, df_merged['PitcherHandedness'] = zip(*df_merged['pitcher'].apply(get_handedness))
 
-# Handedness HR Rate
-handed_hr = pd.read_csv(handed_hr_file)
-handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-if 'hr_outcome' in handed_hr.columns:
-    handed_hr = handed_hr.rename(columns={'hr_outcome': 'hr_rate'})
-df_merged = df_merged.merge(
-    handed_hr[['batter_hand', 'pitcher_hand', 'hr_rate']],
-    left_on=['BatterHandedness', 'PitcherHandedness'],
-    right_on=['batter_hand', 'pitcher_hand'],
-    how='left'
-)
-df_merged = df_merged.drop(columns=['batter_hand', 'pitcher_hand'], errors='ignore')
+    # Handedness HR Rate
+    handed_hr = pd.read_csv(handed_hr_file)
+    handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    if 'hr_outcome' in handed_hr.columns:
+        handed_hr = handed_hr.rename(columns={'hr_outcome': 'hr_rate'})
+    df_merged = df_merged.merge(
+        handed_hr[['batter_hand', 'pitcher_hand', 'hr_rate']],
+        left_on=['BatterHandedness', 'PitcherHandedness'],
+        right_on=['batter_hand', 'pitcher_hand'],
+        how='left'
+    )
+    df_merged = df_merged.drop(columns=['batter_hand', 'pitcher_hand'], errors='ignore')
 
-# Logit Feature Weights
-logit_weights = pd.read_csv(logit_weights_file)
-logit_weights.columns = logit_weights.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-logit_weights_dict = {}
-if len(logit_weights.columns) >= 2:
-    feature_col = logit_weights.columns[0]
-    weight_col = logit_weights.columns[1]
-    for _, row in logit_weights.iterrows():
-        feature = row[feature_col]
-        weight = row[weight_col]
-        if pd.notna(feature):
-            logit_weights_dict[feature] = weight
-else:
-    st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
+    # Logit Feature Weights
+    logit_weights = pd.read_csv(logit_weights_file)
+    logit_weights.columns = logit_weights.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    logit_weights_dict = {}
+    if len(logit_weights.columns) >= 2:
+        feature_col = logit_weights.columns[0]
+        weight_col = logit_weights.columns[1]
+        for _, row in logit_weights.iterrows():
+            feature = row[feature_col]
+            weight = row[weight_col]
+            if pd.notna(feature):
+                logit_weights_dict[feature] = weight
+    else:
+        st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
+        
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
