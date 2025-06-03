@@ -110,12 +110,33 @@ park_factors = {
     "truist_park": 1.06, "loandepot_park": 0.86, "citi_field": 1.05, "nationals_park": 1.05, "petco_park": 0.85,
     "citizens_bank_park": 1.19
 }
-compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+compass = [
+    'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'
+]
 
 def get_compass_idx(dir_str):
-    dir_str = dir_str.upper()
-    try: return compass.index(dir_str)
-    except: return -1
+    """Get index in 16-point compass for wind/park direction."""
+    dir_str = str(dir_str).upper().replace('-', '').strip()
+    # Exact match
+    if dir_str in compass:
+        return compass.index(dir_str)
+    # Map common 2-letter combos
+    two_letter_map = {
+        'EN': 'ENE', 'NE': 'NE', 'ES': 'ESE', 'SE': 'SE',
+        'WN': 'WNW', 'NW': 'NW', 'WS': 'WSW', 'SW': 'SW',
+        'SN': 'N',   'NS': 'S',  'EW': 'E',   'WE': 'W'
+    }
+    if len(dir_str) == 2 and dir_str in two_letter_map:
+        mapped = two_letter_map[dir_str]
+        if mapped in compass:
+            return compass.index(mapped)
+    # Fallback: just the first char (N/S/E/W)
+    if dir_str and dir_str[0] in 'NSEW':
+        for c in compass:
+            if c.startswith(dir_str[0]):
+                return compass.index(c)
+    return -1
 
 def is_wind_out(wind_dir, park_orientation):
     if not isinstance(wind_dir, str) or not isinstance(park_orientation, str):
