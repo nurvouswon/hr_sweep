@@ -753,25 +753,6 @@ else:
     park_hr = pd.read_csv(park_hr_file)
     park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
 
-    # Load logistic weights dict
-    logit_weights = pd.read_csv(logit_weights_file)
-    logit_weights.columns = (
-        logit_weights.columns
-        .str.strip().str.lower()
-        .str.replace(' ', '_')
-        .str.replace(r'[^\w]', '', regex=True)
-    )
-    if len(logit_weights.columns) >= 2:
-        feature_col = logit_weights.columns[0]
-        weight_col = logit_weights.columns[1]
-        for _, row in logit_weights.iterrows():
-            feature = row[feature_col]
-            weight = row[weight_col]
-            if pd.notna(feature):
-                logit_weights_dict[feature] = weight
-    else:
-        st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
-
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
