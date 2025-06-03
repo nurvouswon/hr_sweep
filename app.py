@@ -836,8 +836,8 @@ else:
     importances = None  # Set/import if using ML, otherwise leave as None
 
      # Optionally display or use feature importances
-    if importances is not None:
-        st.write("Feature importances:", importances)
+if importances is not None:
+    st.write("Feature importances:", importances)
 
     # Show the top leaderboard table
     st.success("Leaderboard ready! Top HR Matchups below.")
