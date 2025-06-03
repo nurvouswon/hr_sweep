@@ -755,7 +755,7 @@ else:
 
     # --- Begin leaderboard row construction ---
 progress = st.progress(0)
-    rows = []
+rows = []
 
     for idx, row in df_merged.iterrows():
         try:
