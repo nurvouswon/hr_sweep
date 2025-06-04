@@ -900,17 +900,17 @@ if all_files_uploaded:
 
     def robust_blend(row):
     # If AnalyzerLogitScore is missing or nan, treat as 0
-    analyzer_logit = row.get('AnalyzerLogitScore', 0)
-    analyzer_logit = analyzer_logit if pd.notnull(analyzer_logit) else 0
+        analyzer_logit = row.get('AnalyzerLogitScore', 0)
+        analyzer_logit = analyzer_logit if pd.notnull(analyzer_logit) else 0
 
-    handed_hr = row.get('HandedHRRate', 0)
-    handed_hr = handed_hr if pd.notnull(handed_hr) else 0
+        handed_hr = row.get('HandedHRRate', 0)
+        handed_hr = handed_hr if pd.notnull(handed_hr) else 0
 
-    pitchtype_hr = row.get('PitchTypeHRRate', 0)
-    pitchtype_hr = pitchtype_hr if pd.notnull(pitchtype_hr) else 0
+        pitchtype_hr = row.get('PitchTypeHRRate', 0)
+        pitchtype_hr = pitchtype_hr if pd.notnull(pitchtype_hr) else 0
 
-    hr_score = row.get('HR_Score', 0)
-    hr_score = hr_score if pd.notnull(hr_score) else 0
+        hr_score = row.get('HR_Score', 0)
+        hr_score = hr_score if pd.notnull(hr_score) else 0
 
     # If all supplementals are zero, just return HR_Score
     # Otherwise blend as normal
