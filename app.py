@@ -825,27 +825,48 @@ if all_files_uploaded:
         park_hr = park_hr.rename(columns={'hr_outcome': 'hr_rate_park'})
     park_hr = park_hr.dropna(subset=['park'])
     df_merged = df_merged.merge(park_hr[['park', 'hr_rate_park']], on='park', how='left')
-    
-# --- Handedness HR Rate (batter_id, pitcher_hand, hr_rate or HandedHRRate) ---
+
     handed_hr = pd.read_csv(handed_hr_file)
     handed_hr.columns = (
-        handed_hr.columns
-        .str.strip().str.lower()
+    handed_hr.columns
+        .str.strip()
+        .str.lower()
         .str.replace(' ', '_')
         .str.replace(r'[^\w]', '', regex=True)
-    )
+)
+    # Print out columns to debug
+    st.write("Handed HR columns after cleaning:", handed_hr.columns.tolist())
+    st.write(handed_hr.head())
 
-    # Rename to 'HandedHRRate' if needed
+    # Robust renaming for common column variants
+    rename_dict = {}
+    if 'batterid' in handed_hr.columns:
+        rename_dict['batterid'] = 'batter_id'
+    if 'pitcherhand' in handed_hr.columns:
+        rename_dict['pitcherhand'] = 'pitcher_hand'
     if 'hr_rate' in handed_hr.columns:
-        handed_hr.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
+        rename_dict['hr_rate'] = 'HandedHRRate'
+    if 'handedhrrate' in handed_hr.columns:
+        rename_dict['handedhrrate'] = 'HandedHRRate'
+    handed_hr.rename(columns=rename_dict, inplace=True)
 
-    # Now merge on batter_id, PitcherHandedness, pitcher_hand
+    # Check columns after renaming
+    st.write("Handed HR columns after renaming:", handed_hr.columns.tolist())
+
+    # Check for missing columns
+    required = ['batter_id', 'pitcher_hand', 'HandedHRRate']
+    missing = [col for col in required if col not in handed_hr.columns]
+    if missing:
+        st.error(f"Missing columns in Handed HR file: {missing}")
+        st.stop()
+
+    # Now merge
     df_merged = df_merged.merge(
         handed_hr[['batter_id', 'pitcher_hand', 'HandedHRRate']],
         left_on=['batter_id', 'PitcherHandedness'],
         right_on=['batter_id', 'pitcher_hand'],
         how='left'
-    )
+)
     df_merged.drop(columns=['pitcher_hand'], inplace=True, errors='ignore')
     # Optional: Rename for clarity
     if 'hr_rate' in df_merged.columns:
