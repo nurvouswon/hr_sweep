@@ -608,19 +608,6 @@ def train_and_apply_model(df_leaderboard):
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
 
-def get_pitcher_primary_pitch(pitcher_id):
-    try:
-        row = pitcher_bb[pitcher_bb['pitcher_id'] == str(pitcher_id)]
-        if not row.empty:
-            pitch_cols = [col for col in row.columns if col.endswith('_pct')]
-            if pitch_cols:
-                # Take the column (pitch) with the highest % usage
-                pitch_type = row[pitch_cols].iloc[0].idxmax().replace('_pct', '').upper()
-                return pitch_type
-    except Exception as e:
-        log_error("Primary pitch assignment", e)
-    return 'FF'  # Fallback if unknown
-
 def compute_analyzer_logit_score(row, logit_weights_dict):
     score = 0
     used_weights = 0
@@ -850,6 +837,22 @@ if all_files_uploaded:
     pitchtype_hr['pitch_type'],
     pitchtype_hr['hr_rate_pitch'] if 'hr_rate_pitch' in pitchtype_hr.columns else pitchtype_hr['hr_outcome']
 ))
+    def get_pitcher_primary_pitch(pitcher_id):
+        try:
+            row = pitcher_bb[pitcher_bb['pitcher_id'] == str(pitcher_id)]
+            if not row.empty:
+                pitch_cols = [col for col in row.columns if col.endswith('_pct')]
+                if pitch_cols:
+                    pitch_type = row[pitch_cols].iloc[0].idxmax().replace('_pct', '').upper()
+                    return pitch_type
+        except Exception as e:
+            log_error("Primary pitch assignment", e)
+        return 'FF'  # Fallback if unknown
+
+    # <<--- Use it to fill PitchTypeHRRate
+    df_merged['PitchTypeHRRate'] = df_merged['pitcher_id'].apply(
+        lambda pid: pitch_type_to_hr.get(get_pitcher_primary_pitch(pid), 0)
+    )
     
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
