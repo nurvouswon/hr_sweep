@@ -125,9 +125,9 @@ compass_aliases = {
     'SN': 'N',  'NS': 'S',  'EW': 'E',  'WE': 'W',
     'N': 'N', 'S': 'S', 'E': 'E', 'W': 'W'
 }
+
 def direction_to_angle(dir_str):
     d = str(dir_str).upper().replace('-', '').strip()
-    # Map via aliases if needed
     if d in compass_angles:
         return compass_angles[d]
     if d in compass_aliases and compass_aliases[d] in compass_angles:
@@ -147,14 +147,12 @@ def is_wind_out(wind_dir, park_orientation, tolerance=45):
     if wind_angle is None or park_angle is None:
         return "unknown"
     diff = (wind_angle - park_angle) % 360
-    # "Out" if wind is blowing within ±tolerance degrees of park orientation
     if diff <= tolerance or diff >= (360 - tolerance):
         return "out"
-    # "In" if wind is blowing toward home plate (±tolerance of opposite direction)
     if abs(diff - 180) <= tolerance:
         return "in"
-    # Otherwise, "side"
     return "side"
+
 def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
         if not isinstance(city, str) or pd.isna(city):
@@ -170,15 +168,14 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         temp = weather_hour.get('temp_f')
         wind = weather_hour.get('wind_mph')
         wind_dir_full = weather_hour.get('wind_dir', '').strip().upper()
-        wind_dir = wind_dir_full if wind_dir_full in compass else wind_dir_full[:2]
         humidity = weather_hour.get('humidity')
         condition = weather_hour.get('condition', {}).get('text')
-        wind_effect = is_wind_out(wind_dir, park_orientation)
-        st.write(f"WIND RAW: {wind_dir_full} | NORMALIZED: {wind_dir}")
+        wind_effect = is_wind_out(wind_dir_full, park_orientation)
+        st.write(f"WIND RAW: {wind_dir_full} | PARK ORIENT: {park_orientation} | WIND EFFECT: {wind_effect}")
         if wind_effect == "unknown":
-            log_error("Wind Effect Debug", f"wind_dir={wind_dir}, orientation={park_orientation}")
+            log_error("Wind Effect Debug", f"wind_dir={wind_dir_full}, orientation={park_orientation}")
         return {
-            "Temp": temp, "Wind": wind, "WindDir": wind_dir, "WindEffect": wind_effect,
+            "Temp": temp, "Wind": wind, "WindDir": wind_dir_full, "WindEffect": wind_effect,
             "Humidity": humidity, "Condition": condition
         }
     except Exception as e:
