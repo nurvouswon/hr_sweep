@@ -991,7 +991,7 @@ if all_files_uploaded:
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
 
-    df_final['Analyzer_Blend'] = df_final.apply(robust_blend, axis=1)
+    df_final['Analyzer_Blend'] = df_final.apply(robust_blend_normalized, axis=1)
 
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
