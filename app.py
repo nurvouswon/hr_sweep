@@ -898,12 +898,32 @@ if all_files_uploaded:
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
 
-    df_final['Analyzer_Blend'] = (
-        0.60 * df_final['HR_Score'] +
-        0.30 * df_final.get('AnalyzerLogitScore', 0) +
-        0.05 * df_final.get('HandedHRRate', 0) +
-        0.05 * df_final.get('PitchTypeHRRate', 0)
+    def robust_blend(row):
+    # If AnalyzerLogitScore is missing or nan, treat as 0
+    analyzer_logit = row.get('AnalyzerLogitScore', 0)
+    analyzer_logit = analyzer_logit if pd.notnull(analyzer_logit) else 0
+
+    handed_hr = row.get('HandedHRRate', 0)
+    handed_hr = handed_hr if pd.notnull(handed_hr) else 0
+
+    pitchtype_hr = row.get('PitchTypeHRRate', 0)
+    pitchtype_hr = pitchtype_hr if pd.notnull(pitchtype_hr) else 0
+
+    hr_score = row.get('HR_Score', 0)
+    hr_score = hr_score if pd.notnull(hr_score) else 0
+
+    # If all supplementals are zero, just return HR_Score
+    # Otherwise blend as normal
+    if analyzer_logit == 0 and handed_hr == 0 and pitchtype_hr == 0:
+        return hr_score
+    return (
+        0.60 * hr_score +
+        0.30 * analyzer_logit +
+        0.05 * handed_hr +
+        0.05 * pitchtype_hr
     )
+
+df_final['Analyzer_Blend'] = df_final.apply(robust_blend, axis=1)
 
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
