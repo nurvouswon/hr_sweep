@@ -607,6 +607,94 @@ def train_and_apply_model(df_leaderboard):
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
+
+def get_pitcher_primary_pitch(pitcher_id):
+    try:
+        row = pitcher_bb[pitcher_bb['pitcher_id'] == str(pitcher_id)]
+        if not row.empty:
+            pitch_cols = [col for col in row.columns if col.endswith('_pct')]
+            if pitch_cols:
+                # Take the column (pitch) with the highest % usage
+                pitch_type = row[pitch_cols].iloc[0].idxmax().replace('_pct', '').upper()
+                return pitch_type
+    except Exception as e:
+        log_error("Primary pitch assignment", e)
+    return 'FF'  # Fallback if unknown
+
+def compute_analyzer_logit_score(row, logit_weights_dict):
+    score = 0
+    used_weights = 0
+    for feature, weight in logit_weights_dict.items():
+        val = row.get(feature, 0)
+        # If value is missing or nan, treat as 0
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            val = 0
+        try:
+            score += float(val) * float(weight)
+            used_weights += 1
+        except Exception as e:
+            log_error("LogitScore error", f"feature={feature}, val={val}, weight={weight}")
+    if used_weights == 0:
+        return 0
+    return score
+
+def robust_calc_hr_score(row, feature_weights, norm_funcs, min_features=0.7):
+    score = 0
+    total_weight = 0
+    used_features = 0
+    for feat, weight in feature_weights.items():
+        value = row.get(feat, None)
+        if value is not None and pd.notna(value):
+            norm_val = norm_funcs.get(feat, lambda x: x)(value)
+            score += norm_val * weight
+            total_weight += weight
+            used_features += 1
+    completeness = used_features / len(feature_weights) if feature_weights else 0
+    flag = "Low Data" if completeness < min_features else "OK"
+    if total_weight == 0:
+        return 0, flag
+    return score / total_weight, flag
+
+def robust_blend(row):
+    # If AnalyzerLogitScore is missing or nan, treat as 0
+    analyzer_logit = row.get('AnalyzerLogitScore', 0)
+    analyzer_logit = analyzer_logit if pd.notnull(analyzer_logit) else 0
+
+    handed_hr = row.get('HandedHRRate', 0)
+    handed_hr = handed_hr if pd.notnull(handed_hr) else 0
+
+    pitchtype_hr = row.get('PitchTypeHRRate', 0)
+    pitchtype_hr = pitchtype_hr if pd.notnull(pitchtype_hr) else 0
+
+    hr_score = row.get('HR_Score', 0)
+    hr_score = hr_score if pd.notnull(hr_score) else 0
+
+    # If all supplementals are zero, just return HR_Score
+    if analyzer_logit == 0 and handed_hr == 0 and pitchtype_hr == 0:
+        return hr_score
+    else:
+        return (
+            0.60 * hr_score +
+            0.30 * analyzer_logit +
+            0.05 * handed_hr +
+            0.05 * pitchtype_hr
+        )
+
+def compute_analyzer_logit(row, logit_weights_dict):
+    """Calculate AnalyzerLogitScore for a given row and logit_weights dict."""
+    score = 0
+    feature_count = 0
+    for feat, weight in logit_weights_dict.items():
+        val = row.get(feat, None)
+        # Use 0 for missing features
+        try:
+            val = float(val) if pd.notnull(val) else 0
+            score += val * float(weight)
+            feature_count += 1
+        except Exception:
+            continue
+    # If no valid features found, score is 0
+    return score
 # ====================== STREAMLIT UI & LEADERBOARD ========================
 st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
@@ -762,72 +850,7 @@ if all_files_uploaded:
     pitchtype_hr['pitch_type'],
     pitchtype_hr['hr_rate_pitch'] if 'hr_rate_pitch' in pitchtype_hr.columns else pitchtype_hr['hr_outcome']
 ))
-    def get_pitcher_primary_pitch(pitcher_id):
-        try:
-            row = pitcher_bb[pitcher_bb['pitcher_id'] == str(pitcher_id)]
-            if not row.empty:
-                pitch_cols = [col for col in row.columns if col.endswith('_pct')]
-                if pitch_cols:
-                    # Take the column (pitch) with the highest % usage
-                    pitch_type = row[pitch_cols].iloc[0].idxmax().replace('_pct', '').upper()
-                    return pitch_type
-        except Exception as e:
-            log_error("Primary pitch assignment", e)
-        return 'FF'  # Fallback if unknown
-
-    df_merged['PitchTypeHRRate'] = df_merged['pitcher_id'].apply(
-        lambda pid: pitch_type_to_hr.get(get_pitcher_primary_pitch(pid), 0)
-    )
-
-    # Ensure handedness columns are filled
-    if not ('BatterHandedness' in df_merged.columns and 'PitcherHandedness' in df_merged.columns):
-        df_merged['BatterHandedness'], _ = zip(*df_merged['batter'].apply(get_handedness))
-        _, df_merged['PitcherHandedness'] = zip(*df_merged['pitcher'].apply(get_handedness))
-
-    # Handedness HR Rate
-    handed_hr = pd.read_csv(handed_hr_file)
-    handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    if 'hr_outcome' in handed_hr.columns:
-        handed_hr = handed_hr.rename(columns={'hr_outcome': 'hr_rate'})
-    df_merged = df_merged.merge(
-        handed_hr[['batter_hand', 'pitcher_hand', 'hr_rate']],
-        left_on=['BatterHandedness', 'PitcherHandedness'],
-        right_on=['batter_hand', 'pitcher_hand'],
-        how='left'
-    )
-    df_merged = df_merged.drop(columns=['batter_hand', 'pitcher_hand'], errors='ignore')
-
-    # Logit Feature Weights
-    logit_weights = pd.read_csv(logit_weights_file)
-    logit_weights.columns = logit_weights.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    logit_weights_dict = {}
-    if len(logit_weights.columns) >= 2:
-        feature_col = logit_weights.columns[0]
-        weight_col = logit_weights.columns[1]
-        for _, row in logit_weights.iterrows():
-            feature = row[feature_col]
-            weight = row[weight_col]
-            if pd.notna(feature):
-                logit_weights_dict[feature] = weight
-    else:
-        st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
     
-    def compute_analyzer_logit_score(row, logit_weights_dict):
-        score = 0
-        used_weights = 0
-        for feature, weight in logit_weights_dict.items():
-            val = row.get(feature, 0)
-        # If value is missing or nan, treat as 0
-            if val is None or (isinstance(val, float) and np.isnan(val)):
-                val = 0
-            try:
-                score += float(val) * float(weight)
-                used_weights += 1
-            except Exception as e:
-                log_error("LogitScore error", f"feature={feature}, val={val}, weight={weight}")
-        if used_weights == 0:
-            return 0
-        return score    
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
@@ -847,23 +870,6 @@ if all_files_uploaded:
         'B_sweet_spot_pct_3': norm_sweetspot, 'B_sweet_spot_pct_5': norm_sweetspot, 'B_sweet_spot_pct_7': norm_sweetspot, 'B_sweet_spot_pct_14': norm_sweetspot,
         'B_hardhit_pct_3': norm_hardhit, 'B_hardhit_pct_5': norm_hardhit, 'B_hardhit_pct_7': norm_hardhit, 'B_hardhit_pct_14': norm_hardhit,
     }
-
-    def robust_calc_hr_score(row, feature_weights, norm_funcs, min_features=0.7):
-        score = 0
-        total_weight = 0
-        used_features = 0
-        for feat, weight in feature_weights.items():
-            value = row.get(feat, None)
-            if value is not None and pd.notna(value):
-                norm_val = norm_funcs.get(feat, lambda x: x)(value)
-                score += norm_val * weight
-                total_weight += weight
-                used_features += 1
-        completeness = used_features / len(feature_weights) if feature_weights else 0
-        flag = "Low Data" if completeness < min_features else "OK"
-        if total_weight == 0:
-            return 0, flag
-        return score / total_weight, flag
 
     for idx, row in df_merged.iterrows():
         try:
@@ -930,32 +936,6 @@ if all_files_uploaded:
     df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
-
-    def robust_blend(row):
-    # If AnalyzerLogitScore is missing or nan, treat as 0
-        analyzer_logit = row.get('AnalyzerLogitScore', 0)
-        analyzer_logit = analyzer_logit if pd.notnull(analyzer_logit) else 0
-
-        handed_hr = row.get('HandedHRRate', 0)
-        handed_hr = handed_hr if pd.notnull(handed_hr) else 0
-
-        pitchtype_hr = row.get('PitchTypeHRRate', 0)
-        pitchtype_hr = pitchtype_hr if pd.notnull(pitchtype_hr) else 0
-
-        hr_score = row.get('HR_Score', 0)
-        hr_score = hr_score if pd.notnull(hr_score) else 0
-
-    # If all supplementals are zero, just return HR_Score
-    # Otherwise blend as normal
-        if analyzer_logit == 0 and handed_hr == 0 and pitchtype_hr == 0:
-            return hr_score
-        else:
-            return (
-                0.60 * hr_score +
-                0.30 * analyzer_logit +
-                0.05 * handed_hr +
-                0.05 * pitchtype_hr
-            )
 
     df_final['Analyzer_Blend'] = df_final.apply(robust_blend, axis=1)
 
