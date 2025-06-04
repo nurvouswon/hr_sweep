@@ -826,50 +826,35 @@ if all_files_uploaded:
     park_hr = park_hr.dropna(subset=['park'])
     df_merged = df_merged.merge(park_hr[['park', 'hr_rate_park']], on='park', how='left')
 
+    # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
+    df_merged['BatterHandedness'] = df_merged['batter'].apply(
+        lambda n: get_handedness(n)[0] if pd.notnull(n) else np.nan
+)
+    df_merged['PitcherHandedness'] = df_merged['pitcher'].apply(
+        lambda n: get_handedness(n)[1] if pd.notnull(n) else np.nan
+)
+
+# --- Load and prepare handedness HR rate file ---
     handed_hr = pd.read_csv(handed_hr_file)
     handed_hr.columns = (
-    handed_hr.columns
-        .str.strip()
-        .str.lower()
-        .str.replace(' ', '_')
-        .str.replace(r'[^\w]', '', regex=True)
+        handed_hr.columns
+            .str.strip()
+            .str.lower()
+            .str.replace(' ', '_')
+            .str.replace(r'[^\w]', '', regex=True)
 )
-    # Print out columns to debug
-    st.write("Handed HR columns after cleaning:", handed_hr.columns.tolist())
-    st.write(handed_hr.head())
+    handed_hr.rename(columns={
+        'batter_hand': 'BatterHandedness',
+        'pitcher_hand': 'PitcherHandedness',
+        'hr_outcome': 'HandedHRRate'
+    }, inplace=True)
 
-    # Robust renaming for common column variants
-    rename_dict = {}
-    if 'batterid' in handed_hr.columns:
-        rename_dict['batterid'] = 'batter_id'
-    if 'pitcherhand' in handed_hr.columns:
-        rename_dict['pitcherhand'] = 'pitcher_hand'
-    if 'hr_rate' in handed_hr.columns:
-        rename_dict['hr_rate'] = 'HandedHRRate'
-    if 'handedhrrate' in handed_hr.columns:
-        rename_dict['handedhrrate'] = 'HandedHRRate'
-    handed_hr.rename(columns=rename_dict, inplace=True)
-
-    # Check columns after renaming
-    st.write("Handed HR columns after renaming:", handed_hr.columns.tolist())
-
-    # Check for correct handedness columns
-    required = ['batter_hand', 'pitcher_hand', 'hr_outcome']
-    missing = [col for col in required if col not in handed_hr.columns]
-    if missing:
-        st.error(f"Missing columns in Handed HR file: {missing}")
-        st.stop()
-
-    # Rename columns to match your usage in the main df
-    handed_hr.rename(columns={'batter_hand': 'BatterHandedness', 'pitcher_hand': 'PitcherHandedness', 'hr_outcome': 'HandedHRRate'}, inplace=True)
-
-    # Now merge on handedness, not IDs
+    # --- Merge on handedness columns ---
     df_merged = df_merged.merge(
         handed_hr[['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']],
         on=['BatterHandedness', 'PitcherHandedness'],
         how='left'
 )
-    df_merged.drop(columns=['pitcher_hand'], inplace=True, errors='ignore')
     # Optional: Rename for clarity
     if 'hr_rate' in df_merged.columns:
         df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
