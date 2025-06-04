@@ -898,7 +898,7 @@ if all_files_uploaded:
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
 
-def robust_blend(row):
+    def robust_blend(row):
     # If AnalyzerLogitScore is missing or nan, treat as 0
     analyzer_logit = row.get('AnalyzerLogitScore', 0)
     analyzer_logit = analyzer_logit if pd.notnull(analyzer_logit) else 0
@@ -916,12 +916,13 @@ def robust_blend(row):
     # Otherwise blend as normal
     if analyzer_logit == 0 and handed_hr == 0 and pitchtype_hr == 0:
         return hr_score
-    return (
-        0.60 * hr_score +
-        0.30 * analyzer_logit +
-        0.05 * handed_hr +
-        0.05 * pitchtype_hr
-    )
+    else:
+        return (
+            0.60 * hr_score +
+            0.30 * analyzer_logit +
+            0.05 * handed_hr +
+            0.05 * pitchtype_hr
+        )
 
     df_final['Analyzer_Blend'] = df_final.apply(robust_blend, axis=1)
 
