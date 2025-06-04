@@ -809,7 +809,22 @@ if all_files_uploaded:
                 logit_weights_dict[feature] = weight
     else:
         st.warning("⚠️ Logit weights file has insufficient columns. Using default weights.")
-        
+    def compute_analyzer_logit_score(row, logit_weights_dict):
+    score = 0
+    used_weights = 0
+    for feature, weight in logit_weights_dict.items():
+        val = row.get(feature, 0)
+        # If value is missing or nan, treat as 0
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            val = 0
+        try:
+            score += float(val) * float(weight)
+            used_weights += 1
+        except Exception as e:
+            log_error("LogitScore error", f"feature={feature}, val={val}, weight={weight}")
+    if used_weights == 0:
+        return 0
+    return score    
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
