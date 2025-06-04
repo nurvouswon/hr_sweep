@@ -121,10 +121,10 @@ def get_compass_idx(dir_str):
     # Exact match
     if dir_str in compass:
         return compass.index(dir_str)
-    # Map common 2-letter combos
+    # Map common 2-letter combos (handle API/CSV conventions)
     two_letter_map = {
-        'EN': 'ENE', 'NE': 'NE', 'ES': 'ESE', 'SE': 'SE',
-        'WN': 'WNW', 'NW': 'NW', 'WS': 'WSW', 'SW': 'SW',
+        'EN': 'NE', 'NE': 'NE', 'ES': 'SE', 'SE': 'SE',
+        'WN': 'NW', 'NW': 'NW', 'WS': 'SW', 'SW': 'SW',
         'SN': 'N',   'NS': 'S',  'EW': 'E',   'WE': 'W'
     }
     if len(dir_str) == 2 and dir_str in two_letter_map:
