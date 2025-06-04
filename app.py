@@ -898,7 +898,7 @@ if all_files_uploaded:
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
 
-    def robust_blend(row):
+def robust_blend(row):
     # If AnalyzerLogitScore is missing or nan, treat as 0
     analyzer_logit = row.get('AnalyzerLogitScore', 0)
     analyzer_logit = analyzer_logit if pd.notnull(analyzer_logit) else 0
