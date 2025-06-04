@@ -666,7 +666,26 @@ def robust_blend(row):
             0.05 * handed_hr +
             0.05 * pitchtype_hr
         )
-
+def robust_blend_normalized(row):
+    weights = {
+        'HR_Score': 0.60,
+        'AnalyzerLogitScore': 0.30,
+        'HandedHRRate': 0.05,
+        'PitchTypeHRRate': 0.05
+    }
+    values = {
+        'HR_Score': row.get('HR_Score', 0) if pd.notnull(row.get('HR_Score', 0)) else 0,
+        'AnalyzerLogitScore': row.get('AnalyzerLogitScore', 0) if pd.notnull(row.get('AnalyzerLogitScore', 0)) else 0,
+        'HandedHRRate': row.get('HandedHRRate', 0) if pd.notnull(row.get('HandedHRRate', 0)) else 0,
+        'PitchTypeHRRate': row.get('PitchTypeHRRate', 0) if pd.notnull(row.get('PitchTypeHRRate', 0)) else 0
+    }
+    # Only use weights where value != 0
+    active_weights = {k: w for k, w in weights.items() if values[k] != 0}
+    if not active_weights:
+        return values['HR_Score']
+    norm_sum = sum(active_weights.values())
+    return sum(values[k] * weights[k] for k in active_weights) / norm_sum
+    
 def compute_analyzer_logit(row, logit_weights_dict):
     """Calculate AnalyzerLogitScore for a given row and logit_weights dict."""
     score = 0
