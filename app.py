@@ -110,44 +110,51 @@ park_factors = {
     "truist_park": 1.06, "loandepot_park": 0.86, "citi_field": 1.05, "nationals_park": 1.05, "petco_park": 0.85,
     "citizens_bank_park": 1.19
 }
-compass = [
+import math
+
+# 16-point compass for mapping wind/park directions to angles (in degrees)
+compass_points = [
     'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
     'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'
 ]
+compass_angles = {name: i * 22.5 for i, name in enumerate(compass_points)}
+# Add 2-letter variants for weather API compatibility
+compass_aliases = {
+    'EN': 'NE', 'NE': 'NE', 'ES': 'SE', 'SE': 'SE',
+    'WN': 'NW', 'NW': 'NW', 'WS': 'SW', 'SW': 'SW',
+    'SN': 'N',  'NS': 'S',  'EW': 'E',  'WE': 'W',
+    'N': 'N', 'S': 'S', 'E': 'E', 'W': 'W'
+}
+def direction_to_angle(dir_str):
+    d = str(dir_str).upper().replace('-', '').strip()
+    # Map via aliases if needed
+    if d in compass_angles:
+        return compass_angles[d]
+    if d in compass_aliases and compass_aliases[d] in compass_angles:
+        return compass_angles[compass_aliases[d]]
+    # Try first letter fallback
+    if d and d[0] in compass_angles:
+        return compass_angles[d[0]]
+    return None
 
-def get_compass_idx(dir_str):
-    """Get index in 16-point compass for wind/park direction."""
-    dir_str = str(dir_str).upper().replace('-', '').strip()
-    # Exact match
-    if dir_str in compass:
-        return compass.index(dir_str)
-    # Map common 2-letter combos (handle API/CSV conventions)
-    two_letter_map = {
-        'EN': 'NE', 'NE': 'NE', 'ES': 'SE', 'SE': 'SE',
-        'WN': 'NW', 'NW': 'NW', 'WS': 'SW', 'SW': 'SW',
-        'SN': 'N',   'NS': 'S',  'EW': 'E',   'WE': 'W'
-    }
-    if len(dir_str) == 2 and dir_str in two_letter_map:
-        mapped = two_letter_map[dir_str]
-        if mapped in compass:
-            return compass.index(mapped)
-    # Fallback: just the first char (N/S/E/W)
-    if dir_str and dir_str[0] in 'NSEW':
-        for c in compass:
-            if c.startswith(dir_str[0]):
-                return compass.index(c)
-    return -1
-
-def is_wind_out(wind_dir, park_orientation):
-    if not isinstance(wind_dir, str) or not isinstance(park_orientation, str):
+def is_wind_out(wind_dir, park_orientation, tolerance=45):
+    """
+    Returns "out" if wind is blowing out to center, "in" if in, "side" otherwise.
+    tolerance: Angle in degrees for 'out'/'in' (default 45°).
+    """
+    wind_angle = direction_to_angle(wind_dir)
+    park_angle = direction_to_angle(park_orientation)
+    if wind_angle is None or park_angle is None:
         return "unknown"
-    wi = get_compass_idx(wind_dir)
-    pi = get_compass_idx(park_orientation)
-    if wi == -1 or pi == -1: return "unknown"
-    if abs(wi - pi) <= 1 or abs(wi - pi) >= 7: return "out"
-    elif abs(wi - pi) == 4: return "in"
-    else: return "side"
-
+    diff = (wind_angle - park_angle) % 360
+    # "Out" if wind is blowing within ±tolerance degrees of park orientation
+    if diff <= tolerance or diff >= (360 - tolerance):
+        return "out"
+    # "In" if wind is blowing toward home plate (±tolerance of opposite direction)
+    if abs(diff - 180) <= tolerance:
+        return "in"
+    # Otherwise, "side"
+    return "side"
 def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
     try:
         if not isinstance(city, str) or pd.isna(city):
