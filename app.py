@@ -853,18 +853,20 @@ if all_files_uploaded:
     # Check columns after renaming
     st.write("Handed HR columns after renaming:", handed_hr.columns.tolist())
 
-    # Check for missing columns
-    required = ['batter_id', 'pitcher_hand', 'HandedHRRate']
+    # Check for correct handedness columns
+    required = ['batter_hand', 'pitcher_hand', 'hr_outcome']
     missing = [col for col in required if col not in handed_hr.columns]
     if missing:
         st.error(f"Missing columns in Handed HR file: {missing}")
         st.stop()
 
-    # Now merge
+    # Rename columns to match your usage in the main df
+    handed_hr.rename(columns={'batter_hand': 'BatterHandedness', 'pitcher_hand': 'PitcherHandedness', 'hr_outcome': 'HandedHRRate'}, inplace=True)
+
+    # Now merge on handedness, not IDs
     df_merged = df_merged.merge(
-        handed_hr[['batter_id', 'pitcher_hand', 'HandedHRRate']],
-        left_on=['batter_id', 'PitcherHandedness'],
-        right_on=['batter_id', 'pitcher_hand'],
+        handed_hr[['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']],
+        on=['BatterHandedness', 'PitcherHandedness'],
         how='left'
 )
     df_merged.drop(columns=['pitcher_hand'], inplace=True, errors='ignore')
