@@ -923,7 +923,7 @@ def robust_blend(row):
         0.05 * pitchtype_hr
     )
 
-df_final['Analyzer_Blend'] = df_final.apply(robust_blend, axis=1)
+    df_final['Analyzer_Blend'] = df_final.apply(robust_blend, axis=1)
 
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
