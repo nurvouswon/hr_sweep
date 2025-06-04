@@ -825,7 +825,30 @@ if all_files_uploaded:
         park_hr = park_hr.rename(columns={'hr_outcome': 'hr_rate_park'})
     park_hr = park_hr.dropna(subset=['park'])
     df_merged = df_merged.merge(park_hr[['park', 'hr_rate_park']], on='park', how='left')
+    # Merge handedness HR rates
+    handed_hr = pd.read_csv(handed_hr_file)
+    handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    if 'hr_outcome' in handed_hr.columns:
+        handed_hr = handed_hr.rename(columns={'hr_outcome': 'hr_rate'})
+    if 'batter_id' in handed_hr.columns:
+        handed_hr['batter_id'] = handed_hr['batter_id'].astype(str)
 
+    # Ensure handedness columns exist in df_merged
+    if not ('BatterHandedness' in df_merged.columns and 'PitcherHandedness' in df_merged.columns):
+        df_merged['BatterHandedness'], _ = zip(*df_merged['batter'].apply(get_handedness))
+        _, df_merged['PitcherHandedness'] = zip(*df_merged['pitcher'].apply(get_handedness))
+
+    # Merge on batter_id + pitcher_hand
+    df_merged = df_merged.merge(
+        handed_hr[['batter_id', 'pitcher_hand', 'hr_rate']],
+        left_on=['batter_id', 'PitcherHandedness'],
+        right_on=['batter_id', 'pitcher_hand'],
+        how='left'
+    )
+    df_merged.drop(columns=['pitcher_hand'], inplace=True, errors='ignore')
+    # Optional: Rename for clarity
+    if 'hr_rate' in df_merged.columns:
+        df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
     # Pitch Type HR Rate
     # --- Pitch Type HR Rate (robust assignment per matchup) ---
     pitchtype_hr = pd.read_csv(pitchtype_hr_file)
