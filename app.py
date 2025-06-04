@@ -752,12 +752,30 @@ if all_files_uploaded:
     df_merged = df_merged.merge(park_hr[['park', 'hr_rate_park']], on='park', how='left')
 
     # Pitch Type HR Rate
+    # --- Pitch Type HR Rate (robust assignment per matchup) ---
     pitchtype_hr = pd.read_csv(pitchtype_hr_file)
-    pitchtype_hr.columns = pitchtype_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    if 'hr_outcome' in pitchtype_hr.columns:
-        pitchtype_hr = pitchtype_hr.rename(columns={'hr_outcome': 'hr_rate_pitch'})
-    if 'pitch_type' in df_merged.columns and 'pitch_type' in pitchtype_hr.columns:
-        df_merged = df_merged.merge(pitchtype_hr[['pitch_type', 'hr_rate_pitch']], on='pitch_type', how='left')
+    pitchtype_hr.columns = (
+        pitchtype_hr.columns
+        .str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    )
+    pitch_type_to_hr = dict(zip(pitchtype_hr['pitch_type'], pitchtype_hr['hr_outcome']))
+
+    def get_pitcher_primary_pitch(pitcher_id):
+        try:
+            row = pitcher_bb[pitcher_bb['pitcher_id'] == str(pitcher_id)]
+            if not row.empty:
+                pitch_cols = [col for col in row.columns if col.endswith('_pct')]
+                if pitch_cols:
+                    # Take the column (pitch) with the highest % usage
+                    pitch_type = row[pitch_cols].iloc[0].idxmax().replace('_pct', '').upper()
+                    return pitch_type
+        except Exception as e:
+            log_error("Primary pitch assignment", e)
+        return 'FF'  # Fallback if unknown
+
+    df_merged['PitchTypeHRRate'] = df_merged['pitcher_id'].apply(
+        lambda pid: pitch_type_to_hr.get(get_pitcher_primary_pitch(pid), 0)
+    )
 
     # Ensure handedness columns are filled
     if not ('BatterHandedness' in df_merged.columns and 'PitcherHandedness' in df_merged.columns):
