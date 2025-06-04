@@ -937,8 +937,8 @@ if all_files_uploaded:
             record['PitchMixBoost'] = pt_boost
             p_spin_metrics_30 = get_pitcher_spin_metrics(row['pitcher_id'], windows=[30])
             record.update(p_spin_metrics_30)
-            record['HandedHRRate'] = row.get('hr_rate', np.nan)
-            record['PitchTypeHRRate'] = row.get('hr_rate_pitch', np.nan)
+            record['HandedHRRate'] = row.get('HandedHRRate', np.nan)
+            record['PitchTypeHRRate'] = row.get('PitchTypeHRRate', np.nan)
             record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
 
             record['AnalyzerLogitScore'] = compute_analyzer_logit_score(record, logit_weights_dict)
