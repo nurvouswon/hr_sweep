@@ -914,15 +914,15 @@ if all_files_uploaded:
 
     # If all supplementals are zero, just return HR_Score
     # Otherwise blend as normal
-    if analyzer_logit == 0 and handed_hr == 0 and pitchtype_hr == 0:
-        return hr_score
-    else:
-        return (
-            0.60 * hr_score +
-            0.30 * analyzer_logit +
-            0.05 * handed_hr +
-            0.05 * pitchtype_hr
-        )
+        if analyzer_logit == 0 and handed_hr == 0 and pitchtype_hr == 0:
+            return hr_score
+        else:
+            return (
+                0.60 * hr_score +
+                0.30 * analyzer_logit +
+                0.05 * handed_hr +
+                0.05 * pitchtype_hr
+            )
 
     df_final['Analyzer_Blend'] = df_final.apply(robust_blend, axis=1)
 
