@@ -758,8 +758,10 @@ if all_files_uploaded:
         pitchtype_hr.columns
         .str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
     )
-    pitch_type_to_hr = dict(zip(pitchtype_hr['pitch_type'], pitchtype_hr['hr_outcome']))
-
+    pitch_type_to_hr = dict(zip(
+    pitchtype_hr['pitch_type'],
+    pitchtype_hr['hr_rate_pitch'] if 'hr_rate_pitch' in pitchtype_hr.columns else pitchtype_hr['hr_outcome']
+))
     def get_pitcher_primary_pitch(pitcher_id):
         try:
             row = pitcher_bb[pitcher_bb['pitcher_id'] == str(pitcher_id)]
