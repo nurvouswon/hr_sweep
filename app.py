@@ -917,14 +917,10 @@ if all_files_uploaded:
         df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
     # Pitch Type HR Rate
     # --- Pitch Type HR Rate (robust assignment per matchup) ---
-    pitchtype_hr = pd.read_csv(pitchtype_hr_file)
-    pitchtype_hr.columns = (
-        pitchtype_hr.columns
-        .str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    )
+    pitchtype_hr = load_and_standardize_pitchtype_hr(pitchtype_hr_file)
     pitch_type_to_hr = dict(zip(
-    pitchtype_hr['pitch_type'],
-    pitchtype_hr['hr_rate_pitch'] if 'hr_rate_pitch' in pitchtype_hr.columns else pitchtype_hr['hr_outcome']
+        pitchtype_hr['pitch_type'],
+        pitchtype_hr['PitchTypeHRRate']
 ))
     def get_pitcher_primary_pitch(pitcher_id):
         try:
