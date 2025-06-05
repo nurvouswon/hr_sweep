@@ -668,8 +668,8 @@ def robust_blend(row):
         )
 def robust_blend_normalized(row):
     weights = {
-        'HR_Score': 0.60,
-        'AnalyzerLogitScore': 0.30,
+        'HR_Score': 0.30,            # Changed from 0.60 to 0.30
+        'AnalyzerLogitScore': 0.60,  # Changed from 0.30 to 0.60
         'HandedHRRate': 0.05,
         'PitchTypeHRRate': 0.05
     }
