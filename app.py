@@ -923,8 +923,7 @@ if all_files_uploaded:
         handed_hr,
         on=['BatterHandedness', 'PitcherHandedness'],
         how='left'
-)
-)
+    )
     # Optional: Rename for clarity
     if 'hr_rate' in df_merged.columns:
         df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
