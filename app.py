@@ -855,6 +855,13 @@ if all_files_uploaded:
 
 # --- Load and prepare handedness HR rate file ---
     handed_hr = pd.read_csv(handed_hr_file)
+    # --- Robustly clean and rename handed HR rate columns ---
+    handed_hr.columns = handed_hr.columns.str.strip().str.lower()
+    handed_hr = handed_hr.rename(columns={
+        'stand': 'BatterHandedness',
+        'p_throws': 'PitcherHandedness',
+        'hr_outcome': 'HandedHRRate'
+    })
     handed_hr.columns = (
         handed_hr.columns
             .str.strip()
