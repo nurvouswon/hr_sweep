@@ -917,10 +917,13 @@ if all_files_uploaded:
     # Debug printout (optional, remove for prod)
     print("Columns after rename:", handed_hr.columns)
     # --- Merge on handedness columns ---
+    handed_hr = load_and_standardize_handed_hr(handed_hr_file)
+
     df_merged = df_merged.merge(
-        handed_hr[['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']],
+        handed_hr,
         on=['BatterHandedness', 'PitcherHandedness'],
         how='left'
+)
 )
     # Optional: Rename for clarity
     if 'hr_rate' in df_merged.columns:
