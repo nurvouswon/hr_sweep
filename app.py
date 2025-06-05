@@ -890,6 +890,8 @@ if all_files_uploaded:
 
     # --- Canonical Park HR Rate merge (single column only) ---
     park_hr = pd.read_csv(park_hr_file)
+    st.write("Park HR Rate columns:", park_hr.columns)
+    st.write("First 3 rows:", park_hr.head(3))
     park_hr.columns = (
         park_hr.columns
         .str.strip().str.lower()
