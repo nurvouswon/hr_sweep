@@ -903,6 +903,7 @@ if all_files_uploaded:
     elif 'hr_rate' in park_hr.columns:
         park_hr = park_hr.rename(columns={'hr_rate': 'ParkHRRate'})
     df_merged = df_merged.merge(park_hr[['park', 'ParkHRRate']], on='park', how='left')
+    st.write("Merged parks:", df_merged['park'].unique())
     # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
     df_merged['BatterHandedness'] = df_merged['batter'].apply(
         lambda n: get_handedness(n)[0] if pd.notnull(n) else np.nan
