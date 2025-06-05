@@ -447,6 +447,30 @@ def load_and_standardize_handed_hr(handed_hr_file):
             raise ValueError(f"Handed HR CSV missing required column: {col}. Columns found: {df.columns.tolist()}")
     # Only keep required columns
     return df[required]
+
+def load_and_standardize_pitchtype_hr(pitchtype_hr_file):
+    """
+    Loads and robustly normalizes the Pitch Type HR CSV to always produce columns:
+    ['pitch_type', 'PitchTypeHRRate']
+    """
+    df = pd.read_csv(pitchtype_hr_file)
+    # Normalize all columns to lowercase, remove spaces/underscores
+    df.columns = [c.strip().lower().replace(' ', '').replace('_', '') for c in df.columns]
+    rename_map = {
+        'pitchtype': 'pitch_type',
+        'pitch_type': 'pitch_type',
+        'pitch': 'pitch_type',
+        'hroutcome': 'PitchTypeHRRate',
+        'hrratepitch': 'PitchTypeHRRate',
+        'hrrate': 'PitchTypeHRRate',
+        'hr_rate': 'PitchTypeHRRate',
+        'hr_rate_pitch': 'PitchTypeHRRate',
+        'pitchtypehrrate': 'PitchTypeHRRate'
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    if 'pitch_type' not in df.columns or 'PitchTypeHRRate' not in df.columns:
+        raise ValueError(f"PitchType HR CSV missing required column(s). Found: {df.columns.tolist()}")
+    return df[['pitch_type', 'PitchTypeHRRate']]
 # --- Custom 2025 Ballpark/Weather/Handedness Boosts ---
 def custom_2025_boost(row):
     bonus = 0
