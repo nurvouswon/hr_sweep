@@ -753,25 +753,7 @@ def compute_analyzer_logit(row, logit_weights_dict):
             continue
     # If no valid features found, score is 0
     return score
-# --- Robust Logit Weights Loading ---
-logit_weights_dict = {}
-if logit_weights_file is not None:
-    logit_weights_df = pd.read_csv(logit_weights_file)
-    logit_weights_df.columns = (
-        logit_weights_df.columns
-        .str.strip().str.lower()
-        .str.replace(' ', '_')
-        .str.replace(r'[^\w]', '', regex=True)
-    )
-    possible_feature_cols = ['feature', 'field', 'stat', 'column']
-    possible_weight_cols = ['weight', 'logit_weight', 'coef']
-    feature_col = next((c for c in logit_weights_df.columns if c in possible_feature_cols), logit_weights_df.columns[0])
-    weight_col = next((c for c in logit_weights_df.columns if c in possible_weight_cols), logit_weights_df.columns[1])
-    for _, row in logit_weights_df.iterrows():
-        feature = str(row[feature_col]).strip()
-        weight = row[weight_col]
-        if pd.notna(feature) and feature != '':
-            logit_weights_dict[feature] = weight
+
 # ====================== STREAMLIT UI & LEADERBOARD ========================
 st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
@@ -960,7 +942,25 @@ if all_files_uploaded:
     df_merged['PitchTypeHRRate'] = df_merged['pitcher_id'].apply(
         lambda pid: pitch_type_to_hr.get(get_pitcher_primary_pitch(pid), 0)
     )
-    
+    # --- Load Logistic Weights (Logit) File ---
+    logit_weights_dict = {}
+    if logit_weights_file is not None:
+        logit_weights_df = pd.read_csv(logit_weights_file)
+        logit_weights_df.columns = (
+            logit_weights_df.columns
+            .str.strip().str.lower()
+            .str.replace(' ', '_')
+            .str.replace(r'[^\w]', '', regex=True)
+        )
+        possible_feature_cols = ['feature', 'field', 'stat', 'column']
+        possible_weight_cols = ['weight', 'logit_weight', 'coef']
+        feature_col = next((c for c in logit_weights_df.columns if c in possible_feature_cols), logit_weights_df.columns[0])
+        weight_col = next((c for c in logit_weights_df.columns if c in possible_weight_cols), logit_weights_df.columns[1])
+        for _, row in logit_weights_df.iterrows():
+            feature = str(row[feature_col]).strip()
+            weight = row[weight_col]
+            if pd.notna(feature) and feature != '':
+                logit_weights_dict[feature] = weight
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
