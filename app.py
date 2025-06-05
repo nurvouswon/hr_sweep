@@ -906,16 +906,19 @@ if all_files_uploaded:
         if 'team_code' in df_merged.columns:
             df_merged['park'] = df_merged['team_code'].map(team_to_park)
 
-    # Park HR Rate
+    # --- Canonical Park HR Rate merge (single column only) ---
     park_hr = pd.read_csv(park_hr_file)
-    park_hr.columns = park_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    if 'home_team' in park_hr.columns:
-        park_hr['park'] = park_hr['home_team'].map(team_to_park)
-    if 'hr_outcome' in park_hr.columns:
-        park_hr = park_hr.rename(columns={'hr_outcome': 'hr_rate_park'})
-    park_hr = park_hr.dropna(subset=['park'])
-    df_merged = df_merged.merge(park_hr[['park', 'hr_rate_park']], on='park', how='left')
-
+    park_hr.columns = (
+        park_hr.columns
+        .str.strip().str.lower()
+        .str.replace(' ', '_')
+        .str.replace(r'[^\w]', '', regex=True)
+)
+    if 'hr_rate_park' in park_hr.columns:
+        park_hr = park_hr.rename(columns={'hr_rate_park': 'ParkHRRate'})
+    elif 'hr_rate' in park_hr.columns:
+        park_hr = park_hr.rename(columns={'hr_rate': 'ParkHRRate'})
+    df_merged = df_merged.merge(park_hr[['park', 'ParkHRRate']], on='park', how='left')
     # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
     df_merged['BatterHandedness'] = df_merged['batter'].apply(
         lambda n: get_handedness(n)[0] if pd.notnull(n) else np.nan
