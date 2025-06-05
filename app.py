@@ -1025,9 +1025,16 @@ if all_files_uploaded:
             record['PitchTypeHRRate'] = row.get('PitchTypeHRRate', np.nan)
             record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
 
-            record['AnalyzerLogitScore'] = compute_analyzer_logit_score(record, logit_weights_dict)
+# --- Compute AnalyzerLogitScore using the correct features and weights ---
+            analyzer_score = 0
+        for feat, weight in logit_weights_dict.items():
+            val = record.get(feat, 0)
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                val = 0
+            analyzer_score += float(val) * float(weight)
+            record['AnalyzerLogitScore'] = analyzer_score
 
-            # --- NEW: Robust HR_Score and DataFlag for missing data ---
+# --- NEW: Robust HR_Score and DataFlag for missing data ---
             record['HR_Score'], record['DataFlag'] = robust_calc_hr_score(record, feature_weights, norm_funcs, min_features=0.7)
 
             rows.append(record)
