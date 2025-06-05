@@ -1029,8 +1029,8 @@ if all_files_uploaded:
             analyzer_score = 0
             for feat, weight in logit_weights_dict.items():
                 val = record.get(feat, 0)
-            if val is None or (isinstance(val, float) and np.isnan(val)):
-                val = 0
+                if val is None or (isinstance(val, float) and np.isnan(val)):
+                    val = 0
             analyzer_score += float(val) * float(weight)
             record['AnalyzerLogitScore'] = analyzer_score
 
