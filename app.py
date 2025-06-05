@@ -419,6 +419,37 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
         log_error("Pitch type matchup boost error", e)
         return 0
 
+def load_and_standardize_handed_hr(handed_hr_file):
+    """
+    Reads the handedness HR CSV and returns a DataFrame
+    with columns: BatterHandedness, PitcherHandedness, HandedHRRate
+    Throws a helpful error if the file is not formatted correctly.
+    """
+    df = pd.read_csv(handed_hr_file)
+    # Clean up and normalize column names
+    df.columns = (
+        df.columns
+        .str.strip().str.lower()
+        .str.replace(' ', '').str.replace('_', '')
+    )
+    rename_map = {}
+    for c in df.columns:
+        if c in ['stand', 'batterhand', 'batterhandedness']:
+            rename_map[c] = 'BatterHandedness'
+        elif c in ['pthrows', 'p_throws', 'pitcherhand', 'pitcherhandedness']:
+            rename_map[c] = 'PitcherHandedness'
+        elif c in ['hrrate', 'handedhrrate', 'hrratehand', 'hr_outcome', 'hrratehanded']:
+            rename_map[c] = 'HandedHRRate'
+    df = df.rename(columns=rename_map)
+    # Confirm required columns
+    required = ['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']
+    for col in required:
+        if col not in df.columns:
+            raise ValueError(
+                f"Handedness CSV missing required column '{col}'. Columns found: {df.columns.tolist()}"
+            )
+    return df[required]
+
 # --- Custom 2025 Ballpark/Weather/Handedness Boosts ---
 def custom_2025_boost(row):
     bonus = 0
