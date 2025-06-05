@@ -892,7 +892,6 @@ if all_files_uploaded:
     park_hr = pd.read_csv(park_hr_file)
     st.write("Park HR Rate columns:", park_hr.columns)
     st.write("First 3 rows:", park_hr.head(3))
-    park_hr = pd.read_csv(park_hr_file)
     # Normalize all columns to lowercase, remove spaces/underscores
     park_hr.columns = (
         park_hr.columns
