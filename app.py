@@ -421,55 +421,32 @@ def calc_pitchtype_boost(batter_pitch_woba, pitcher_mix):
 
 def load_and_standardize_handed_hr(handed_hr_file):
     """
-    Reads the handedness HR CSV and returns a DataFrame
-    with columns: BatterHandedness, PitcherHandedness, HandedHRRate
-    Throws a helpful error if the file is not formatted correctly.
+    Load and normalize the Handed HR CSV to always produce:
+    columns: ['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']
     """
     df = pd.read_csv(handed_hr_file)
-    # Clean up and normalize column names
-    df.columns = (
-        df.columns
-        .str.strip().str.lower()
-        .str.replace(' ', '').str.replace('_', '')
-    )
-    rename_map = {}
-    for c in df.columns:
-        if c in ['stand', 'batterhand', 'batterhandedness']:
-            rename_map[c] = 'BatterHandedness'
-        elif c in ['pthrows', 'p_throws', 'pitcherhand', 'pitcherhandedness']:
-            rename_map[c] = 'PitcherHandedness'
-        elif c in ['hrrate', 'handedhrrate', 'hrratehand', 'hr_outcome', 'hrratehanded']:
-            rename_map[c] = 'HandedHRRate'
-    df = df.rename(columns=rename_map)
-    # Confirm required columns
-    required = ['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']
-    for col in required:
-        if col not in df.columns:
-            raise ValueError(
-                f"Handedness CSV missing required column '{col}'. Columns found: {df.columns.tolist()}"
-            )
-    return df[required]
-
-def load_and_standardize_handed_hr(file):
-    if file is None:
-        raise ValueError("Handed HR file is missing!")
-    file.seek(0)
-    df = pd.read_csv(file)
-    df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
+    # Lowercase and strip all columns
+    df.columns = [c.strip().lower().replace(' ', '').replace('_', '') for c in df.columns]
     rename_map = {
         'stand': 'BatterHandedness',
         'batterhand': 'BatterHandedness',
-        'batter_handedness': 'BatterHandedness',
-        'p_throws': 'PitcherHandedness',
+        'batterhandedness': 'BatterHandedness',
+        'pthrows': 'PitcherHandedness',
         'pitcherhand': 'PitcherHandedness',
-        'pitcher_handedness': 'PitcherHandedness',
-        'hr_outcome': 'HandedHRRate',
-        'hr_rate': 'HandedHRRate',
+        'pitcherhandedness': 'PitcherHandedness',
+        'hroutcome': 'HandedHRRate',
+        'hrrate': 'HandedHRRate',
+        'handedhrrate': 'HandedHRRate'
     }
-    df.rename(columns=rename_map, inplace=True)
-    df = df[['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']]
-    return df
-
+    # Rename all columns using mapping if they exist
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    # Check for all required columns
+    required = ['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']
+    for col in required:
+        if col not in df.columns:
+            raise ValueError(f"Handed HR CSV missing required column: {col}. Columns found: {df.columns.tolist()}")
+    # Only keep required columns
+    return df[required]
 # --- Custom 2025 Ballpark/Weather/Handedness Boosts ---
 def custom_2025_boost(row):
     bonus = 0
