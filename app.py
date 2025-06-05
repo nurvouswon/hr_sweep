@@ -450,6 +450,26 @@ def load_and_standardize_handed_hr(handed_hr_file):
             )
     return df[required]
 
+def load_and_standardize_handed_hr(file):
+    if file is None:
+        raise ValueError("Handed HR file is missing!")
+    file.seek(0)
+    df = pd.read_csv(file)
+    df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
+    rename_map = {
+        'stand': 'BatterHandedness',
+        'batterhand': 'BatterHandedness',
+        'batter_handedness': 'BatterHandedness',
+        'p_throws': 'PitcherHandedness',
+        'pitcherhand': 'PitcherHandedness',
+        'pitcher_handedness': 'PitcherHandedness',
+        'hr_outcome': 'HandedHRRate',
+        'hr_rate': 'HandedHRRate',
+    }
+    df.rename(columns=rename_map, inplace=True)
+    df = df[['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']]
+    return df
+
 # --- Custom 2025 Ballpark/Weather/Handedness Boosts ---
 def custom_2025_boost(row):
     bonus = 0
