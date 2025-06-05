@@ -905,45 +905,12 @@ if all_files_uploaded:
 )
 
 # --- Load and prepare handedness HR rate file ---
-    handed_hr = pd.read_csv(handed_hr_file)
-    # --- Robustly clean and rename handed HR rate columns ---
-    handed_hr.columns = handed_hr.columns.str.strip().str.lower()
-    handed_hr = handed_hr.rename(columns={
-        'stand': 'BatterHandedness',
-        'p_throws': 'PitcherHandedness',
-        'hr_outcome': 'HandedHRRate'
-    })
-    handed_hr.columns = (
-        handed_hr.columns
-            .str.strip()
-            .str.lower()
-            .str.replace(' ', '_')
-            .str.replace(r'[^\w]', '', regex=True)
-)
-    handed_hr.rename(columns={
-        'batter_hand': 'BatterHandedness',
-        'pitcher_hand': 'PitcherHandedness',
-        'hr_outcome': 'HandedHRRate'
-    }, inplace=True)
-    # Rename columns robustly
-    handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    handed_hr.rename(columns={
-        'batter_hand': 'BatterHandedness',
-        'pitcher_hand': 'PitcherHandedness',
-        'hr_outcome': 'HandedHRRate',
-        'hr_rate': 'HandedHRRate'
-    }, inplace=True)
-
-    # Debug printout (optional, remove for prod)
-    print("Columns after rename:", handed_hr.columns)
-    # --- Merge on handedness columns ---
     handed_hr = load_and_standardize_handed_hr(handed_hr_file)
-
     df_merged = df_merged.merge(
         handed_hr,
         on=['BatterHandedness', 'PitcherHandedness'],
         how='left'
-    )
+)
     # Optional: Rename for clarity
     if 'hr_rate' in df_merged.columns:
         df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
