@@ -867,7 +867,17 @@ if all_files_uploaded:
         'pitcher_hand': 'PitcherHandedness',
         'hr_outcome': 'HandedHRRate'
     }, inplace=True)
+    # Rename columns robustly
+    handed_hr.columns = handed_hr.columns.str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
+    handed_hr.rename(columns={
+        'batter_hand': 'BatterHandedness',
+        'pitcher_hand': 'PitcherHandedness',
+        'hr_outcome': 'HandedHRRate',
+        'hr_rate': 'HandedHRRate'
+    }, inplace=True)
 
+    # Debug printout (optional, remove for prod)
+    print("Columns after rename:", handed_hr.columns)
     # --- Merge on handedness columns ---
     df_merged = df_merged.merge(
         handed_hr[['BatterHandedness', 'PitcherHandedness', 'HandedHRRate']],
