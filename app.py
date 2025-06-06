@@ -1034,15 +1034,16 @@ if all_files_uploaded:
             df_merged[col] = df_merged[col].fillna("NA").astype(str)
         if col in handed_hr.columns:
             handed_hr[col] = handed_hr[col].fillna("NA").astype(str)
-    df_merged = df_merged.merge(
+        df_merged = df_merged.merge(
         handed_hr,
         on=['BatterHandedness', 'PitcherHandedness'],
         how='left'
     )
+
     # Optional: Rename for clarity
-        if 'hr_rate' in df_merged.columns:
-    df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
-    # Pitch Type HR Rate
+    if 'hr_rate' in df_merged.columns:
+        df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
+    
     # --- Pitch Type HR Rate (robust assignment per matchup) ---
     pitchtype_hr = load_and_standardize_pitchtype_hr(pitchtype_hr_file)
     pitch_type_to_hr = dict(zip(
