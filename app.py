@@ -1072,7 +1072,6 @@ if all_files_uploaded:
             record.update(p_spin_metrics_30)
             record['HandedHRRate'] = row.get('HandedHRRate', np.nan)
             record['PitchTypeHRRate'] = row.get('PitchTypeHRRate', np.nan)
-            record['ParkHRRate'] = row.get('hr_rate_park', np.nan)
 
 # --- Compute AnalyzerLogitScore using the correct features and weights ---
             analyzer_score = 0
