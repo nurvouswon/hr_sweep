@@ -885,11 +885,10 @@ pitcher_battedball_file = st.file_uploader("4️⃣ Pitcher batted-ball profile 
 handed_hr_file = st.file_uploader("5️⃣ Handedness HR Rates CSV", type=["csv"])
 pitchtype_hr_file = st.file_uploader("6️⃣ Pitch Type HR Rates CSV", type=["csv"])
 park_hr_file = st.file_uploader("7️⃣ Park HR Rates CSV", type=["csv"])
-logit_weights_file = st.file_uploader("8️⃣ Custom Logistic Weights CSV", type=["csv"])
 
 csvs_uploaded = [
     lineup_file, xhr_file, battedball_file, pitcher_battedball_file,
-    handed_hr_file, pitchtype_hr_file, park_hr_file, logit_weights_file
+    handed_hr_file, pitchtype_hr_file, park_hr_file
 ]
 all_files_uploaded = all(csvs_uploaded)
 
