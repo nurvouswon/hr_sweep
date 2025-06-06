@@ -990,16 +990,9 @@ if all_files_uploaded:
             record['PitchTypeHRRate'] = row.get('PitchTypeHRRate', np.nan)
 
 # --- Compute AnalyzerLogitScore using the correct features and weights ---
-            analyzer_score = 0
-            for feat, weight in logit_weights_dict.items():
-                val = record.get(feat, 0)
-                if val is None or (isinstance(val, float) and np.isnan(val)):
-                    val = 0
-            record['HR_Score'] = compute_hr_score_logit(record, logit_weights_dict)
-            # Optionally, create a simple data flag (for missing % of features)
-            missing_count = sum(pd.isna(record.get(f, None)) or record.get(f, None) == '' for f in logit_weights_dict)
-            total_feats = len(logit_weights_dict)
-            record['DataFlag'] = "Low" if missing_count > total_feats * 0.4 else "OK"
+            record['HR_Score'], record['DataFlag'] = compute_normalized_logit_score_with_flag(
+                record, logit_weights_dict, min_feature_pct=0.7
+            )
 
             rows.append(record)
 
