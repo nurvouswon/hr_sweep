@@ -914,8 +914,6 @@ if all_files_uploaded:
 
     # --- Park HR Rate Merge (Team code to Park name and normalization) ---
     park_hr = pd.read_csv(park_hr_file)
-    st.write("Park HR Rate columns:", park_hr.columns)
-    st.write("First 3 rows:", park_hr.head(3))
 
     # Normalize column names
     park_hr.columns = (
@@ -951,9 +949,6 @@ if all_files_uploaded:
 
     df_merged['ParkHRRate'] = df_merged['ParkHRRate'].fillna(1.0)
 
-    # Preview the merge
-    st.write("Sample parks and their HR rates:", df_merged[['park', 'ParkHRRate']].drop_duplicates().head(10))
-    st.write("Merged parks:", df_merged['park'].unique())
     # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
     df_merged['BatterHandedness'] = df_merged['batter'].apply(
         lambda n: get_handedness(n)[0] if pd.notnull(n) else np.nan
