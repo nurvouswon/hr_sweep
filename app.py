@@ -892,7 +892,7 @@ csvs_uploaded = [
 ]
 all_files_uploaded = all(csvs_uploaded)
 
-logit_weights_dict = {}
+logit_weights_dict = STATIC_LOGIT_WEIGHTS
 
 if all_files_uploaded:
     # --- Load and clean all uploaded data
