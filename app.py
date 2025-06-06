@@ -172,6 +172,22 @@ STATIC_LOGIT_WEIGHTS = {
     "CustomBoost": 0.07,
 }
 
+def identity(x):
+    return x if pd.notnull(x) else 0
+
+# --- Feature Normalization Functions ---
+def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
+def norm_ev(x): return max(0, min((x - 80) / 25, 1)) if pd.notnull(x) else 0
+def norm_park(x): return max(0, min((x - 0.8) / 0.5, 1)) if pd.notnull(x) else 0
+def norm_xwoba(x): return max(0, min((x - 0.250) / 0.150, 1)) if pd.notnull(x) else 0
+def norm_sweetspot(x): return max(0, min((x - 0.25) / 0.2, 1)) if pd.notnull(x) else 0
+def norm_hardhit(x): return max(0, min((x - 0.25) / 0.35, 1)) if pd.notnull(x) else 0
+def norm_whiff(x): return max(0, min((x - 0.15) / 0.25, 1)) if pd.notnull(x) else 0
+def norm_temp(x): return max(0, min((x - 50) / 40, 1)) if pd.notnull(x) else 0
+def norm_wind(x): return max(0, min(x / 20, 1)) if pd.notnull(x) else 0
+def norm_humidity(x): return max(0, min((x - 40) / 60, 1)) if pd.notnull(x) else 0
+def norm_xhr_diff(x): return max(-1, min(x / 5, 1)) if pd.notnull(x) else 0
+
 feature_norms = {
     "B_SLG_14": identity,
     "P_SLG_14": identity,
@@ -251,20 +267,6 @@ feature_norms = {
     "PitcherBBScore": identity,
     "CustomBoost": identity
 }
-
-# --- Feature Normalization Functions ---
-def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
-def norm_ev(x): return max(0, min((x - 80) / 25, 1)) if pd.notnull(x) else 0
-def norm_park(x): return max(0, min((x - 0.8) / 0.5, 1)) if pd.notnull(x) else 0
-def norm_xwoba(x): return max(0, min((x - 0.250) / 0.150, 1)) if pd.notnull(x) else 0
-def norm_sweetspot(x): return max(0, min((x - 0.25) / 0.2, 1)) if pd.notnull(x) else 0
-def norm_hardhit(x): return max(0, min((x - 0.25) / 0.35, 1)) if pd.notnull(x) else 0
-def norm_whiff(x): return max(0, min((x - 0.15) / 0.25, 1)) if pd.notnull(x) else 0
-def norm_temp(x): return max(0, min((x - 50) / 40, 1)) if pd.notnull(x) else 0
-def norm_wind(x): return max(0, min(x / 20, 1)) if pd.notnull(x) else 0
-def norm_humidity(x): return max(0, min((x - 40) / 60, 1)) if pd.notnull(x) else 0
-def norm_xhr_diff(x): return max(-1, min(x / 5, 1)) if pd.notnull(x) else 0
-def identity(x): return x if pd.notnull(x) else 0
 
 def normalize_name(name):
     if not isinstance(name, str):
