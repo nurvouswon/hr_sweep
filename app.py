@@ -1005,16 +1005,16 @@ if all_files_uploaded:
             .str.replace(' ', '_')
             .str.replace(r'[^\w]', '', regex=True)
         )
-        possible_feature_cols = ['feature', 'field', 'stat', 'column']
-        possible_weight_cols = ['weight', 'logit_weight', 'coef']
-        feature_col = next((c for c in logit_weights_df.columns if c in possible_feature_cols), logit_weights_df.columns[0])
-        weight_col = next((c for c in logit_weights_df.columns if c in possible_weight_cols), logit_weights_df.columns[1])
-        for _, row in logit_weights_df.iterrows():
-            feature = str(row[feature_col]).strip()
-            weight = row[weight_col]
-            if pd.notna(feature) and feature != '':
-                logit_weights_dict[feature] = weight
-        st.write("Logit weights:", logit_weights_dict)
+    possible_feature_cols = ['feature', 'field', 'stat', 'column']
+    possible_weight_cols = ['weight', 'logit_weight', 'coef']
+    feature_col = next((c for c in logit_weights_df.columns if c in possible_feature_cols), logit_weights_df.columns[0])
+    weight_col = next((c for c in logit_weights_df.columns if c in possible_weight_cols), logit_weights_df.columns[1])
+    for _, row in logit_weights_df.iterrows():
+        feature = str(row[feature_col]).strip()
+        weight = row[weight_col]
+        if pd.notna(feature) and feature != '':
+            logit_weights_dict[feature] = weight
+    st.write("Logit weights:", logit_weights_dict)
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
