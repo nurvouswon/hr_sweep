@@ -1040,7 +1040,7 @@ if all_files_uploaded:
         how='left'
     )
     # Optional: Rename for clarity
-    if 'hr_rate' in df_merged.columns:
+        if 'hr_rate' in df_merged.columns:
     df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
     # Pitch Type HR Rate
     # --- Pitch Type HR Rate (robust assignment per matchup) ---
