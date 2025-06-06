@@ -912,6 +912,7 @@ if all_files_uploaded:
         if 'team_code' in df_merged.columns:
             df_merged['park'] = df_merged['team_code'].map(team_to_park)
 
+    # --- Park HR Rate Merge (Team code to Park name and normalization) ---
     park_hr = pd.read_csv(park_hr_file)
     st.write("Park HR Rate columns:", park_hr.columns)
     st.write("First 3 rows:", park_hr.head(3))
@@ -933,21 +934,24 @@ if all_files_uploaded:
 
     park_hr.rename(columns={park_col: 'park', rate_col: 'ParkHRRate'}, inplace=True)
 
-    # --- HERE is the critical step ---
+    # Map codes (ATH, ATL, etc.) to full park names
     park_hr['park'] = park_hr['park'].map(team_code_to_park)
 
-    # Normalize for robust matching (assuming df_merged['park'] uses same normalization)
+    # Normalize park names (so 'sutter_health_park', etc.)
     park_hr['park'] = park_hr['park'].apply(normalize_park_name)
     df_merged['park'] = df_merged['park'].apply(normalize_park_name)
 
+    # Merge the ParkHRRate column onto your main dataframe
     df_merged = df_merged.merge(park_hr[['park', 'ParkHRRate']], on='park', how='left')
 
+    # Debugging: check for parks with missing ParkHRRate
     missing_park_hr = df_merged[df_merged['ParkHRRate'].isnull()]['park'].unique()
     if len(missing_park_hr) > 0:
         st.warning(f"Park HR Rate missing for: {missing_park_hr}")
 
     df_merged['ParkHRRate'] = df_merged['ParkHRRate'].fillna(1.0)
 
+    # Preview the merge
     st.write("Sample parks and their HR rates:", df_merged[['park', 'ParkHRRate']].drop_duplicates().head(10))
     st.write("Merged parks:", df_merged['park'].unique())
     # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
@@ -1103,8 +1107,6 @@ if all_files_uploaded:
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
 
     df_final['Analyzer_Blend'] = df_final.apply(robust_blend_normalized, axis=1)
-    if 'hr_rate_park' in df_final.columns:
-        df_final.drop(columns=['hr_rate_park'], inplace=True)
     df_leaderboard = df_final.sort_values("Analyzer_Blend", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
 
