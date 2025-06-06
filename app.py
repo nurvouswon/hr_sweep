@@ -140,6 +140,7 @@ team_code_to_park = {
     'CWS': 'guaranteed_rate_field',
     'LAA': 'angel_stadium',
     'SEA': 't-mobile_park',
+    'SEA': 'tmobile_park',
     'TEX': 'globe_life_field',
     'ARI': 'chase_field',
     'COL': 'coors_field',
