@@ -1020,25 +1020,29 @@ if all_files_uploaded:
 
     # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
     df_merged['BatterHandedness'] = df_merged['batter'].apply(
-        lambda n: get_handedness(n)[0] if pd.notnull(n) else np.nan
+        lambda n: get_handedness(n)[0] if pd.notnull(n) else "NA"
     )
     df_merged['PitcherHandedness'] = df_merged['pitcher'].apply(
-        lambda n: get_handedness(n)[1] if pd.notnull(n) else np.nan
+        lambda n: get_handedness(n)[1] if pd.notnull(n) else "NA"
     )
 
-# --- Load and prepare handedness HR rate file ---
+    # --- Load and prepare handedness HR rate file ---
     handed_hr = load_and_standardize_handed_hr(handed_hr_file)
+
     # Force both columns to string and fill missing with "NA"
     for col in ['BatterHandedness', 'PitcherHandedness']:
-        if col in df_merged.columns:
-            df_merged[col] = df_merged[col].fillna("NA").astype(str)
-        if col in handed_hr.columns:
-            handed_hr[col] = handed_hr[col].fillna("NA").astype(str)
-        df_merged = df_merged.merge(
+        df_merged[col] = df_merged[col].fillna("NA").astype(str)
+        handed_hr[col] = handed_hr[col].fillna("NA").astype(str)
+
+    # Merge ONCE after fixing all dtypes
+    df_merged = df_merged.merge(
         handed_hr,
         on=['BatterHandedness', 'PitcherHandedness'],
         how='left'
     )
+    # Debug: check datatypes
+    print(df_merged[['BatterHandedness','PitcherHandedness']].dtypes)
+    print(handed_hr[['BatterHandedness','PitcherHandedness']].dtypes)
 
     # Optional: Rename for clarity
     if 'hr_rate' in df_merged.columns:
