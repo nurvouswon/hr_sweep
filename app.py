@@ -1009,7 +1009,7 @@ if all_files_uploaded:
         weight = row[weight_col]
         if pd.notna(feature) and feature != '':
             logit_weights_dict[feature] = weight
-    st.write("Logit weights:", logit_weights_dict)
+    
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
     rows = []
