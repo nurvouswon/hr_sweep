@@ -44,75 +44,97 @@ def cached_weather_api(city, date, api_key):
         return {}
 # --- Static logit weights for HR Score (auto-generated from your CSV + 3 custom features) ---
 STATIC_LOGIT_WEIGHTS = {
-    "B_SLG_14": 0.5267278705,
-    "P_SLG_14": 0.4898397892,
-    "B_hardhit_pct_14": 0.2465825531,
-    "P_hardhit_pct_14": 0.2028337498,
-    "P_hardhit_pct_5": 0.2012464233,
-    "P_xwoba_14": 0.1986446811,
-    "B_hardhit_pct_7": 0.1982819304,
-    "P_hardhit_pct_7": 0.1876102681,
-    "P_SLG_7": 0.1783106545,
-    "B_xwoba_14": 0.1751735811,
-    "P_BarrelRateAllowed_14": 0.1746593534,
-    "B_SLG_7": 0.1693330283,
-    "B_hardhit_pct_3": 0.16468403,
-    "B_xSLG_14": 0.1573305465,
-    "B_hardhit_pct_5": 0.1568523201,
-    "P_hardhit_pct_3": 0.1398760269,
-    "P_SLG_5": 0.1342024796,
-    "P_xwoba_7": 0.1295064101,
-    "B_xISO_14": 0.1275490596,
-    "P_xwoba_5": 0.1185868111,
-    "B_BarrelRate_14": 0.1117798081,
-    "P_BarrelRateAllowed_7": 0.1080167763,
-    "B_SLG_5": 0.1076433055,
-    "P_sweet_spot_pct_14": 0.09603252322,
-    "B_xISO_3": 0.09308931784,
-    "P_BarrelRateAllowed_5": 0.08896610738,
-    "P_xSLG_14": 0.07173565634,
-    "B_xwoba_5": 0.05684525149,
-    "B_xwoba_7": 0.05661626699,
-    "P_xSLG_3": 0.05267014337,
-    "P_xSLG_5": 0.04969560583,
-    "P_xSLG_7": 0.0360047754,
-    "B_xSLG_3": 0.03036553773,
-    "P_sweet_spot_pct_7": 0.02761455222,
-    "P_sweet_spot_pct_5": 0.02185941319,
-    "P_xwoba_3": 0.01645838203,
-    "B_EV_3": 0.0147095849,
-    "B_EV_14": 0.01296157332,
-    "B_BarrelRate_7": 0.01130558273,
-    "P_BarrelRateAllowed_3": 0.001490703858,
-    "P_EVAllowed_3": 0.001331538993,
-    "P_EVAllowed_5": -0.003756845536,
-    "B_sweet_spot_pct_14": -0.004009074271,
-    "P_xISO_14": -0.008865489247,
-    "P_EVAllowed_14": -0.0104865996,
-    "B_EV_7": -0.01484089458,
-    "B_xISO_7": -0.01995787278,
-    "B_EV_5": -0.02028979606,
-    "B_xSLG_5": -0.02329611474,
-    "B_xISO_5": -0.02491246841,
-    "P_xISO_3": -0.03036961059,
-    "B_xwoba_3": -0.03219370009,
-    "P_sweet_spot_pct_3": -0.03474891921,
-    "P_EVAllowed_7": -0.03796445805,
-    "B_xSLG_7": -0.04978170743,
-    "B_BarrelRate_5": -0.05432801179,
-    "P_xISO_7": -0.06858784063,
-    "B_sweet_spot_pct_7": -0.0740723242,
-    "B_sweet_spot_pct_5": -0.09186272762,
-    "P_xISO_5": -0.09250716848,
-    "B_sweet_spot_pct_3": -0.09464224113,
-    "B_SLG_3": -0.09583742732,
-    "B_BarrelRate_3": -0.1755261804,
-    "P_SLG_3": -0.2039291056,
-    # --- Custom added features for HR context ---
-    "HandedHRRate": 1.3,
-    "ParkHRRate": 0.8,
-    "PitchTypeHRRate": 0.8
+    # --- Statcast core features (auto-generated, from your CSV) ---
+    "B_SLG_14": 0.53,
+    "P_SLG_14": 0.49,
+    "B_hardhit_pct_14": 0.25,
+    "P_hardhit_pct_14": 0.20,
+    "P_hardhit_pct_5": 0.20,
+    "P_xwoba_14": 0.20,
+    "B_hardhit_pct_7": 0.20,
+    "P_hardhit_pct_7": 0.19,
+    "P_SLG_7": 0.18,
+    "B_xwoba_14": 0.18,
+    "P_BarrelRateAllowed_14": 0.17,
+    "B_SLG_7": 0.17,
+    "B_hardhit_pct_3": 0.16,
+    "B_xSLG_14": 0.16,
+    "B_hardhit_pct_5": 0.16,
+    "P_hardhit_pct_3": 0.14,
+    "P_SLG_5": 0.13,
+    "P_xwoba_7": 0.13,
+    "B_xISO_14": 0.13,
+    "P_xwoba_5": 0.12,
+    "B_BarrelRate_14": 0.11,
+    "P_BarrelRateAllowed_7": 0.11,
+    "B_SLG_5": 0.11,
+    "P_sweet_spot_pct_14": 0.10,
+    "B_xISO_3": 0.09,
+    "P_BarrelRateAllowed_5": 0.09,
+    "P_xSLG_14": 0.07,
+    "B_xwoba_5": 0.06,
+    "B_xwoba_7": 0.06,
+    "P_xSLG_3": 0.05,
+    "P_xSLG_5": 0.05,
+    "P_xSLG_7": 0.04,
+    "B_xSLG_3": 0.03,
+    "P_sweet_spot_pct_7": 0.03,
+    "P_sweet_spot_pct_5": 0.02,
+    "P_xwoba_3": 0.02,
+    "B_EV_3": 0.01,
+    "B_EV_14": 0.01,
+    "B_BarrelRate_7": 0.01,
+    "P_BarrelRateAllowed_3": 0.00,
+    "P_EVAllowed_3": 0.00,
+    "P_EVAllowed_5": -0.00,
+    "B_sweet_spot_pct_14": -0.00,
+    "P_xISO_14": -0.01,
+    "P_EVAllowed_14": -0.01,
+    "B_EV_7": -0.01,
+    "B_xISO_7": -0.02,
+    "B_EV_5": -0.02,
+    "B_xSLG_5": -0.02,
+    "B_xISO_5": -0.02,
+    "P_xISO_3": -0.03,
+    "B_xwoba_3": -0.03,
+    "P_sweet_spot_pct_3": -0.03,
+    "P_EVAllowed_7": -0.04,
+    "B_xSLG_7": -0.05,
+    "B_BarrelRate_5": -0.05,
+    "P_xISO_7": -0.07,
+    "B_sweet_spot_pct_7": -0.07,
+    "B_sweet_spot_pct_5": -0.09,
+    "P_xISO_5": -0.09,
+    "B_sweet_spot_pct_3": -0.09,
+    "B_SLG_3": -0.10,
+    "B_BarrelRate_3": -0.18,
+    "P_SLG_3": -0.20,
+
+    # --- Game/contextual features (highly recommended additions!) ---
+    "HandedHRRate": 1.3,        # HR rate for batter/pitcher handed matchup
+    "ParkHRRate": 0.8,          # Park-specific HR rate
+    "PitchTypeHRRate": 0.8,     # Pitch type-specific HR rate
+
+    # --- Weather effects ---
+    "Temp": 0.03,               # Temp boost for hot weather
+    "Wind": 0.03,               # Wind boost (or penalty) if strong
+    "Humidity": 0.01,           # Slight humidity bonus
+
+    # --- Matchup/context features ---
+    "PitchMixBoost": 0.12,      # How well batter matches up vs primary pitch types
+    "PlatoonWoba": 0.5,         # Batter's wOBA vs pitcher's handedness
+
+    # --- Regression/expected stats ---
+    "xhr_diff": 0.10,           # Player's xHR minus actual HR (recent under/over performance)
+
+    # --- Batted ball profile custom scoring ---
+    "BattedBallScore": 0.18,    # Your air/flyball/pull/push model
+    "PitcherBBScore": -0.13,    # Pitcher’s profile suppression/scoring (negative means good at suppressing HR)
+
+    # --- Ballpark/game/handedness custom boost (if you include your custom_2025_boost) ---
+    "CustomBoost": 0.07         # All those "special" ballpark/wind/game time boosts
 }
+
 def normalize_name(name):
     if not isinstance(name, str):
         return ""
