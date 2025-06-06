@@ -171,6 +171,55 @@ STATIC_LOGIT_WEIGHTS = {
     "PitcherBBScore": -0.13,
     "CustomBoost": 0.07,
 }
+LOGIT_MULTIPLIER = 2.0
+CONTEXT_MULTIPLIER = 1.0
+
+logit_features = [
+    "B_SLG_3","B_SLG_5","B_SLG_7","B_SLG_14",
+    "B_xSLG_3","B_xSLG_5","B_xSLG_7","B_xSLG_14",
+    "B_xISO_3","B_xISO_5","B_xISO_7","B_xISO_14",
+    "B_xwoba_3","B_xwoba_5","B_xwoba_7","B_xwoba_14",
+    "B_BarrelRate_3","B_BarrelRate_5","B_BarrelRate_7","B_BarrelRate_14",
+    "B_EV_3","B_EV_5","B_EV_7","B_EV_14",
+    "B_sweet_spot_pct_3","B_sweet_spot_pct_5","B_sweet_spot_pct_7","B_sweet_spot_pct_14",
+    "B_hardhit_pct_3","B_hardhit_pct_5","B_hardhit_pct_7","B_hardhit_pct_14",
+    "P_SLG_3","P_SLG_5","P_SLG_7","P_SLG_14",
+    "P_xSLG_3","P_xSLG_5","P_xSLG_7","P_xSLG_14",
+    "P_xISO_3","P_xISO_5","P_xISO_7","P_xISO_14",
+    "P_xwoba_3","P_xwoba_5","P_xwoba_7","P_xwoba_14",
+    "P_BarrelRateAllowed_3","P_BarrelRateAllowed_5","P_BarrelRateAllowed_7","P_BarrelRateAllowed_14",
+    "P_EVAllowed_3","P_EVAllowed_5","P_EVAllowed_7","P_EVAllowed_14",
+    "P_sweet_spot_pct_3","P_sweet_spot_pct_5","P_sweet_spot_pct_7","P_sweet_spot_pct_14",
+    "P_hardhit_pct_3","P_hardhit_pct_5","P_hardhit_pct_7","P_hardhit_pct_14"
+]
+context_features = [
+    "HandedHRRate","ParkHRRate","PitchTypeHRRate",
+    "Temp","Wind","Humidity","PitchMixBoost","PlatoonWoba","xhr_diff",
+    "BattedBallScore","PitcherBBScore","CustomBoost",
+    "B_WhiffRate_3","B_WhiffRate_5","B_WhiffRate_7","B_WhiffRate_14",
+    "P_WhiffRate_3","P_WhiffRate_5","P_WhiffRate_7","P_WhiffRate_14",
+    "P_FF_Spin_3","P_FF_Spin_5","P_FF_Spin_7","P_FF_Spin_14",
+    "gb_rate","air_rate","fb_rate","ld_rate","pu_rate",
+    "pull_rate","straight_rate","oppo_rate",
+    "pull_gb_rate","straight_gb_rate","oppo_gb_rate",
+    "pull_air_rate","straight_air_rate","oppo_air_rate",
+    "gb_rate_pbb","air_rate_pbb","fb_rate_pbb","ld_rate_pbb","pu_rate_pbb",
+    "pull_rate_pbb","straight_rate_pbb","oppo_rate_pbb",
+    "pull_gb_rate_pbb","straight_gb_rate_pbb","oppo_gb_rate_pbb",
+    "pull_air_rate_pbb","straight_air_rate_pbb","oppo_air_rate_pbb"
+]
+
+STATIC_LOGIT_WEIGHTS_BOOSTED = {}
+for k, v in STATIC_LOGIT_WEIGHTS.items():
+    if k in logit_features:
+        STATIC_LOGIT_WEIGHTS_BOOSTED[k] = v * LOGIT_MULTIPLIER
+    elif k in context_features:
+        STATIC_LOGIT_WEIGHTS_BOOSTED[k] = v * CONTEXT_MULTIPLIER
+    else:
+        STATIC_LOGIT_WEIGHTS_BOOSTED[k] = v
+
+# Use this boosted dict for your HR scoring:
+logit_weights_dict = STATIC_LOGIT_WEIGHTS_BOOSTED
 
 def identity(x):
     return x if pd.notnull(x) else 0
