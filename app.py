@@ -816,6 +816,8 @@ if all_files_uploaded:
         st.error(f"Missing required columns: {missing}")
         st.stop()
     df_upload = df_upload[df_upload['confirmed'].astype(str).str.lower() == 'y']
+    # Exclude starting pitchers (SP) from the list of batters
+    df_upload = df_upload[~df_upload['batting_order'].astype(str).str.strip().str.upper().eq('SP')]
     df_upload['norm_batter'] = df_upload['batter'].apply(normalize_name)
     df_upload['batter_id'] = df_upload['batter_id'].astype(str)
     # Assign pitcher per team (SP = starting pitcher)
