@@ -1081,4 +1081,4 @@ if all_files_uploaded:
 
     st.dataframe(df_leaderboard[out_cols].head(20), use_container_width=True)
 else:
-    st.info("📂 Upload all 8 files to generate the leaderboard.")
+    st.info("📂 Upload all 7 files to generate the leaderboard.")
