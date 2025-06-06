@@ -1154,16 +1154,15 @@ if all_files_uploaded:
     df_final['HR_Score_pctile'] = df_final['HR_Score'].rank(pct=True)
     df_final['HR_Tier'] = df_final['HR_Score'].apply(hr_score_tier)
 
-    df_final['Analyzer_Blend'] = df_final.apply(robust_blend_normalized, axis=1)
-    df_leaderboard = df_final.sort_values("AnalyzerLogitScore", ascending=False).reset_index(drop=True)
+    df_leaderboard = df_final.sort_values("HR_Score", ascending=False).reset_index(drop=True)
     df_leaderboard["rank"] = df_leaderboard.index + 1
 
     # --- Show the top leaderboard table, including DataFlag
     st.success("Leaderboard ready! Top HR Matchups below.")
     out_cols = [
-        'rank', 'batter', 'pitcher', 'HR_Score', 'AnalyzerLogitScore', 'Analyzer_Blend', 'ParkHRRate', 'DataFlag'
+        'rank', 'batter', 'pitcher', 'HR_Score', 'ParkHRRate', 'DataFlag'
     ] + [c for c in df_leaderboard.columns if c not in [
-        'rank', 'batter', 'pitcher', 'HR_Score', 'AnalyzerLogitScore', 'Analyzer_Blend', 'ParkHRRate', 'DataFlag'
+        'rank', 'batter', 'pitcher', 'HR_Score', 'ParkHRRate', 'DataFlag'
     ]]
 
     st.dataframe(df_leaderboard[out_cols].head(20), use_container_width=True)
