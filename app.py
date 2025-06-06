@@ -171,7 +171,7 @@ STATIC_LOGIT_WEIGHTS = {
     "PitcherBBScore": -0.13,
     "CustomBoost": 0.07,
 }
-LOGIT_MULTIPLIER = 2.0
+LOGIT_MULTIPLIER = 3.0
 CONTEXT_MULTIPLIER = 1.0
 
 logit_features = [
@@ -914,7 +914,7 @@ def compute_normalized_logit_score_with_flag(row, logit_weights_dict, feature_no
 # ====================== STREAMLIT UI & LEADERBOARD ========================
 st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
-**Upload these 8 Analyzer CSVs for maximum prediction power:**  
+**Upload these 7 Analyzer CSVs for maximum prediction power:**  
 1. **Lineups/Matchups** (confirmed, with MLB IDs)  
 2. **xHR/HR Regression** (player, hr_total, xhr, xhr_diff)  
 3. **Batter Batted-Ball Profile** (with id)  
