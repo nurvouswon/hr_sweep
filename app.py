@@ -224,98 +224,27 @@ logit_weights_dict = STATIC_LOGIT_WEIGHTS_BOOSTED
 def identity(x):
     return x if pd.notnull(x) else 0
 
-# --- Feature Normalization Functions ---
-def norm_barrel(x): return min(x / 0.15, 1) if pd.notnull(x) else 0
-def norm_ev(x): return max(0, min((x - 80) / 25, 1)) if pd.notnull(x) else 0
-def norm_park(x): return max(0, min((x - 0.8) / 0.5, 1)) if pd.notnull(x) else 0
-def norm_xwoba(x): return max(0, min((x - 0.250) / 0.150, 1)) if pd.notnull(x) else 0
-def norm_sweetspot(x): return max(0, min((x - 0.25) / 0.2, 1)) if pd.notnull(x) else 0
-def norm_hardhit(x): return max(0, min((x - 0.25) / 0.35, 1)) if pd.notnull(x) else 0
-def norm_whiff(x): return max(0, min((x - 0.15) / 0.25, 1)) if pd.notnull(x) else 0
-def norm_temp(x): return max(0, min((x - 50) / 40, 1)) if pd.notnull(x) else 0
-def norm_wind(x): return max(0, min(x / 20, 1)) if pd.notnull(x) else 0
-def norm_humidity(x): return max(0, min((x - 40) / 60, 1)) if pd.notnull(x) else 0
-def norm_xhr_diff(x): return max(-1, min(x / 5, 1)) if pd.notnull(x) else 0
+def norm_temp(x):
+    # Typical MLB temps: 40–100, so scale to 0–1 (centered at 70)
+    return max(0, min((x - 40) / 60, 1)) if pd.notnull(x) else 0
 
-feature_norms = {
-    "B_SLG_14": identity,
-    "P_SLG_14": identity,
-    "B_hardhit_pct_14": norm_hardhit,
-    "P_hardhit_pct_14": norm_hardhit,
-    "P_hardhit_pct_5": norm_hardhit,
-    "P_xwoba_14": norm_xwoba,
-    "B_hardhit_pct_7": norm_hardhit,
-    "P_hardhit_pct_7": norm_hardhit,
-    "P_SLG_7": identity,
-    "B_xwoba_14": norm_xwoba,
-    "P_BarrelRateAllowed_14": norm_barrel,
-    "B_SLG_7": identity,
-    "B_hardhit_pct_3": norm_hardhit,
-    "B_xSLG_14": identity,
-    "B_hardhit_pct_5": norm_hardhit,
-    "P_hardhit_pct_3": norm_hardhit,
-    "P_SLG_5": identity,
-    "P_xwoba_7": norm_xwoba,
-    "B_xISO_14": identity,
-    "P_xwoba_5": norm_xwoba,
-    "B_BarrelRate_14": norm_barrel,
-    "P_BarrelRateAllowed_7": norm_barrel,
-    "B_SLG_5": identity,
-    "P_sweet_spot_pct_14": norm_sweetspot,
-    "B_xISO_3": identity,
-    "P_BarrelRateAllowed_5": norm_barrel,
-    "P_xSLG_14": identity,
-    "B_xwoba_5": norm_xwoba,
-    "B_xwoba_7": norm_xwoba,
-    "P_xSLG_3": identity,
-    "P_xSLG_5": identity,
-    "P_xSLG_7": identity,
-    "B_xSLG_3": identity,
-    "P_sweet_spot_pct_7": norm_sweetspot,
-    "P_sweet_spot_pct_5": norm_sweetspot,
-    "P_xwoba_3": norm_xwoba,
-    "B_EV_3": norm_ev,
-    "B_EV_14": norm_ev,
-    "B_BarrelRate_7": norm_barrel,
-    "P_BarrelRateAllowed_3": norm_barrel,
-    "P_EVAllowed_3": norm_ev,
-    "P_EVAllowed_5": norm_ev,
-    "B_sweet_spot_pct_14": norm_sweetspot,
-    "P_xISO_14": identity,
-    "P_EVAllowed_14": norm_ev,
-    "B_EV_7": norm_ev,
-    "B_xISO_7": identity,
-    "B_EV_5": norm_ev,
-    "B_xSLG_5": identity,
-    "B_xISO_5": identity,
-    "P_xISO_3": identity,
-    "B_xwoba_3": norm_xwoba,
-    "P_sweet_spot_pct_3": norm_sweetspot,
-    "P_EVAllowed_7": norm_ev,
-    "B_xSLG_7": identity,
-    "B_BarrelRate_5": norm_barrel,
-    "P_xISO_7": identity,
-    "B_sweet_spot_pct_7": norm_sweetspot,
-    "B_sweet_spot_pct_5": norm_sweetspot,
-    "P_xISO_5": identity,
-    "B_sweet_spot_pct_3": norm_sweetspot,
-    "B_SLG_3": identity,
-    "B_BarrelRate_3": norm_barrel,
-    "P_SLG_3": identity,
-    # Context
-    "HandedHRRate": identity,
-    "ParkHRRate": norm_park,
-    "PitchTypeHRRate": identity,
-    "Temp": norm_temp,
-    "Wind": norm_wind,
-    "Humidity": norm_humidity,
-    "PitchMixBoost": identity,
-    "PlatoonWoba": identity,
-    "xhr_diff": norm_xhr_diff,
-    "BattedBallScore": identity,
-    "PitcherBBScore": identity,
-    "CustomBoost": identity
-}
+def norm_wind(x):
+    # Typical wind: 0–20 mph, scale to 0–1
+    return max(0, min(x / 20, 1)) if pd.notnull(x) else 0
+
+def norm_park(x):
+    # Most park HR rates cluster 0.8–1.3
+    return max(0, min((x - 0.8) / 0.5, 1)) if pd.notnull(x) else 0
+
+def norm_humidity(x):
+    # MLB games: 20–90%
+    return max(0, min((x - 20) / 70, 1)) if pd.notnull(x) else 0
+
+feature_norms = {k: identity for k in STATIC_LOGIT_WEIGHTS_BOOSTED.keys()}
+feature_norms['Temp'] = norm_temp
+feature_norms['Wind'] = norm_wind
+feature_norms['Humidity'] = norm_humidity
+feature_norms['ParkHRRate'] = norm_park
 
 def normalize_name(name):
     if not isinstance(name, str):
