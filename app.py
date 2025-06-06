@@ -934,7 +934,7 @@ if all_files_uploaded:
     park_hr.rename(columns={park_col: 'park', rate_col: 'ParkHRRate'}, inplace=True)
 
     # --- HERE is the critical step ---
-   bpark_hr['park'] = park_hr['park'].map(team_code_to_park)
+    park_hr['park'] = park_hr['park'].map(team_code_to_park)
 
     # Normalize for robust matching (assuming df_merged['park'] uses same normalization)
     park_hr['park'] = park_hr['park'].apply(normalize_park_name)
