@@ -737,11 +737,10 @@ st.markdown("""
 4. **Pitcher Batted-Ball Profile** (with id)  
 5. **Handedness HR Rates** (batter_id, pitcher_hand, hr_rate, etc.)  
 6. **Pitch Type HR Rates** (batter_id, pitch_type, hr_rate, etc.)  
-7. **Park HR Rates** (park, hr_rate, etc.)  
-8. **Custom Logistic Weights** (feature, weight)  
+7. **Park HR Rates** (park, hr_rate, etc.)    
 """)
 
-# --- File Uploaders for all 8 CSVs
+# --- File Uploaders for all 7 CSVs
 lineup_file = st.file_uploader("1️⃣ Lineups/Matchups CSV (with MLB IDs)", type=["csv"])
 xhr_file = st.file_uploader("2️⃣ xHR / HR Regression CSV", type=["csv"])
 battedball_file = st.file_uploader("3️⃣ Batter batted-ball profile CSV", type=["csv"])
