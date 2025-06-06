@@ -914,16 +914,21 @@ if all_files_uploaded:
         st.error(f"Missing required columns: {missing}")
         st.stop()
     df_upload = df_upload[df_upload['confirmed'].astype(str).str.lower() == 'y']
-    # Exclude starting pitchers (SP) from the list of batters
-    df_upload = df_upload[~df_upload['batting_order'].astype(str).str.strip().str.upper().eq('SP')]
-    df_upload['norm_batter'] = df_upload['batter'].apply(normalize_name)
-    df_upload['batter_id'] = df_upload['batter_id'].astype(str)
-    # Assign pitcher per team (SP = starting pitcher)
-    pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.lower() == 'sp']
+
+    # --- First, identify pitchers using rows with batting_order == 'SP'
+    pitcher_rows = df_upload[df_upload['batting_order'].astype(str).str.strip().str.upper() == 'SP']
     team_pitcher_map = dict(zip(pitcher_rows['team_code'], pitcher_rows['batter_id']))
     pitcher_name_map = dict(zip(pitcher_rows['team_code'], pitcher_rows['batter']))
+
+    # --- Now, assign pitcher_id and pitcher name for each team in the main DataFrame
     df_upload['pitcher_id'] = df_upload['team_code'].map(team_pitcher_map)
     df_upload['pitcher'] = df_upload['team_code'].map(pitcher_name_map)
+
+    # --- Only AFTER assigning, filter out pitcher rows from batter pool
+    df_upload = df_upload[~df_upload['batting_order'].astype(str).str.strip().str.upper().eq('SP')]
+
+    df_upload['norm_batter'] = df_upload['batter'].apply(normalize_name)
+    df_upload['batter_id'] = df_upload['batter_id'].astype(str)
 
     # Merge xHR regression data
     xhr_df = pd.read_csv(xhr_file)
