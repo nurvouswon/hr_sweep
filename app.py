@@ -939,7 +939,7 @@ csvs_uploaded = [
 ]
 all_files_uploaded = all(csvs_uploaded)
 
-logit_weights_dict = STATIC_LOGIT_WEIGHTS
+logit_weights_dict = STATIC_LOGIT_WEIGHTS_BOOSTED
 
 if all_files_uploaded:
     # --- Load and clean all uploaded data
@@ -1125,7 +1125,7 @@ if all_files_uploaded:
         lambda pid: pitch_type_to_hr.get(get_pitcher_primary_pitch(pid), 0)
     )
     # --- Load Logistic Weights (Logit) File ---
-    logit_weights_dict = STATIC_LOGIT_WEIGHTS
+    logit_weights_dict = STATIC_LOGIT_WEIGHTS_BOOSTED
     
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
