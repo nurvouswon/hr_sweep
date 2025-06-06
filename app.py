@@ -955,11 +955,11 @@ if all_files_uploaded:
                 val = record.get(feat, 0)
                 if val is None or (isinstance(val, float) and np.isnan(val)):
                     val = 0
-            analyzer_score += float(val) * float(weight)
-            record['HR_Score'] = compute_analyzer_logit_score(record, logit_weights_dict)
-
-# --- NEW: Robust HR_Score and DataFlag for missing data ---
-            record['HR_Score'], record['DataFlag'] = robust_calc_hr_score(record, feature_weights, norm_funcs, min_features=0.7)
+            record['HR_Score'] = compute_hr_score_logit(record, logit_weights_dict)
+            # Optionally, create a simple data flag (for missing % of features)
+            missing_count = sum(pd.isna(record.get(f, None)) or record.get(f, None) == '' for f in logit_weights_dict)
+            total_feats = len(logit_weights_dict)
+            record['DataFlag'] = "Low" if missing_count > total_feats * 0.4 else "OK"
 
             rows.append(record)
 
