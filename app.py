@@ -211,7 +211,6 @@ def get_weather(city, date, park_orientation, game_time, api_key=API_KEY):
         humidity = weather_hour.get('humidity')
         condition = weather_hour.get('condition', {}).get('text')
         wind_effect = is_wind_out(wind_dir_full, park_orientation)
-        st.write(f"WIND RAW: {wind_dir_full} | PARK ORIENT: {park_orientation} | WIND EFFECT: {wind_effect}")
         if wind_effect == "unknown":
             log_error("Wind Effect Debug", f"wind_dir={wind_dir_full}, orientation={park_orientation}")
         return {
