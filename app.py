@@ -768,101 +768,15 @@ def train_and_apply_model(df_leaderboard):
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
-
-def compute_analyzer_logit_score(row, logit_weights_dict):
+    
+def compute_hr_score_logit(row, logit_weights_dict):
     score = 0
-    used_weights = 0
     for feature, weight in logit_weights_dict.items():
         val = row.get(feature, 0)
-        # If value is missing or nan, treat as 0
         if val is None or (isinstance(val, float) and np.isnan(val)):
             val = 0
-        try:
-            score += float(val) * float(weight)
-            used_weights += 1
-        except Exception as e:
-            log_error("LogitScore error", f"feature={feature}, val={val}, weight={weight}")
-    if used_weights == 0:
-        return 0
+        score += float(val) * float(weight)
     return score
-
-def robust_calc_hr_score(row, feature_weights, norm_funcs, min_features=0.7):
-    score = 0
-    total_weight = 0
-    used_features = 0
-    for feat, weight in feature_weights.items():
-        value = row.get(feat, None)
-        if value is not None and pd.notna(value):
-            norm_val = norm_funcs.get(feat, lambda x: x)(value)
-            score += norm_val * weight
-            total_weight += weight
-            used_features += 1
-    completeness = used_features / len(feature_weights) if feature_weights else 0
-    flag = "Low Data" if completeness < min_features else "OK"
-    if total_weight == 0:
-        return 0, flag
-    return score / total_weight, flag
-
-def robust_blend(row):
-    # If AnalyzerLogitScore is missing or nan, treat as 0
-    analyzer_logit = row.get('AnalyzerLogitScore', 0)
-    analyzer_logit = analyzer_logit if pd.notnull(analyzer_logit) else 0
-
-    handed_hr = row.get('HandedHRRate', 0)
-    handed_hr = handed_hr if pd.notnull(handed_hr) else 0
-
-    pitchtype_hr = row.get('PitchTypeHRRate', 0)
-    pitchtype_hr = pitchtype_hr if pd.notnull(pitchtype_hr) else 0
-
-    hr_score = row.get('HR_Score', 0)
-    hr_score = hr_score if pd.notnull(hr_score) else 0
-
-    # If all supplementals are zero, just return HR_Score
-    if analyzer_logit == 0 and handed_hr == 0 and pitchtype_hr == 0:
-        return hr_score
-    else:
-        return (
-            0.60 * hr_score +
-            0.30 * analyzer_logit +
-            0.05 * handed_hr +
-            0.05 * pitchtype_hr
-        )
-def robust_blend_normalized(row):
-    weights = {
-        'HR_Score': 0.30,            # Changed from 0.60 to 0.30
-        'AnalyzerLogitScore': 0.60,  # Changed from 0.30 to 0.60
-        'HandedHRRate': 0.05,
-        'PitchTypeHRRate': 0.05
-    }
-    values = {
-        'HR_Score': row.get('HR_Score', 0) if pd.notnull(row.get('HR_Score', 0)) else 0,
-        'AnalyzerLogitScore': row.get('AnalyzerLogitScore', 0) if pd.notnull(row.get('AnalyzerLogitScore', 0)) else 0,
-        'HandedHRRate': row.get('HandedHRRate', 0) if pd.notnull(row.get('HandedHRRate', 0)) else 0,
-        'PitchTypeHRRate': row.get('PitchTypeHRRate', 0) if pd.notnull(row.get('PitchTypeHRRate', 0)) else 0
-    }
-    # Only use weights where value != 0
-    active_weights = {k: w for k, w in weights.items() if values[k] != 0}
-    if not active_weights:
-        return values['HR_Score']
-    norm_sum = sum(active_weights.values())
-    return sum(values[k] * weights[k] for k in active_weights) / norm_sum
-    
-def compute_analyzer_logit(row, logit_weights_dict):
-    """Calculate AnalyzerLogitScore for a given row and logit_weights dict."""
-    score = 0
-    feature_count = 0
-    for feat, weight in logit_weights_dict.items():
-        val = row.get(feat, None)
-        # Use 0 for missing features
-        try:
-            val = float(val) if pd.notnull(val) else 0
-            score += val * float(weight)
-            feature_count += 1
-        except Exception:
-            continue
-    # If no valid features found, score is 0
-    return score
-
 # ====================== STREAMLIT UI & LEADERBOARD ========================
 st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
