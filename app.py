@@ -892,33 +892,46 @@ if all_files_uploaded:
     park_hr = pd.read_csv(park_hr_file)
     st.write("Park HR Rate columns:", park_hr.columns)
     st.write("First 3 rows:", park_hr.head(3))
-    # Normalize all columns to lowercase, remove spaces/underscores
+    # --- Load Park HR Rate CSV and robustly merge ---
+
+     # 2. Normalize column names
     park_hr.columns = (
         park_hr.columns
-        .str.strip().str.lower().str.replace(' ', '_').str.replace(r'[^\w]', '', regex=True)
-    )
-    # Handle a variety of naming conventions
-    for c in ['parknames', 'park', 'ballpark', 'stadium']:
-        if c in park_hr.columns:
-            park_col = c
-            break
-    else:
-        park_col = park_hr.columns[0]  # Default to first column if unsure
+        .str.strip()
+        .str.lower()
+        .str.replace(' ', '_')
+        .str.replace(r'[^\w]', '', regex=True)
+)
 
-    for c in ['parkrate', 'parkratehr', 'parkrate_homerun', 'hrrate', 'hrrate_park', 'parkhrrate']:
-        if c in park_hr.columns:
-            rate_col = c
-            break
-    else:
-    # Fallback to the second column, but warn if unsure
-        rate_col = park_hr.columns[1] if len(park_hr.columns) > 1 else None
-        st.warning(f"Couldn't robustly find Park HR rate column in {park_hr.columns}")
+    # 3. Identify correct columns for merging (robust)
+    possible_park_cols = ['park', 'parknames', 'ballpark', 'stadium']
+    possible_rate_cols = ['parkrate', 'parkratehr', 'parkrate_homerun', 'hrrate', 'hrrate_park', 'parkhrrate']
 
-    # Rename columns for merge
-    if park_col != 'park':
-        park_hr.rename(columns={park_col: 'park'}, inplace=True)
-    if rate_col != 'ParkHRRate':
-        park_hr.rename(columns={rate_col: 'ParkHRRate'}, inplace=True)
+    park_col = next((c for c in park_hr.columns if c in possible_park_cols), park_hr.columns[0])
+    rate_col = next((c for c in park_hr.columns if c in possible_rate_cols), park_hr.columns[1] if len(park_hr.columns) > 1 else None)
+
+    park_hr.rename(columns={park_col: 'park', rate_col: 'ParkHRRate'}, inplace=True)
+
+    # 4. Normalize park names in both dataframes (define this function at the top of your file if needed)
+    def normalize_park_name(park):
+        return str(park).strip().lower().replace(' ', '_')
+
+    df_merged['park'] = df_merged['park'].apply(normalize_park_name)
+    park_hr['park'] = park_hr['park'].apply(normalize_park_name)
+
+    # 5. Merge ParkHRRate into your main dataframe
+    df_merged = df_merged.merge(park_hr[['park', 'ParkHRRate']], on='park', how='left')
+
+    # 6. Debug unmatched parks (in Streamlit: will display a yellow warning if any are missing)
+    missing_park_hr = df_merged[df_merged['ParkHRRate'].isnull()]['park'].unique()
+    if len(missing_park_hr) > 0:
+        st.warning(f"Park HR Rate missing for: {missing_park_hr}")
+
+    # 7. Fill missing ParkHRRate values with a neutral default (e.g., 1.0)
+    df_merged['ParkHRRate'] = df_merged['ParkHRRate'].fillna(1.0)
+
+    # 8. (Optional) Show a preview
+    st.write("Sample parks and their HR rates:", df_merged[['park', 'ParkHRRate']].drop_duplicates().head(10))
     st.write("Merged parks:", df_merged['park'].unique())
     # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
     df_merged['BatterHandedness'] = df_merged['batter'].apply(
