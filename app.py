@@ -1132,7 +1132,7 @@ if all_files_uploaded:
                 if val is None or (isinstance(val, float) and np.isnan(val)):
                     val = 0
             analyzer_score += float(val) * float(weight)
-            record['AnalyzerLogitScore'] = analyzer_score
+            record['HR_Score'] = compute_analyzer_logit_score(record, logit_weights_dict)
 
 # --- NEW: Robust HR_Score and DataFlag for missing data ---
             record['HR_Score'], record['DataFlag'] = robust_calc_hr_score(record, feature_weights, norm_funcs, min_features=0.7)
