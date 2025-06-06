@@ -1060,24 +1060,7 @@ if all_files_uploaded:
         lambda pid: pitch_type_to_hr.get(get_pitcher_primary_pitch(pid), 0)
     )
     # --- Load Logistic Weights (Logit) File ---
-    logit_weights_dict = {}
-    if logit_weights_file is not None:
-        logit_weights_df = pd.read_csv(logit_weights_file)
-        logit_weights_df.columns = (
-            logit_weights_df.columns
-            .str.strip().str.lower()
-            .str.replace(' ', '_')
-            .str.replace(r'[^\w]', '', regex=True)
-        )
-    possible_feature_cols = ['feature', 'field', 'stat', 'column']
-    possible_weight_cols = ['weight', 'logit_weight', 'coef']
-    feature_col = next((c for c in logit_weights_df.columns if c in possible_feature_cols), logit_weights_df.columns[0])
-    weight_col = next((c for c in logit_weights_df.columns if c in possible_weight_cols), logit_weights_df.columns[1])
-    for _, row in logit_weights_df.iterrows():
-        feature = str(row[feature_col]).strip()
-        weight = row[weight_col]
-        if pd.notna(feature) and feature != '':
-            logit_weights_dict[feature] = weight
+    logit_weights_dict = STATIC_LOGIT_WEIGHTS
     
     # --- Begin leaderboard row construction ---
     progress = st.progress(0)
