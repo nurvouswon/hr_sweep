@@ -116,8 +116,41 @@ park_factors = {
     "truist_park": 1.06, "loandepot_park": 0.86, "citi_field": 1.05, "nationals_park": 1.05, "petco_park": 0.85,
     "citizens_bank_park": 1.19
 }
-import math
+team_code_to_park = {
+    'PHI': 'citizens_bank_park',
+    'ATL': 'truist_park',
+    'NYM': 'citi_field',
+    'BOS': 'fenway_park',
+    'NYY': 'yankee_stadium',
+    'CHC': 'wrigley_field',
+    'LAD': 'dodger_stadium',
+    'OAK': 'sutter_health_park',
+    'CIN': 'great_american_ball_park',
+    'DET': 'comerica_park',
+    'HOU': 'minute_maid_park',
+    'MIA': 'loandepot_park',
+    'TB': 'tropicana_field',
+    'MIL': 'american_family_field',
+    'SD': 'petco_park',
+    'SF': 'oracle_park',
+    'TOR': 'rogers_centre',
+    'CLE': 'progressive_field',
+    'MIN': 'target_field',
+    'KC': 'kauffman_stadium',
+    'CWS': 'guaranteed_rate_field',
+    'LAA': 'angel_stadium',
+    'SEA': 't-mobile_park',
+    'TEX': 'globe_life_field',
+    'ARI': 'chase_field',
+    'COL': 'coors_field',
+    'PIT': 'pnc_park',
+    'STL': 'busch_stadium',
+    'BAL': 'camden_yards',
+    'WSH': 'nationals_park',
+    'ATH': 'sutter_health_park' # For Las Vegas/Oakland alternate
+}
 
+import math
 # 16-point compass for mapping wind/park directions to angles (in degrees)
 compass_points = [
     'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
@@ -873,34 +906,17 @@ if all_files_uploaded:
     df_merged['pitcher_id'] = df_merged['pitcher_id'].astype(str)
     pitcher_bb['pitcher_id'] = pitcher_bb['pitcher_id'].astype(str)
     df_merged = df_merged.merge(pitcher_bb, on="pitcher_id", how="left")
-
-    # === Load, clean, and robustly merge Analyzer HR rates & logistic weights ===
-    # 1. Team to Park Mapping (handles Oakland/Sutter Health Park!)
-    team_to_park = {
-        'PHI': 'citizens_bank_park', 'ATL': 'truist_park', 'NYM': 'citi_field', 'BOS': 'fenway_park',
-        'NYY': 'yankee_stadium', 'CHC': 'wrigley_field', 'LAD': 'dodger_stadium',
-        'OAK': 'sutter_health_park',  # <- Oakland A's new park!
-        'CIN': 'great_american_ball_park', 'DET': 'comerica_park', 'HOU': 'minute_maid_park',
-        'MIA': 'loandepot_park', 'TB': 'tropicana_field', 'MIL': 'american_family_field',
-        'SD': 'petco_park', 'SF': 'oracle_park', 'TOR': 'rogers_centre', 'CLE': 'progressive_field',
-        'MIN': 'target_field', 'KC': 'kauffman_stadium', 'CWS': 'guaranteed_rate_field',
-        'LAA': 'angel_stadium', 'SEA': 't-mobile_park', 'TEX': 'globe_life_field',
-        'ARI': 'chase_field', 'COL': 'coors_field', 'PIT': 'pnc_park', 'STL': 'busch_stadium',
-        'BAL': 'camden_yards', 'WSH': 'nationals_park'
-    }
-
+    
     # Assign/normalize park using team_code if needed
     if 'park' not in df_merged.columns or df_merged['park'].isnull().any():
         if 'team_code' in df_merged.columns:
             df_merged['park'] = df_merged['team_code'].map(team_to_park)
 
-    # --- Canonical Park HR Rate merge (single column only) ---
     park_hr = pd.read_csv(park_hr_file)
     st.write("Park HR Rate columns:", park_hr.columns)
     st.write("First 3 rows:", park_hr.head(3))
-    # --- Load Park HR Rate CSV and robustly merge ---
 
-     # 2. Normalize column names
+    # Normalize column names
     park_hr.columns = (
         park_hr.columns
         .str.strip()
@@ -909,7 +925,6 @@ if all_files_uploaded:
         .str.replace(r'[^\w]', '', regex=True)
     )
 
-    # 3. Identify correct columns for merging (robust)
     possible_park_cols = ['park', 'parknames', 'ballpark', 'stadium']
     possible_rate_cols = ['parkrate', 'parkratehr', 'parkrate_homerun', 'hrrate', 'hrrate_park', 'parkhrrate']
 
@@ -918,18 +933,21 @@ if all_files_uploaded:
 
     park_hr.rename(columns={park_col: 'park', rate_col: 'ParkHRRate'}, inplace=True)
 
-    # 5. Merge ParkHRRate into your main dataframe
+    # --- HERE is the critical step ---
+   bpark_hr['park'] = park_hr['park'].map(team_code_to_park)
+
+    # Normalize for robust matching (assuming df_merged['park'] uses same normalization)
+    park_hr['park'] = park_hr['park'].apply(normalize_park_name)
+    df_merged['park'] = df_merged['park'].apply(normalize_park_name)
+
     df_merged = df_merged.merge(park_hr[['park', 'ParkHRRate']], on='park', how='left')
 
-    # 6. Debug unmatched parks (in Streamlit: will display a yellow warning if any are missing)
     missing_park_hr = df_merged[df_merged['ParkHRRate'].isnull()]['park'].unique()
     if len(missing_park_hr) > 0:
         st.warning(f"Park HR Rate missing for: {missing_park_hr}")
 
-    # 7. Fill missing ParkHRRate values with a neutral default (e.g., 1.0)
     df_merged['ParkHRRate'] = df_merged['ParkHRRate'].fillna(1.0)
 
-    # 8. (Optional) Show a preview
     st.write("Sample parks and their HR rates:", df_merged[['park', 'ParkHRRate']].drop_duplicates().head(10))
     st.write("Merged parks:", df_merged['park'].unique())
     # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
