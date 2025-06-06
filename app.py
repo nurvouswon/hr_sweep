@@ -53,6 +53,12 @@ def normalize_name(name):
         name = f"{first.strip()} {last.strip()}"
     return ' '.join(name.split())
 
+def normalize_park_name(park):
+    return str(park).strip().lower().replace(' ', '_')
+
+    df_merged['park'] = df_merged['park'].apply(normalize_park_name)
+    park_hr['park'] = park_hr['park'].apply(normalize_park_name)
+    
 def get_player_id(name):
     if not isinstance(name, str) or len(name.strip().split()) < 2:
         log_error("Player ID lookup", f"Invalid player name format: {name}")
@@ -901,7 +907,7 @@ if all_files_uploaded:
         .str.lower()
         .str.replace(' ', '_')
         .str.replace(r'[^\w]', '', regex=True)
-)
+    )
 
     # 3. Identify correct columns for merging (robust)
     possible_park_cols = ['park', 'parknames', 'ballpark', 'stadium']
@@ -911,13 +917,6 @@ if all_files_uploaded:
     rate_col = next((c for c in park_hr.columns if c in possible_rate_cols), park_hr.columns[1] if len(park_hr.columns) > 1 else None)
 
     park_hr.rename(columns={park_col: 'park', rate_col: 'ParkHRRate'}, inplace=True)
-
-    # 4. Normalize park names in both dataframes (define this function at the top of your file if needed)
-    def normalize_park_name(park):
-        return str(park).strip().lower().replace(' ', '_')
-
-    df_merged['park'] = df_merged['park'].apply(normalize_park_name)
-    park_hr['park'] = park_hr['park'].apply(normalize_park_name)
 
     # 5. Merge ParkHRRate into your main dataframe
     df_merged = df_merged.merge(park_hr[['park', 'ParkHRRate']], on='park', how='left')
@@ -936,10 +935,10 @@ if all_files_uploaded:
     # --- Add BatterHandedness and PitcherHandedness columns to df_merged ---
     df_merged['BatterHandedness'] = df_merged['batter'].apply(
         lambda n: get_handedness(n)[0] if pd.notnull(n) else np.nan
-)
+    )
     df_merged['PitcherHandedness'] = df_merged['pitcher'].apply(
         lambda n: get_handedness(n)[1] if pd.notnull(n) else np.nan
-)
+    )
 
 # --- Load and prepare handedness HR rate file ---
     handed_hr = load_and_standardize_handed_hr(handed_hr_file)
@@ -947,7 +946,7 @@ if all_files_uploaded:
         handed_hr,
         on=['BatterHandedness', 'PitcherHandedness'],
         how='left'
-)
+    )
     # Optional: Rename for clarity
     if 'hr_rate' in df_merged.columns:
         df_merged.rename(columns={'hr_rate': 'HandedHRRate'}, inplace=True)
@@ -957,7 +956,7 @@ if all_files_uploaded:
     pitch_type_to_hr = dict(zip(
         pitchtype_hr['pitch_type'],
         pitchtype_hr['PitchTypeHRRate']
-))
+    ))
     def get_pitcher_primary_pitch(pitcher_id):
         try:
             row = pitcher_bb[pitcher_bb['pitcher_id'] == str(pitcher_id)]
