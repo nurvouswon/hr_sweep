@@ -171,8 +171,8 @@ STATIC_LOGIT_WEIGHTS = {
     "PitcherBBScore": -0.13,
     "CustomBoost": 0.07,
 }
-LOGIT_MULTIPLIER = 2.0
-CONTEXT_MULTIPLIER = 1.0
+LOGIT_MULTIPLIER = 1.0
+CONTEXT_MULTIPLIER = 0.0
 
 logit_features = [
     "B_SLG_3","B_SLG_5","B_SLG_7","B_SLG_14",
@@ -1132,6 +1132,10 @@ if all_files_uploaded:
 
     # --- Score & leaderboard construction ---
     df_final = pd.DataFrame(rows)
+    # Exclude any players flagged as "Low Data"
+    df_final = df_final[df_final['DataFlag'] != "Low Data"].copy()
+    df_final.reset_index(drop=True, inplace=True)
+    df_final.insert(0, "rank", df_final.index + 1)
     df_final.reset_index(drop=True, inplace=True)
     df_final.insert(0, "rank", df_final.index + 1)
     df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
