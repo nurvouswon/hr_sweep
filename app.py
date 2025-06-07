@@ -1131,13 +1131,14 @@ if all_files_uploaded:
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
 
     # --- Score & leaderboard construction ---
-    df_final = pd.DataFrame(rows)
-    # Exclude any players flagged as "Low Data"
     df_final = df_final[df_final['DataFlag'] != "Low Data"].copy()
     df_final.reset_index(drop=True, inplace=True)
-    df_final.insert(0, "rank", df_final.index + 1)
-    df_final.reset_index(drop=True, inplace=True)
-    df_final.insert(0, "rank", df_final.index + 1)
+
+# Only insert 'rank' if it does not exist yet
+    if 'rank' in df_final.columns:
+        df_final = df_final.drop(columns=['rank'])
+        df_final.insert(0, "rank", df_final.index + 1)
+
     df_final['BattedBallScore'] = df_final.apply(calc_batted_ball_score, axis=1)
     df_final['PitcherBBScore'] = df_final.apply(calc_pitcher_bb_score, axis=1)
     df_final['CustomBoost'] = df_final.apply(custom_2025_boost, axis=1)
