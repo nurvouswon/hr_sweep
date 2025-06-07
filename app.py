@@ -811,35 +811,20 @@ def train_and_apply_model(df_leaderboard):
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
     return df_leaderboard, importances
-    
-def compute_hr_score_logit(row, logit_weights_dict):
-    score = 0
+
+def compute_logit_score_analyzer_style(row, logit_weights_dict):
+    """
+    Compute HR score as the sum of value * weight for each feature.
+    Missing values treated as zero.
+    """
+    score = 0.0
     for feature, weight in logit_weights_dict.items():
         val = row.get(feature, 0)
         if val is None or (isinstance(val, float) and np.isnan(val)):
             val = 0
         score += float(val) * float(weight)
     return score
-
-def compute_normalized_logit_score_with_flag(row, logit_weights_dict, feature_norms, min_feature_pct=0.7):
-    score = 0
-    used_weights = 0
-    total_weights = 0
-    features_present = 0
-    for feature, weight in logit_weights_dict.items():
-        total_weights += 1
-        val = row.get(feature, None)
-        norm_func = feature_norms.get(feature, identity)
-        if val is not None and pd.notna(val):
-            norm_val = norm_func(val)
-            score += norm_val * float(weight)
-            used_weights += abs(float(weight))
-            features_present += 1
-    completeness = features_present / total_weights if total_weights > 0 else 0
-    flag = "Low Data" if completeness < min_feature_pct else "OK"
-    if used_weights == 0:
-        return 0, flag
-    return score / used_weights, flag
+    
 # ====================== STREAMLIT UI & LEADERBOARD ========================
 st.title("⚾ MLB HR Matchup Leaderboard – Analyzer+ Statcast + Pitcher Trends + ML")
 st.markdown("""
@@ -1119,10 +1104,9 @@ if all_files_uploaded:
             record['HandedHRRate'] = row.get('HandedHRRate', np.nan)
             record['PitchTypeHRRate'] = row.get('PitchTypeHRRate', np.nan)
 
-            # --- Compute AnalyzerLogitScore using the correct features and weights ---
-            record['HR_Score'], record['DataFlag'] = compute_normalized_logit_score_with_flag(
-                record, logit_weights_dict, feature_norms, min_feature_pct=0.7
-        )
+            # --- Compute AnalyzerLogitScore using RAW logit weights (no normalization) ---
+            record['HR_Score'] = compute_logit_score_analyzer_style(record, logit_weights_dict)
+            record['DataFlag'] = "OK"  # Optionally, you can remove DataFlag logic or keep for debug
             rows.append(record)
 
         except Exception as e:
