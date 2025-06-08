@@ -1115,9 +1115,6 @@ if all_files_uploaded:
         progress.progress((idx + 1) / len(df_merged), text=f"Processing {int(100 * (idx + 1) / len(df_merged))}%")
         # --- Score & leaderboard construction ---
     df_final = pd.DataFrame(rows)
-    # 1. Remove players with 'Low Data' (<70% features present)
-    record['HR_Score'] = compute_logit_score_analyzer_style(record, logit_weights_dict)
-    record['DataFlag'] = "OK"
     # 2. Reset index for fresh ranking
     df_final.reset_index(drop=True, inplace=True)
 
