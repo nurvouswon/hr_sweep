@@ -171,8 +171,8 @@ STATIC_LOGIT_WEIGHTS = {
     "PitcherBBScore": -0.13,
     "CustomBoost": 0.07,
 }
-LOGIT_MULTIPLIER = 1.0
-CONTEXT_MULTIPLIER = 1.0
+LOGIT_MULTIPLIER = 2.0
+CONTEXT_MULTIPLIER = 0.0
 
 logit_features = [
     "B_SLG_3","B_SLG_5","B_SLG_7","B_SLG_14",
