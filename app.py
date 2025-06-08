@@ -172,7 +172,7 @@ STATIC_LOGIT_WEIGHTS = {
     "CustomBoost": 0.07,
 }
 LOGIT_MULTIPLIER = 1.0
-CONTEXT_MULTIPLIER = 0.0
+CONTEXT_MULTIPLIER = 1.0
 
 logit_features = [
     "B_SLG_3","B_SLG_5","B_SLG_7","B_SLG_14",
