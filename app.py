@@ -1116,9 +1116,8 @@ if all_files_uploaded:
         # --- Score & leaderboard construction ---
     df_final = pd.DataFrame(rows)
     # 1. Remove players with 'Low Data' (<70% features present)
-    if 'DataFlag' in df_final.columns:
-        df_final = df_final[df_final['DataFlag'] != "Low Data"].copy()
-
+    record['HR_Score'] = compute_logit_score_analyzer_style(record, logit_weights_dict)
+    record['DataFlag'] = "OK"
     # 2. Reset index for fresh ranking
     df_final.reset_index(drop=True, inplace=True)
 
