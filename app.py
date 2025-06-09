@@ -132,10 +132,36 @@ if df is not None and not df.empty:
         return pd.Series(feats)
 
     st.subheader("Engineering Rolling Features")
-    batter_feats = df.groupby('batter_id').apply(lambda x: rolling_features(x, 'B', 'batter_id', windows)).reset_index()
+    batter_ids = df['batter_id'].unique()
+    pitcher_ids = df['pitcher_id'].unique()
+    total_steps = len(batter_ids) + len(pitcher_ids)
+    progress = st.progress(0, text="Processing batters and pitchers...")
+
+    # Batters
+    results = []
+    for idx, batter_id in enumerate(batter_ids):
+        group = df[df['batter_id'] == batter_id]
+        feats = rolling_features(group, 'B', 'batter_id', windows)
+        row = {'batter_id': batter_id}
+        row.update(feats)
+        results.append(row)
+        progress.progress((idx + 1) / total_steps, text=f"Processing batters: {idx+1}/{len(batter_ids)}")
+    batter_feats = pd.DataFrame(results)
     df = df.merge(batter_feats, on='batter_id', how='left')
-    pitcher_feats = df.groupby('pitcher_id').apply(lambda x: rolling_features(x, 'P', 'pitcher_id', windows)).reset_index()
+
+    # Pitchers
+    results = []
+    for idx, pitcher_id in enumerate(pitcher_ids):
+        group = df[df['pitcher_id'] == pitcher_id]
+        feats = rolling_features(group, 'P', 'pitcher_id', windows)
+        row = {'pitcher_id': pitcher_id}
+        row.update(feats)
+        results.append(row)
+        progress.progress((len(batter_ids)+idx+1) / total_steps, text=f"Processing pitchers: {idx+1}/{len(pitcher_ids)}")
+    pitcher_feats = pd.DataFrame(results)
     df = df.merge(pitcher_feats, on='pitcher_id', how='left')
+
+    progress.progress(1.0, text="Rolling features complete!")
 
     # --- Contextual HR rates ---
     st.subheader("Context HR Rates")
