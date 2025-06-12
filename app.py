@@ -1,167 +1,196 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import requests
-import datetime
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="HR Predictor", layout="wide")
+st.set_page_config(page_title="MLB HR Predictor", layout="wide")
 
-st.title("Home Run Predictor")
+# --- 1. HARDCODED LOGISTIC WEIGHTS (edit as needed) ---
+LOGIT_WEIGHTS = {
+    "iso_value": 5.757820079,
+    "hit_distance_sc": 0.6411852127,
+    "pull_side": 0.5569402386,
+    "launch_speed_angle": 0.5280235471,
+    "B_pitch_pct_CH_5": 0.3858783912,
+    "park_handed_hr_rate": 0.3438658641,
+    "B_median_ev_7": 0.33462617,
+    "B_pitch_pct_CU_3": 0.3280395666,
+    "P_max_ev_5": 0.3113203434,
+    "P_pitch_pct_SV_3": 0.2241205438,
+    # ... include more weights as needed ...
+}
 
-# --- 1. Upload CSVs ---
-player_file = st.file_uploader("Upload Player-Level HR Features CSV", type=["csv"])
-event_file = st.file_uploader("Upload Event-Level Data CSV", type=["csv (optional)"])
-
-player_df = None
-event_df = None
-
-if player_file:
-    try:
-        player_df = pd.read_csv(player_file)
-    except Exception as e:
-        st.error(f"Error loading player-level CSV: {e}")
-
-if event_file:
-    try:
-        event_df = pd.read_csv(event_file)
-    except Exception as e:
-        st.error(f"Error loading event-level CSV: {e}")
-
-if player_df is None or player_df.empty:
-    st.info("Please upload a valid Player-Level CSV to view leaderboard.")
-    st.stop()
-
-# --- 2. MLB PlayerID → Name Lookup Function (for batter_id) ---
+# --- 2. MLB.com PLAYER NAME LOOKUP ---
 @st.cache_data(show_spinner=False)
-def get_player_name_from_id(mlb_id):
+def get_mlb_id_name_dict():
+    url = "https://statsapi.mlb.com/api/v1/sports/1/players?fields=people,id,fullName"
     try:
-        # MLB Stats API: https://statsapi.mlb.com/api/v1/people/{personId}
-        url = f"https://statsapi.mlb.com/api/v1/people/{int(mlb_id)}"
-        r = requests.get(url, timeout=5)
-        if r.status_code == 200:
-            info = r.json()
-            name = info["people"][0]["fullName"]
-            return name
+        r = requests.get(url)
+        r.raise_for_status()
+        players = r.json().get("people", [])
+        return {str(p["id"]): p["fullName"] for p in players}
     except Exception:
-        pass
-    return str(mlb_id)
+        return {}
 
-# --- 3. Weather Lookup ---
-def fetch_weather(park, date_str):
-    api_key = st.secrets["weather"]["api_key"]
-    # Park location mapping (expand as needed)
-    park_locations = {
-        "camden_yards": "Baltimore,MD",
-        "oracle_park": "San Francisco,CA",
-        # Add more mappings!
-    }
-    city_state = park_locations.get(park, park)
+MLB_ID_NAME = get_mlb_id_name_dict()
+
+def lookup_name(mlb_id):
+    if pd.isna(mlb_id): return ""
+    return MLB_ID_NAME.get(str(int(mlb_id)), str(mlb_id))
+
+# --- 3. MLB.com LINEUPS FETCH (by date) ---
+@st.cache_data(show_spinner=True)
+def get_mlb_lineups(date_str):
+    """Returns dict: {team: [batter_id, ...]}, {team: (starter_id, starter_name)}"""
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&expand=schedule.lineups"
+    try:
+        r = requests.get(url)
+        r.raise_for_status()
+        games = r.json().get("dates", [{}])[0].get("games", [])
+        lineups = {}
+        starters = {}
+        for g in games:
+            home = g.get("teams", {}).get("home", {}).get("team", {}).get("abbreviation")
+            away = g.get("teams", {}).get("away", {}).get("team", {}).get("abbreviation")
+            if "lineups" not in g: continue
+            for l in g["lineups"]:
+                t = l.get("team", {}).get("abbreviation")
+                batters = [int(p["person"]["id"]) for p in l.get("battingOrder", [])]
+                sp = l.get("pitchers", [{}])[0].get("person", {})
+                sp_id = sp.get("id")
+                sp_name = sp.get("fullName", "")
+                if batters: lineups[t] = batters
+                if sp_id: starters[t] = (sp_id, sp_name)
+        return lineups, starters
+    except Exception:
+        return {}, {}
+
+# --- 4. WEATHER LOOKUP ---
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_weather(city, date_str):
+    try:
+        api_key = st.secrets["weather"]["api_key"]
+    except Exception:
+        st.warning("Missing weatherapi.com API key in Streamlit secrets.")
+        return None
+    # We use history API for past/future
+    q = city.replace(" ", "%20")
     url = (
         f"http://api.weatherapi.com/v1/history.json?key={api_key}"
-        f"&q={city_state}&dt={date_str}"
+        f"&q={q}&dt={date_str}"
     )
     try:
-        resp = requests.get(url, timeout=5)
-        data = resp.json()
-        if "forecast" in data:
-            d = data["forecast"]["forecastday"][0]["day"]
-            temp = d.get("avgtemp_f", None)
-            humidity = d.get("avghumidity", None)
-            wind = d.get("maxwind_mph", None)
-            return {"temp": temp, "humidity": humidity, "wind": wind}
+        r = requests.get(url)
+        r.raise_for_status()
+        day = r.json()["forecast"]["forecastday"][0]["day"]
+        return {
+            "temp": day["avgtemp_f"],
+            "humidity": day["avghumidity"],
+            "wind_mph": day["maxwind_mph"],
+        }
     except Exception:
-        pass
-    return {"temp": None, "humidity": None, "wind": None}
+        return None
 
-# --- 4. Date Selector (today by default) ---
-today = datetime.date.today()
-sel_date = st.date_input("Prediction Date", value=today)
-sel_date_str = sel_date.strftime("%Y-%m-%d")
-
-# --- 5. Get Park for Weather ---
-if "park" in player_df.columns and player_df["park"].notnull().any():
-    park = player_df["park"].mode()[0]
-else:
-    park = st.text_input("Ballpark (for weather lookup)", "camden_yards")
-
-weather_data = fetch_weather(park, sel_date_str)
-
-# --- 6. Logistic Weights (hardcoded) ---
-logit_weights = {
-    "iso_value": 5.757820079, "hit_distance_sc": 0.6411852127, "pull_side": 0.5569402386, "launch_speed_angle": 0.5280235471,
-    "B_pitch_pct_CH_5": 0.3858783912, "park_handed_hr_rate": 0.3438658641, "B_median_ev_7": 0.33462617, "B_pitch_pct_CU_3": 0.3280395666,
-    "P_max_ev_5": 0.3113203434, "P_pitch_pct_SV_3": 0.2241205438, "B_pitch_pct_EP_5": 0.2163322514, "P_pitch_pct_ST_14": 0.2052831283,
-    "P_rolling_hr_rate_7": 0.1877664166, "P_pitch_pct_FF_5": 0.1783978536, "P_median_ev_3": 0.1752142738, "groundball": 0.1719989086,
-    "B_pitch_pct_KC_5": 0.1615036223, "B_pitch_pct_FS_3": 0.1595644445, "P_pitch_pct_FC_14": 0.1591148241, "B_pitch_pct_SI_14": 0.1570044892,
-    "B_max_ev_5": 0.1540596514,
-    # add as needed... this is a shortened set for demo
+# --- 5. BALLPARK TO CITY MAPPING ---
+PARK_LOOKUP = {
+    "camden_yards": "Baltimore, MD",
+    "dodger_stadium": "Los Angeles, CA",
+    # Extend as needed!
 }
 
-# --- 7. Fill Missing Features with 0 (only for features in weights) ---
-for feat in logit_weights:
-    if feat not in player_df.columns:
-        player_df[feat] = 0
+# --- 6. SIDEBAR UPLOADS + DATE ---
+st.title("MLB Home Run Predictor Leaderboard")
 
-# --- 8. HR Logit Score & Probability ---
-def compute_logit(row):
-    s = 0
-    for feat, weight in logit_weights.items():
-        s += row[feat] * weight
-    return s
+with st.sidebar:
+    st.header("1. Upload Required Data")
+    event_csv = st.file_uploader("Event-Level CSV (Analyzer)", type="csv", key="ev")
+    player_csv = st.file_uploader("Player-Level CSV (Analyzer)", type="csv", key="pl")
 
-player_df["hr_logit_score"] = player_df.apply(compute_logit, axis=1)
-# Probability with sigmoid (for logistic regression style output)
-import numpy as np
-player_df["prob_hr"] = 1 / (1 + np.exp(-player_df["hr_logit_score"]))
+    st.header("2. Select Game Date")
+    today = datetime.today().date()
+    sel_date = st.date_input("Game date", value=today, min_value=datetime(2023, 3, 1).date(), max_value=today+timedelta(days=7))
+    sel_date_str = sel_date.strftime("%Y-%m-%d")
 
-# --- 9. Add Player Names via MLB API ---
-@st.cache_data(show_spinner=False)
-def id_to_name_dict(ids):
-    names = {}
-    for i in ids:
-        names[i] = get_player_name_from_id(i)
-    return names
+    st.header("3. Show Columns")
+    show_all_feats = st.checkbox("Show all feature columns", value=False)
 
-all_ids = player_df["batter_id"].unique().tolist()
-id_to_name = id_to_name_dict(all_ids)
-player_df["Player"] = player_df["batter_id"].map(id_to_name)
-player_df["MLB ID"] = player_df["batter_id"]
-player_df["Team"] = player_df["park"] if "park" in player_df.columns else ""
+if not event_csv or not player_csv:
+    st.warning("Please upload BOTH event-level and player-level CSVs to continue.")
+    st.stop()
 
-# --- 10. Insert Weather Columns ---
-player_df["Weather Temp (F)"] = weather_data["temp"]
-player_df["Weather Humidity"] = weather_data["humidity"]
-player_df["Weather Wind (mph)"] = weather_data["wind"]
+event_df = pd.read_csv(event_csv)
+player_df = pd.read_csv(player_csv)
 
-# --- 11. Leaderboard Columns to Show ---
-top_feats = [
-    "iso_value", "hit_distance_sc", "pull_side", "launch_speed_angle", "B_pitch_pct_CH_5", "park_handed_hr_rate",
-    "B_median_ev_7", "B_pitch_pct_CU_3", "P_max_ev_5", "P_pitch_pct_SV_3", "B_pitch_pct_EP_5", "P_pitch_pct_ST_14"
+# --- 7. LINEUPS & MATCHUPS FETCH ---
+with st.spinner("Fetching MLB lineups..."):
+    lineups, starters = get_mlb_lineups(sel_date_str)
+if not lineups:
+    st.error(f"Could not find MLB.com lineups for {sel_date_str}.")
+    st.stop()
+
+# --- 8. BUILD PREDICTION LEADERBOARD ---
+results = []
+# Index player-level by MLB ID for fast lookup
+player_df["batter_id"] = player_df["batter_id"].astype(str)
+player_df.set_index("batter_id", inplace=True)
+
+for team, batters in lineups.items():
+    if team not in starters:
+        continue
+    sp_id, sp_name = starters[team]
+    # Weather: use park from event CSV (use most common park for this team)
+    team_events = event_df[event_df["home_team"] == team]
+    park = team_events["park"].mode()[0] if not team_events.empty else ""
+    city = PARK_LOOKUP.get(park, park)
+    weather = fetch_weather(city, sel_date_str) if city else {}
+    for batter_id in batters:
+        str_batter = str(batter_id)
+        # Pull all features for this batter
+        if str_batter not in player_df.index:
+            continue
+        feat = player_df.loc[str_batter].copy()
+        # Build feature vector for scoring
+        fv = {}
+        for k, v in LOGIT_WEIGHTS.items():
+            # Use player-level, fallback to event-level if needed
+            val = feat[k] if k in feat else np.nan
+            fv[k] = val if not pd.isna(val) else 0.0
+        # Insert weather features
+        if weather:
+            fv["weather_temp"] = weather.get("temp", np.nan)
+            fv["weather_humidity"] = weather.get("humidity", np.nan)
+            fv["weather_wind"] = weather.get("wind_mph", np.nan)
+        # Logistic HR score
+        hr_logit = sum(LOGIT_WEIGHTS[k] * fv.get(k, 0) for k in LOGIT_WEIGHTS)
+        hr_prob = 1 / (1 + np.exp(-hr_logit))
+        # Store result row
+        results.append({
+            "Player": lookup_name(batter_id),
+            "MLB ID": batter_id,
+            "Team": team,
+            "Opp SP": lookup_name(sp_id),
+            "HR Probability": hr_prob,
+            "HR Logit Score": hr_logit,
+            **{f: fv[f] for f in list(LOGIT_WEIGHTS.keys())[:15] if f in fv},
+            "Weather Temp (F)": fv.get("weather_temp", ""),
+            "Weather Humidity": fv.get("weather_humidity", ""),
+            "Weather Wind (mph)": fv.get("weather_wind", ""),
+        })
+
+# --- 9. DISPLAY LEADERBOARD ---
+leaderboard = pd.DataFrame(results)
+if leaderboard.empty:
+    st.error("No qualified batters found for selected date/lineups.")
+    st.stop()
+
+st.header(f"Predicted Home Run Leaderboard ({sel_date_str})")
+top_cols = [
+    "Player", "MLB ID", "Team", "Opp SP", "HR Probability", "HR Logit Score",
+    *list(LOGIT_WEIGHTS.keys())[:10],
+    "Weather Temp (F)", "Weather Humidity", "Weather Wind (mph)"
 ]
-# Only keep top_feats actually in DataFrame
-top_feats = [f for f in top_feats if f in player_df.columns]
-
-cols_to_show = (
-    ["Player", "MLB ID", "Team", "prob_hr", "hr_logit_score"] +
-    top_feats + ["Weather Temp (F)", "Weather Humidity", "Weather Wind (mph)"]
-)
-cols_rename = {
-    "prob_hr": "HR Probability",
-    "hr_logit_score": "HR Logit Score"
-}
-
-# --- 12. Display Leaderboard ---
-leaderboard = player_df.sort_values("prob_hr", ascending=False).reset_index(drop=True)
-display_cols = [c for c in cols_to_show if c in leaderboard.columns]
-leaderboard_disp = leaderboard[display_cols].rename(columns=cols_rename)
-
-st.header("Predicted Home Run Leaderboard")
-show_all_feats = st.checkbox("Show all feature columns", value=False)
 if show_all_feats:
-    st.dataframe(leaderboard.rename(columns=cols_rename), use_container_width=True)
+    st.dataframe(leaderboard, use_container_width=True)
 else:
-    st.dataframe(leaderboard_disp.head(15), use_container_width=True)
-
-# --- 13. Event-Level Details (optional, NOT displayed by default) ---
-if False and event_df is not None and not event_df.empty:
-    # This block is skipped per your latest request (no dropdown/detail)
-    st.subheader("Underlying Event-Level Details (disabled)")
+    st.dataframe(leaderboard[top_cols].sort_values("HR Probability", ascending=False).head(15), use_container_width=True)
