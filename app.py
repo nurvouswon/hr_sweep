@@ -2,9 +2,31 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
 st.set_page_config(page_title="MLB Home Run Predictor", layout="wide")
+st.title("MLB Home Run Predictor ⚾️")
+
+# 1. CSV Uploaders FIRST
+st.sidebar.header("Step 1: Upload Data")
+player_csv = st.sidebar.file_uploader("Player-Level CSV (required)", type=["csv"], key="player")
+event_csv = st.sidebar.file_uploader("Event-Level CSV (required)", type=["csv"], key="event")
+
+if not player_csv or not event_csv:
+    st.warning("⬆️ Upload **both** player-level and event-level CSVs to begin!")
+    st.stop()
+
+player_df = pd.read_csv(player_csv)
+event_df = pd.read_csv(event_csv)
+
+# (Everything else below can follow, including date selection and predictions)
+st.sidebar.header("Step 2: Prediction Date")
+today_str = datetime.now().strftime("%Y-%m-%d")
+sel_date = st.sidebar.date_input("Select Date for Prediction", value=datetime.now())
+sel_date_str = sel_date.strftime("%Y-%m-%d")
+
+st.success(f"✅ CSVs uploaded! Player-level rows: {len(player_df)} | Event-level rows: {len(event_df)}")
+# ...rest of the Predictor logic goes here...
 
 # ------------------- 1. Hardcoded Logistic Weights -------------------
 LOGISTIC_WEIGHTS = {
