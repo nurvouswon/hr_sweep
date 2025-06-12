@@ -1,413 +1,88 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
-from datetime import datetime
-from pybaseball import playerid_reverse_lookup
 
-# -------- HARD-CODED LOGISTIC WEIGHTS --------
+# --- 1. HARDCODE LOGISTIC WEIGHTS ---
 LOGIT_WEIGHTS = {
+    # Your full logistic weights dictionary here, truncated for brevity:
     "iso_value": 5.757820079,
     "hit_distance_sc": 0.6411852127,
     "pull_side": 0.5569402386,
-    "launch_speed_angle": 0.5280235471,
-    "B_pitch_pct_CH_5": 0.3858783912,
-    "park_handed_hr_rate": 0.3438658641,
-    "B_median_ev_7": 0.33462617,
-    "B_pitch_pct_CU_3": 0.3280395666,
-    "P_max_ev_5": 0.3113203434,
-    "P_pitch_pct_SV_3": 0.2241205438,
-    "B_pitch_pct_EP_5": 0.2163322514,
-    "P_pitch_pct_ST_14": 0.2052831283,
-    "P_rolling_hr_rate_7": 0.1877664166,
-    "P_pitch_pct_FF_5": 0.1783978536,
-    "P_median_ev_3": 0.1752142738,
-    "groundball": 0.1719989086,
-    "B_pitch_pct_KC_5": 0.1615036223,
-    "B_pitch_pct_FS_3": 0.1595644445,
-    "P_pitch_pct_FC_14": 0.1591148241,
-    "B_pitch_pct_SI_14": 0.1570044892,
-    "B_max_ev_5": 0.1540596514,
-    "P_pitch_pct_CU_7": 0.1524371468,
-    "P_pitch_pct_SL_3": 0.1429928993,
-    "P_pitch_pct_FO_14": 0.1332430394,
-    "B_pitch_pct_SV_5": 0.1257929016,
-    "P_hit_distance_sc_7": 0.1236586016,
-    "B_iso_value_14": 0.1199768939,
-    "P_woba_value_5": 0.1175567692,
-    "B_pitch_pct_CS_14": 0.1137568069,
-    "pitch_pct_FO": 0.1124543401,
-    "B_pitch_pct_FF_7": 0.105404093,
-    "is_barrel": 0.1044204311,
-    "B_pitch_pct_FA_7": 0.1041956255,
-    "pitch_pct_FF": 0.1041947265,
-    "B_pitch_pct_ST_3": 0.1016502344,
-    "pitch_pct_ST": 0.09809980426,
-    "pitch_pct_CH": 0.09588455603,
-    "B_pitch_pct_SL_3": 0.09395294235,
-    "P_rolling_hr_rate_5": 0.09176055559,
-    "B_pitch_pct_SC_14": 0.08671517652,
-    "platoon": 0.08601459992,
-    "P_pitch_pct_FS_3": 0.08464192523,
-    "B_iso_value_7": 0.08090866123,
-    "B_pitch_pct_KC_7": 0.08079362526,
-    "B_median_ev_14": 0.07898600411,
-    "B_pitch_pct_KN_7": 0.07368063279,
-    "B_pitch_pct_SL_14": 0.07334392117,
-    "P_pitch_pct_SV_5": 0.06890378686,
-    "P_pitch_pct_CH_3": 0.06804529698,
-    "P_woba_value_7": 0.0674790282,
-    "B_launch_angle_7": 0.06733255236,
-    "P_pitch_pct_ST_7": 0.06545350898,
-    "B_pitch_pct_FF_14": 0.06491620372,
-    "P_max_ev_7": 0.06116445719,
-    "P_max_ev_3": 0.05980174448,
-    "B_pitch_pct_FC_7": 0.05788952516,
-    "B_pitch_pct_FA_3": 0.05587337787,
-    "pitch_pct_FC": 0.05483038609,
-    "P_pitch_pct_KC_7": 0.05350923671,
-    "B_max_ev_3": 0.05203847819,
-    "P_launch_angle_5": 0.05141139562,
-    "P_pitch_pct_CS_14": 0.05139024478,
-    "B_pitch_pct_FA_14": 0.05021331706,
-    "P_pitch_pct_CU_14": 0.05020601371,
-    "P_rolling_hr_rate_3": 0.04837416267,
-    "P_pitch_pct_EP_3": 0.04716192902,
-    "B_pitch_pct_EP_7": 0.04703265604,
-    "P_iso_value_7": 0.04279584322,
-    "P_pitch_pct_CS_7": 0.04223520154,
-    "B_hit_distance_sc_7": 0.04213173751,
-    "P_hit_distance_sc_14": 0.04051098632,
-    "pitch_pct_EP": 0.04016871102,
-    "B_pitch_pct_FS_5": 0.03855898953,
-    "B_max_ev_14": 0.03737112154,
-    "P_hit_distance_sc_5": 0.03624982534,
-    "B_pitch_pct_ST_7": 0.03422107548,
-    "P_pitch_pct_FA_14": 0.03370091448,
-    "P_pitch_pct_SI_3": 0.0330997414,
-    "P_pitch_pct_SC_3": 0.0323674025,
-    "P_pitch_pct_FA_5": 0.03217237942,
-    "P_pitch_pct_FA_7": 0.03040455729,
-    "B_pitch_pct_CS_7": 0.03032370172,
-    "P_pitch_pct_FS_14": 0.02975351665,
-    "P_pitch_pct_CH_5": 0.02916198552,
-    "P_launch_angle_3": 0.02898747384,
-    "api_break_x_arm": 0.02580362561,
-    "P_pitch_pct_KN_14": 0.02437049636,
-    "B_launch_angle_5": 0.02279752661,
-    "P_pitch_pct_KN_7": 0.02198258989,
-    "pitch_pct_FA": 0.02116715063,
-    "P_pitch_pct_CS_3": 0.02028996709,
-    "P_launch_speed_5": 0.02025459348,
-    "B_pitch_pct_FS_7": 0.01914504011,
-    "B_iso_value_3": 0.01880782539,
-    "B_pitch_pct_KN_3": 0.01866745556,
-    "P_pitch_pct_KN_5": 0.01832716716,
-    "P_pitch_pct_EP_5": 0.01796925344,
-    "P_pitch_pct_FA_3": 0.01765343611,
-    "B_pitch_pct_SC_3": 0.01704581005,
-    "B_woba_value_14": 0.01625324119,
-    "P_pitch_pct_CH_7": 0.0159123482,
-    "P_iso_value_5": 0.01527328467,
-    "P_pitch_pct_SC_5": 0.01459290553,
-    "P_pitch_pct_EP_7": 0.01245969926,
-    "P_pitch_pct_EP_14": 0.01239925854,
-    "B_pitch_pct_KN_5": 0.01238071672,
-    "P_pitch_pct_KN_3": 0.01108048233,
-    "B_pitch_pct_FO_5": 0.009812235107,
-    "B_pitch_pct_CH_14": 0.006891595653,
-    "P_launch_speed_7": 0.00587642924,
-    "P_pitch_pct_SI_5": 0.004140622116,
-    "P_iso_value_3": 0.003317464841,
-    "B_pitch_pct_SC_7": 0.002973730736,
-    "P_pitch_pct_SI_7": 0.002545559744,
-    "B_pitch_pct_CS_5": 0.001400601092,
-    "P_pitch_pct_CU_5": 4.06E-05,
-    "pitch_pct_SC": 0,
-    "pitch_pct_KN": 0,
-    "B_pitch_pct_FO_7": -0.0007714881065,
-    "B_pitch_pct_SV_14": -0.001823116203,
-    "P_pitch_pct_SC_14": -0.00383505602,
-    "B_pitch_pct_FO_3": -0.005145249883,
-    "P_pitch_pct_SC_7": -0.005206073559,
-    "P_median_ev_14": -0.005612233359,
-    "P_pitch_pct_CS_5": -0.006176652001,
-    "B_pitch_pct_FA_5": -0.006331705902,
-    "B_hit_distance_sc_5": -0.006943213796,
-    "B_pitch_pct_SC_5": -0.01205200704,
-    "B_pitch_pct_FC_14": -0.0143497921,
-    "pitch_pct_SL": -0.01510900719,
-    "P_rolling_hr_rate_14": -0.01595557821,
-    "P_pitch_pct_KC_5": -0.02349274133,
-    "B_pitch_pct_CH_7": -0.02379703807,
-    "P_pitch_pct_FS_7": -0.02455482911,
-    "P_median_ev_5": -0.025323513,
-    "P_launch_angle_7": -0.02534123972,
-    "B_pitch_pct_KN_14": -0.02610112462,
-    "B_hit_distance_sc_3": -0.02717841116,
-    "P_pitch_pct_SI_14": -0.02729122758,
-    "B_pitch_pct_FC_3": -0.02743044863,
-    "P_pitch_pct_FC_7": -0.02813827819,
-    "api_break_x_batter_in": -0.03119408952,
-    "P_pitch_pct_SV_7": -0.03257910372,
-    "P_pitch_pct_FF_3": -0.03271543951,
-    "B_iso_value_5": -0.03577165976,
-    "P_pitch_pct_KC_14": -0.04097640307,
-    "B_pitch_pct_FO_14": -0.04146002355,
-    "B_pitch_pct_CU_5": -0.04183288301,
-    "B_pitch_pct_SI_3": -0.04391242165,
-    "P_pitch_pct_SL_7": -0.04539241009,
-    "P_pitch_pct_FS_5": -0.04720379886,
-    "B_pitch_pct_SV_3": -0.04966895579,
-    "pitch_pct_CU": -0.05060363486,
-    "B_pitch_pct_CU_7": -0.05188060492,
-    "B_woba_value_7": -0.05352041865,
-    "B_median_ev_5": -0.05445014211,
-    "P_pitch_pct_FO_3": -0.05565757264,
-    "B_pitch_pct_SI_5": -0.05597580306,
-    "B_launch_speed_3": -0.05725070846,
-    "P_pitch_pct_FC_5": -0.05818885708,
-    "P_pitch_pct_KC_3": -0.0609302114,
-    "B_pitch_pct_FF_5": -0.07026136308,
-    "P_pitch_pct_FF_7": -0.07054096955,
-    "P_median_ev_7": -0.07249860479,
-    "P_pitch_pct_SV_14": -0.07401508716,
-    "pitch_pct_CS": -0.0750167943,
-    "P_pitch_pct_SL_5": -0.07516276101,
-    "P_pitch_pct_FO_5": -0.07608663534,
-    "B_launch_angle_14": -0.07802255023,
-    "B_launch_speed_7": -0.0805917092,
-    "P_pitch_pct_SL_14": -0.08198276207,
-    "P_pitch_pct_FO_7": -0.08472122915,
-    "B_pitch_pct_SI_7": -0.08603262392,
-    "B_pitch_pct_FF_3": -0.08711461233,
-    "B_pitch_pct_KC_14": -0.08749208913,
-    "B_hit_distance_sc_14": -0.08941394423,
-    "B_pitch_pct_SL_5": -0.08944923535,
-    "B_woba_value_5": -0.09131252715,
-    "P_launch_angle_14": -0.09339176458,
-    "B_pitch_pct_KC_3": -0.09380795248,
-    "woba_value": -0.09486853811,
-    "B_max_ev_7": -0.09570913208,
-    "B_pitch_pct_SL_7": -0.09651967847,
-    "P_pitch_pct_CH_14": -0.09732621466,
-    "P_pitch_pct_ST_3": -0.0983690184,
-    "pitch_pct_KC": -0.09887480393,
-    "pitch_pct_FS": -0.09913272207,
-    "P_pitch_pct_FC_3": -0.1007290791,
-    "P_pitch_pct_FF_14": -0.1041925119,
-    "B_launch_speed_14": -0.1044138585,
-    "B_launch_speed_5": -0.1047430693,
-    "P_hit_distance_sc_3": -0.1095165747,
-    "pitch_pct_SV": -0.1135124529,
-    "P_launch_speed_14": -0.1154621075,
-    "B_launch_angle_3": -0.1182057938,
-    "P_iso_value_14": -0.1239357984,
-    "B_pitch_pct_SV_7": -0.1243399089,
-    "P_woba_value_14": -0.1300451803,
-    "B_pitch_pct_FS_14": -0.1308265914,
-    "intercept_ball_minus_batter_pos_x_inches": -0.1311741983,
-    "B_pitch_pct_ST_5": -0.1317139074,
-    "B_pitch_pct_ST_14": -0.1365470891,
-    "P_max_ev_14": -0.1365872313,
-    "park_hr_rate": -0.1393701286,
-    "B_pitch_pct_CS_3": -0.1396998173,
-    "B_pitch_pct_FC_5": -0.1420174063,
-    "park_altitude": -0.1571715354,
-    "B_median_ev_3": -0.1597647764,
-    "P_pitch_pct_ST_5": -0.1644178515,
-    "pull_air": -0.1646662335,
-    "launch_speed": -0.1671652738,
-    "pitch_pct_SI": -0.1750704955,
-    "B_pitch_pct_EP_3": -0.1803807091,
-    "flyball": -0.183110744,
-    "B_woba_value_3": -0.1878784838,
-    "B_pitch_pct_EP_14": -0.187883453,
-    "P_pitch_pct_CU_3": -0.1965025187,
-    "P_woba_value_3": -0.2020609691,
-    "P_launch_speed_3": -0.2064394068,
-    "B_pitch_pct_CU_14": -0.2071642082,
-    "launch_angle": -0.2249806408,
-    "B_pitch_pct_CH_3": -0.2283291737,
-    "is_hard_hit": -0.4349162272,
-    "is_sweet_spot": -0.5773584022,
+    # ... (add all your features and weights)
     "line_drive": -0.7114540736,
 }
 
-# --------- FUNCTIONS ---------
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+st.title("MLB HR Predictor – Player + Event CSV Integration")
+
+# --- 2. UPLOAD FILES ---
+player_file = st.file_uploader("Upload Player-level CSV (from Analyzer)", type=["csv"])
+event_file = st.file_uploader("Upload Event-level CSV (from Analyzer)", type=["csv"])
+
+if player_file is None or event_file is None:
+    st.warning("Please upload BOTH the player-level and event-level CSVs from Analyzer.")
+    st.stop()
+
+# --- 3. LOAD DATA ---
+df_player = pd.read_csv(player_file, low_memory=False)
+df_event = pd.read_csv(event_file, low_memory=False)
+
+# --- 4. Find all features needed by weights ---
+needed_features = set(LOGIT_WEIGHTS.keys())
+player_cols = set(df_player.columns)
+event_cols = set(df_event.columns)
+
+# Features NOT in player-level
+missing_in_player = needed_features - player_cols
+
+# --- 5. For each missing feature, try to get from event-level (latest event per batter) ---
+event_features_for_merge = list(missing_in_player & event_cols)
+if event_features_for_merge:
+    # Pick latest event for each batter
+    df_event['game_date'] = pd.to_datetime(df_event['game_date'], errors='coerce')
+    df_event_sorted = df_event.sort_values(['batter_id', 'game_date'])
+    # We'll use the last event for each batter (latest date)
+    event_features = (df_event_sorted.groupby('batter_id')
+                      .last()[event_features_for_merge]
+                      .reset_index())
+    # Merge them up to player-level
+    df_player = df_player.merge(event_features, on='batter_id', how='left')
+
+# --- 6. After merge, get the FINAL set of columns available for scoring ---
+final_cols = set(df_player.columns)
+used_weights = {f: w for f, w in LOGIT_WEIGHTS.items() if f in final_cols}
+
+if len(used_weights) < len(LOGIT_WEIGHTS):
+    missing_feats = set(LOGIT_WEIGHTS) - set(used_weights)
+    st.info(f"Missing features not in either CSV (ignored in score): {sorted(missing_feats)}")
+
+# --- 7. Score function ---
 def calc_hr_logit_score(row):
     score = 0
-    for feat, weight in LOGIT_WEIGHTS.items():
-        val = row.get(feat, 0)
-        if pd.isna(val):
-            val = 0
-        score += val * weight
+    for feature, weight in used_weights.items():
+        v = row.get(feature, 0)
+        if pd.isnull(v):
+            v = 0
+        score += float(v) * weight
     return score
 
-def sigmoid(x):
-    # Converts logit to probability (not calibrated, but monotonic)
-    return 1 / (1 + np.exp(-x / 10.0))  # Denominator scale for probability spread
+df_player['hr_logit_score'] = df_player.apply(calc_hr_logit_score, axis=1)
+df_player['prob_hr'] = df_player['hr_logit_score'].apply(sigmoid)
 
-def lookup_names(batter_ids, id_col="batter_id"):
-    """Quickly map MLBAM IDs to player names (if needed)."""
-    try:
-        ids_int = [int(i) for i in batter_ids if pd.notna(i)]
-        name_df = playerid_reverse_lookup(ids_int, key_type='mlbam')
-        id_to_name = dict(zip(name_df['key_mlbam'], name_df['name_first'] + " " + name_df['name_last']))
-        return batter_ids.map(lambda x: id_to_name.get(int(x), str(x)) if pd.notna(x) else "")
-    except Exception:
-        return batter_ids.astype(str)
+# --- 8. LEADERBOARD OUTPUT ---
+out_cols = ['batter_id', 'batter', 'hr_logit_score', 'prob_hr'] + [f for f in used_weights if f in df_player.columns]
+leaderboard = df_player[out_cols].copy()
+leaderboard = leaderboard.sort_values('hr_logit_score', ascending=False).reset_index(drop=True)
+leaderboard.insert(0, 'Rank', leaderboard.index + 1)
 
-def fetch_lineups(date):
-    """Fetch lineups for the given date (YYYY-MM-DD) from MLB API."""
-    try:
-        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date}&hydrate=lineups"
-        resp = requests.get(url, timeout=10)
-        data = resp.json()
-        games = data.get("dates", [{}])[0].get("games", [])
-        lineup_info = []
-        for game in games:
-            game_pk = game.get("gamePk")
-            for team_type in ["home", "away"]:
-                team = game.get(f"{team_type}Team", {}).get("team", {})
-                team_name = team.get("name", "")
-                lineup = game.get("lineups", {}).get(team_type, {}).get("battings", [])
-                for batter in lineup:
-                    entry = {
-                        "team": team_name,
-                        "batter": batter.get("fullName", ""),
-                        "mlb_id": batter.get("id"),
-                        "batting_order": batter.get("order"),
-                        "game_pk": game_pk
-                    }
-                    lineup_info.append(entry)
-        return pd.DataFrame(lineup_info)
-    except Exception:
-        return pd.DataFrame([])
+# --- 9. Show leaderboard
+st.dataframe(leaderboard.style.format({"prob_hr": "{:.3f}", "hr_logit_score": "{:.2f}"}), use_container_width=True)
 
-def get_weather(city, date, api_key):
-    """Get weather from weatherapi.com for city and date."""
-    if not city or not api_key:
-        return {}
-    try:
-        url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date}"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            day = resp.json().get("forecast", {}).get("forecastday", [{}])[0].get("day", {})
-            return {
-                "temp": day.get("avgtemp_f"),
-                "wind": day.get("maxwind_mph"),
-                "humidity": day.get("avghumidity"),
-                "condition": day.get("condition", {}).get("text", ""),
-            }
-    except Exception:
-        return {}
-    return {}
-
-# ------------- STREAMLIT APP UI -------------
-st.title("MLB Home Run Predictor Leaderboard – Event/Player CSV + MLB.com Lineup + Weather")
-
-st.markdown(
-    """
-    - **Upload:**  
-      • Player-level (aggregates/rolling windows) CSV  
-      • Event-level (game/event rows) CSV  
-    - **Optional:** Choose date and pull MLB.com lineups for that day.
-    - **Outputs:** HR leaderboard with weighted features, sortable, downloadable.
-    """
-)
-
-player_csv = st.file_uploader("Upload Player-Level CSV", type="csv")
-event_csv = st.file_uploader("Upload Event-Level CSV", type="csv")
-api_key = st.secrets.get("weather", {}).get("api_key", "")
-
-date_str = st.date_input("Select Game Date (for lineup/weather)", value=datetime.now()).strftime("%Y-%m-%d")
-
-use_mlb_lineups = st.checkbox("Use MLB.com Lineups for selected date (instead of player CSV batters)")
-
-# --- Load Data ---
-if player_csv is not None:
-    df_players = pd.read_csv(player_csv, dtype=str)
-else:
-    st.stop()
-
-if event_csv is not None:
-    df_events = pd.read_csv(event_csv, dtype=str)
-else:
-    st.stop()
-
-# Try to keep only one of each batter_id for leaderboard (most recent/aggregate row)
-if 'batter_id' in df_players.columns:
-    df_players = df_players.drop_duplicates('batter_id', keep='last')
-
-# Merge in batter names if missing
-if "batter" not in df_players.columns:
-    df_players["batter"] = lookup_names(df_players["batter_id"])
-
-# --- Lineup logic ---
-if use_mlb_lineups:
-    st.write("🔍 Looking up MLB.com lineups for selected date...")
-    df_lineups = fetch_lineups(date_str)
-    if not df_lineups.empty:
-        # Only keep batters who are in both the lineups and uploaded player csv
-        df_players = df_players[df_players["batter_id"].isin(df_lineups["mlb_id"].astype(str))]
-        st.success(f"Loaded {len(df_players)} hitters from MLB.com confirmed lineups.")
-    else:
-        st.warning("Could not find MLB.com lineups for this date.")
-
-# --- Main leaderboard calculation ---
-# Select only columns needed for weights (plus batter_id, batter)
-feature_cols = ["batter_id", "batter"] + list(LOGIT_WEIGHTS.keys())
-missing_cols = [col for col in feature_cols if col not in df_players.columns]
-if missing_cols:
-    st.error(f"Missing feature columns in player-level CSV: {missing_cols}")
-    st.stop()
-
-# Convert all feature columns to float
-for col in LOGIT_WEIGHTS:
-    df_players[col] = pd.to_numeric(df_players[col], errors="coerce").fillna(0)
-
-df_players["hr_logit_score"] = df_players.apply(calc_hr_logit_score, axis=1)
-df_players["prob_hr"] = df_players["hr_logit_score"].apply(sigmoid)
-
-# Add context columns (park_hr_rate, park_handed_hr_rate, weather, etc.) from event-level data if possible
-context_cols = ["park_hr_rate", "park_handed_hr_rate", "park_altitude"]
-for ctx in context_cols:
-    if ctx in df_events.columns:
-        # Map most common value for this batter from event-level
-        mode_map = df_events.groupby("batter_id")[ctx].agg(lambda x: pd.to_numeric(x, errors="coerce").mode().max() if not x.mode().empty else np.nan)
-        df_players[ctx] = df_players["batter_id"].map(mode_map).fillna(0)
-
-# Add Weather columns if present in event-level, otherwise allow game-day API lookup
-weather_cols = ["temp", "wind_mph", "humidity", "condition"]
-for wcol in weather_cols:
-    if wcol in df_events.columns:
-        mode_map = df_events.groupby("batter_id")[wcol].agg(lambda x: pd.to_numeric(x, errors="coerce").mode().max() if not x.mode().empty else np.nan)
-        df_players[wcol] = df_players["batter_id"].map(mode_map)
-    else:
-        # Look up today's weather for each unique park (or city, if you want to add city col)
-        pass  # Skipping API lookup for every hitter, but could add here
-
-# Detailed features breakdown for leaderboard
-leader_cols = (
-    ["batter_id", "batter", "hr_logit_score", "prob_hr", "park_hr_rate", "park_handed_hr_rate", "temp", "wind_mph", "humidity"]
-    + [f for f in LOGIT_WEIGHTS.keys() if f in df_players.columns]
-)
-
-df_leader = df_players[leader_cols].copy()
-df_leader = df_leader.sort_values("prob_hr", ascending=False).reset_index(drop=True)
-df_leader.index += 1
-df_leader.insert(0, "Rank", df_leader.index)
-
-# --- Display Leaderboard ---
-st.header("🏆 HR Predictor Leaderboard")
-st.dataframe(df_leader.head(30), use_container_width=True)
-
+# --- 10. Download leaderboard
 st.download_button(
-    "Download Full Leaderboard CSV",
-    df_leader.to_csv(index=False),
-    file_name=f"hr_leaderboard_{date_str}.csv",
-    mime="text/csv"
+    "Download HR Leaderboard CSV",
+    leaderboard.to_csv(index=False),
+    file_name="hr_leaderboard.csv"
 )
-
-st.success("Done! Adjust your weights/features as you need.")
