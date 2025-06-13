@@ -7,7 +7,7 @@ from datetime import datetime
 st.set_page_config(page_title="MLB Home Run Predictor", layout="wide")
 st.title("MLB Home Run Predictor ⚾️")
 
-# ------------ FULL LOGISTIC WEIGHTS ------------------
+# ------------ FULL LOGISTIC WEIGHTS (YOUR TABLE) ------------
 LOGISTIC_WEIGHTS = {
     'iso_value': 5.757820079, 'hit_distance_sc': 0.6411852127, 'pull_side': 0.5569402386, 'launch_speed_angle': 0.5280235471,
     'B_pitch_pct_CH_5': 0.3858783912, 'park_handed_hr_rate': 0.3438658641, 'B_median_ev_7': 0.33462617, 'B_pitch_pct_CU_3': 0.3280395666,
@@ -93,7 +93,7 @@ def fetch_weather(city, date_str):
         url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date_str}"
         resp = requests.get(url, timeout=7)
         data = resp.json()
-    day = data.get("forecast", {}).get("forecastday", [{}])[0].get("day", {})
+        day = data.get("forecast", {}).get("forecastday", [{}])[0].get("day", {})
         temp = day.get("avgtemp_f", 72)
         humidity = day.get("avghumidity", 55)
         wind_mph = day.get("maxwind_mph", 7)
@@ -101,12 +101,14 @@ def fetch_weather(city, date_str):
     except Exception:
         return 72, 55, 7  # fallback/defaults
 
-# If possible, use park/city from event-level csv, else fallback to user input
-if "park" in event_df.columns and not event_df.empty:
-    park = event_df["park"].mode()[0]
-    city = event_df["city"].mode()[0] if "city" in event_df.columns else park
+# Use city if present in event_df, otherwise park, otherwise manual input.
+if "city" in event_df.columns and not event_df.empty:
+    city = event_df["city"].mode()[0]
+elif "park" in event_df.columns and not event_df.empty:
+    city = event_df["park"].mode()[0]
 else:
     city = st.sidebar.text_input("Ballpark/City for Weather Lookup", "Baltimore,MD")
+
 date_guess = event_df["game_date"].mode()[0] if "game_date" in event_df.columns and not event_df.empty else datetime.now().strftime("%Y-%m-%d")
 
 weather_temp, weather_humidity, weather_wind_mph = fetch_weather(city, date_guess)
@@ -135,7 +137,6 @@ progress.progress(70, text="Logistic scoring complete...")
 # ------------ MLB PLAYER NAME LOOKUP BY MLB ID ------------
 @st.cache_data(ttl=86400)
 def get_mlb_player_names(mlb_id_list):
-    # MLB API returns up to 100 IDs per call; handle longer lists if needed.
     out_map = {}
     ids = [int(i) for i in mlb_id_list if not pd.isna(i)]
     CHUNK = 100
@@ -177,7 +178,6 @@ def get_top_feats(row):
     feat_scores.sort(key=lambda x: abs(x[3]), reverse=True)
     return feat_scores[:TOP_N_FEATS]
 
-# ------------ DISPLAY ------------
 progress.progress(100, text="Leaderboard complete! 🎉")
 
 st.success(f"Done! Leaderboard generated for {date_guess} ({city}) with {len(player_df)} batters.")
