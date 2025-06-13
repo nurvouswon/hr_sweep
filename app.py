@@ -69,24 +69,36 @@ LOGISTIC_WEIGHTS = {
 }
 INTERCEPT = 0
 
-# ------------ PROGRESS BAR ------------
 progress = st.progress(0, text="Starting...")
 
 # ------------ FILE UPLOADS ------------
-st.sidebar.header("Step 1: Upload Data")
-player_csv = st.sidebar.file_uploader("Player-Level CSV (required)", type=["csv"], key="player")
-event_csv = st.sidebar.file_uploader("Event-Level CSV (required)", type=["csv"], key="event")
-progress.progress(10, text="Waiting for both player-level and event-level CSVs...")
+st.sidebar.header("Step 1: Upload Required Data")
+matchups_csv = st.sidebar.file_uploader(
+    "Matchups CSV (Required):\n[team code, game_date, game_number, mlb id, player name, batting order, position, weather, time, city, stadium]",
+    type=["csv"], key="matchups"
+)
+event_csv = st.sidebar.file_uploader("Event-Level CSV (Required)", type=["csv"], key="event")
+progress.progress(10, text="Waiting for both Matchups and Event-level CSVs...")
 
-if not player_csv or not event_csv:
-    st.warning("⬆️ Upload **both** player-level and event-level CSVs to begin!")
+if not matchups_csv or not event_csv:
+    st.warning("⬆️ Upload **both** Matchups and Event-level CSVs to begin!")
     st.stop()
 
-player_df = pd.read_csv(player_csv)
+matchups_df = pd.read_csv(matchups_csv)
 event_df = pd.read_csv(event_csv)
-progress.progress(25, text="Files uploaded, reading player/event CSVs...")
+progress.progress(25, text="Files uploaded, reading matchups/event CSVs...")
 
-# ------------ WEATHER LOOKUP (event_df -> park/city) ------------
+# ------------ COLUMN CHECKS ------------
+required_matchup_cols = [
+    "team code", "game_date", "game_number", "mlb id", "player name",
+    "batting order", "position", "weather", "time", "city", "stadium"
+]
+missing = [col for col in required_matchup_cols if col not in matchups_df.columns]
+if missing:
+    st.error(f"Missing required columns in Matchups CSV: {missing}")
+    st.stop()
+
+# ------------ WEATHER LOOKUP (via matchups) ------------
 def fetch_weather(city, date_str):
     try:
         api_key = st.secrets["weather"]["api_key"]
@@ -101,27 +113,36 @@ def fetch_weather(city, date_str):
     except Exception:
         return 72, 55, 7  # fallback/defaults
 
-# Use city if present in event_df, otherwise park, otherwise manual input.
-if "city" in event_df.columns and not event_df.empty:
-    city = event_df["city"].mode()[0]
-elif "park" in event_df.columns and not event_df.empty:
-    city = event_df["park"].mode()[0]
-else:
-    city = st.sidebar.text_input("Ballpark/City for Weather Lookup", "Baltimore,MD")
-
-date_guess = event_df["game_date"].mode()[0] if "game_date" in event_df.columns and not event_df.empty else datetime.now().strftime("%Y-%m-%d")
-
+# Use city/date from matchups for all batters in a group
+city = matchups_df["city"].mode()[0]
+date_guess = pd.to_datetime(matchups_df["game_date"].mode()[0]).strftime("%Y-%m-%d")
 weather_temp, weather_humidity, weather_wind_mph = fetch_weather(city, date_guess)
+progress.progress(35, text="Weather loaded and merged...")
+
+# ------------ JOIN MATCHUPS + EVENT-LEVEL (Statcast) DATA ------------
+# - Assume event-level features keyed by `mlb id`
+# - Use only batters (exclude pitchers, eg. by position != 'SP' or numeric order 1-9)
+# - Deduplicate on mlb id
+batters = matchups_df[
+    (matchups_df["position"].astype(str).str.upper() != "SP") &
+    (matchups_df["batting order"].astype(str).str.isnumeric())
+].copy()
+
+batters["batter_id"] = batters["mlb id"]
+batters = batters.drop_duplicates(subset="batter_id")
+
+# Merge statcast event data (on mlb id)
+player_df = batters.merge(event_df, left_on="batter_id", right_on="batter_id", how="left")
 player_df["weather_temp"] = weather_temp
 player_df["weather_humidity"] = weather_humidity
 player_df["weather_wind_mph"] = weather_wind_mph
-progress.progress(40, text="Weather loaded and merged...")
+progress.progress(55, text="Batters merged with event features...")
 
 # ------------ FILL MISSING FEATURES WITH ZEROS ------------
 for col in LOGISTIC_WEIGHTS:
     if col not in player_df.columns:
         player_df[col] = 0
-progress.progress(55, text="Model features prepared...")
+progress.progress(65, text="Model features prepared...")
 
 # ------------ LOGIT CALCULATION ------------
 def calc_hr_logit(row):
@@ -132,7 +153,7 @@ def calc_hr_logit(row):
 
 player_df["HR Logit Score"] = player_df.apply(calc_hr_logit, axis=1)
 player_df["HR Probability"] = 1 / (1 + np.exp(-player_df["HR Logit Score"]))
-progress.progress(70, text="Logistic scoring complete...")
+progress.progress(80, text="Logistic scoring complete...")
 
 # ------------ MLB PLAYER NAME LOOKUP BY MLB ID ------------
 @st.cache_data(ttl=86400)
@@ -154,27 +175,22 @@ def get_mlb_player_names(mlb_id_list):
 
 unique_ids = player_df["batter_id"].dropna().astype(int).unique().tolist()
 name_map = get_mlb_player_names(unique_ids)
-player_df["Player"] = player_df["batter_id"].astype(int).astype(str).map(name_map).fillna(player_df["batter_id"])
-progress.progress(85, text="Player names resolved using MLB API...")
+player_df["Player"] = player_df["batter_id"].astype(int).astype(str).map(name_map).fillna(player_df["player name"])
+progress.progress(90, text="Player names resolved using MLB API...")
 
 # ------------ LEADERBOARD: ONE ROW PER BATTER ------------
-player_df = player_df.copy()
-player_df = player_df.drop_duplicates(subset="batter_id")  # one row per batter
-
 player_df = player_df.sort_values("HR Logit Score", ascending=False).reset_index(drop=True)
 player_df["Rank"] = np.arange(1, len(player_df) + 1)
-progress.progress(95, text="Leaderboard ranked...")
+progress.progress(97, text="Leaderboard ranked...")
 
 # ------------ HIGHEST WEIGHTED FEATURES FOR EACH BATTER ------------
 TOP_N_FEATS = 10
-
 def get_top_feats(row):
     feat_scores = []
     for feat, wt in LOGISTIC_WEIGHTS.items():
         val = row.get(feat, 0)
         contrib = wt * val
         feat_scores.append((feat, val, wt, contrib))
-    # Sort by absolute value of contribution (impact on score)
     feat_scores.sort(key=lambda x: abs(x[3]), reverse=True)
     return feat_scores[:TOP_N_FEATS]
 
@@ -208,3 +224,4 @@ st.caption(
     "• Top features are shown by largest score impact (weight × value). Logistic score determines probability of HR. "
     "Upload new CSVs to refresh leaderboard."
 )
+    
