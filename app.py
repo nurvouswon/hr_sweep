@@ -2,12 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-from datetime import datetime
 
 st.set_page_config(page_title="MLB Home Run Predictor", layout="wide")
 st.title("MLB Home Run Predictor ⚾️")
 
-# ------------ FULL LOGISTIC WEIGHTS (YOUR TABLE) ------------
+# ------------ FULL LOGISTIC WEIGHTS TABLE (COMPLETE) ------------------
 LOGISTIC_WEIGHTS = {
     'iso_value': 5.757820079, 'hit_distance_sc': 0.6411852127, 'pull_side': 0.5569402386, 'launch_speed_angle': 0.5280235471,
     'B_pitch_pct_CH_5': 0.3858783912, 'park_handed_hr_rate': 0.3438658641, 'B_median_ev_7': 0.33462617, 'B_pitch_pct_CU_3': 0.3280395666,
@@ -71,24 +70,25 @@ INTERCEPT = 0
 
 progress = st.progress(0, text="Starting...")
 
-# ------------ FILE UPLOADS ------------
-st.sidebar.header("Step 1: Upload Required Data")
+# ------------ FILE UPLOADS (ALL REQUIRED) ------------
+st.sidebar.header("Step 1: Upload ALL Required Data")
 matchups_csv = st.sidebar.file_uploader(
-    "Matchups CSV (Required):\n[team code, game_date, game_number, mlb id, player name, batting order, position, weather, time, city, stadium]",
-    type=["csv"], key="matchups"
+    "1️⃣ Matchups CSV (Required)", type=["csv"], key="matchups"
 )
-event_csv = st.sidebar.file_uploader("Event-Level CSV (Required)", type=["csv"], key="event")
-progress.progress(10, text="Waiting for both Matchups and Event-level CSVs...")
+player_csv = st.sidebar.file_uploader("2️⃣ Player-Level CSV (Required)", type=["csv"], key="player")
+event_csv = st.sidebar.file_uploader("3️⃣ Event-Level CSV (Required)", type=["csv"], key="event")
+progress.progress(10, text="Waiting for all three CSV uploads...")
 
-if not matchups_csv or not event_csv:
-    st.warning("⬆️ Upload **both** Matchups and Event-level CSVs to begin!")
+if not matchups_csv or not player_csv or not event_csv:
+    st.warning("⬆️ Upload **all three** CSVs (Matchups, Player-level, Event-level) to begin!")
     st.stop()
 
 matchups_df = pd.read_csv(matchups_csv)
+player_df = pd.read_csv(player_csv)
 event_df = pd.read_csv(event_csv)
-progress.progress(25, text="Files uploaded, reading matchups/event CSVs...")
+progress.progress(25, text="CSVs uploaded and loaded...")
 
-# ------------ COLUMN CHECKS ------------
+# ------------ REQUIRED COLUMN CHECKS ------------
 required_matchup_cols = [
     "team code", "game_date", "game_number", "mlb id", "player name",
     "batting order", "position", "weather", "time", "city", "stadium"
@@ -98,7 +98,7 @@ if missing:
     st.error(f"Missing required columns in Matchups CSV: {missing}")
     st.stop()
 
-# ------------ WEATHER LOOKUP (via matchups) ------------
+# ------------ WEATHER LOOKUP (from matchups) ------------
 def fetch_weather(city, date_str):
     try:
         api_key = st.secrets["weather"]["api_key"]
@@ -111,37 +111,33 @@ def fetch_weather(city, date_str):
         wind_mph = day.get("maxwind_mph", 7)
         return temp, humidity, wind_mph
     except Exception:
-        return 72, 55, 7  # fallback/defaults
+        return 72, 55, 7
 
-# Use city/date from matchups for all batters in a group
 city = matchups_df["city"].mode()[0]
 date_guess = pd.to_datetime(matchups_df["game_date"].mode()[0]).strftime("%Y-%m-%d")
 weather_temp, weather_humidity, weather_wind_mph = fetch_weather(city, date_guess)
-progress.progress(35, text="Weather loaded and merged...")
+progress.progress(35, text="Weather loaded...")
 
-# ------------ JOIN MATCHUPS + EVENT-LEVEL (Statcast) DATA ------------
-# - Assume event-level features keyed by `mlb id`
-# - Use only batters (exclude pitchers, eg. by position != 'SP' or numeric order 1-9)
-# - Deduplicate on mlb id
+# ------------ FILTER BATTERS (one row per starting lineup batter) ------------
 batters = matchups_df[
     (matchups_df["position"].astype(str).str.upper() != "SP") &
     (matchups_df["batting order"].astype(str).str.isnumeric())
 ].copy()
-
 batters["batter_id"] = batters["mlb id"]
 batters = batters.drop_duplicates(subset="batter_id")
 
-# Merge statcast event data (on mlb id)
-player_df = batters.merge(event_df, left_on="batter_id", right_on="batter_id", how="left")
-player_df["weather_temp"] = weather_temp
-player_df["weather_humidity"] = weather_humidity
-player_df["weather_wind_mph"] = weather_wind_mph
-progress.progress(55, text="Batters merged with event features...")
+# ------------ JOIN ALL PLAYER DATA (player-level, event-level) ------------
+merged = batters.merge(player_df, left_on="batter_id", right_on="batter_id", how="left", suffixes=('', '_player'))
+merged = merged.merge(event_df, left_on="batter_id", right_on="batter_id", how="left", suffixes=('', '_event'))
+merged["weather_temp"] = weather_temp
+merged["weather_humidity"] = weather_humidity
+merged["weather_wind_mph"] = weather_wind_mph
+progress.progress(55, text="Batters merged with features...")
 
 # ------------ FILL MISSING FEATURES WITH ZEROS ------------
 for col in LOGISTIC_WEIGHTS:
-    if col not in player_df.columns:
-        player_df[col] = 0
+    if col not in merged.columns:
+        merged[col] = 0
 progress.progress(65, text="Model features prepared...")
 
 # ------------ LOGIT CALCULATION ------------
@@ -151,9 +147,9 @@ def calc_hr_logit(row):
         score += wt * row.get(feat, 0)
     return score
 
-player_df["HR Logit Score"] = player_df.apply(calc_hr_logit, axis=1)
-player_df["HR Probability"] = 1 / (1 + np.exp(-player_df["HR Logit Score"]))
-progress.progress(80, text="Logistic scoring complete...")
+merged["HR Logit Score"] = merged.apply(calc_hr_logit, axis=1)
+merged["HR Probability"] = 1 / (1 + np.exp(-merged["HR Logit Score"]))
+progress.progress(80, text="Scoring complete...")
 
 # ------------ MLB PLAYER NAME LOOKUP BY MLB ID ------------
 @st.cache_data(ttl=86400)
@@ -173,17 +169,17 @@ def get_mlb_player_names(mlb_id_list):
             continue
     return out_map
 
-unique_ids = player_df["batter_id"].dropna().astype(int).unique().tolist()
+unique_ids = merged["batter_id"].dropna().astype(int).unique().tolist()
 name_map = get_mlb_player_names(unique_ids)
-player_df["Player"] = player_df["batter_id"].astype(int).astype(str).map(name_map).fillna(player_df["player name"])
-progress.progress(90, text="Player names resolved using MLB API...")
+merged["Player"] = merged["batter_id"].astype(int).astype(str).map(name_map).fillna(merged["player name"])
+progress.progress(90, text="Player names resolved...")
 
 # ------------ LEADERBOARD: ONE ROW PER BATTER ------------
-player_df = player_df.sort_values("HR Logit Score", ascending=False).reset_index(drop=True)
-player_df["Rank"] = np.arange(1, len(player_df) + 1)
+merged = merged.sort_values("HR Logit Score", ascending=False).reset_index(drop=True)
+merged["Rank"] = np.arange(1, len(merged) + 1)
 progress.progress(97, text="Leaderboard ranked...")
 
-# ------------ HIGHEST WEIGHTED FEATURES FOR EACH BATTER ------------
+# ------------ TOP FEATURE CONTRIBUTIONS ------------
 TOP_N_FEATS = 10
 def get_top_feats(row):
     feat_scores = []
@@ -196,24 +192,25 @@ def get_top_feats(row):
 
 progress.progress(100, text="Leaderboard complete! 🎉")
 
-st.success(f"Done! Leaderboard generated for {date_guess} ({city}) with {len(player_df)} batters.")
+st.success(f"Done! Leaderboard generated for {date_guess} ({city}) with {len(merged)} batters.")
 
 st.header("Predicted Home Run Leaderboard")
 leaderboard_cols = [
     "Rank", "Player", "batter_id", "HR Logit Score", "HR Probability",
     "weather_temp", "weather_humidity", "weather_wind_mph"
 ]
+# Add a few key features by default
 for col in ["iso_value", "hit_distance_sc", "pull_side", "launch_speed_angle", "B_pitch_pct_CH_5", "park_handed_hr_rate"]:
-    if col in player_df.columns and col not in leaderboard_cols:
+    if col in merged.columns and col not in leaderboard_cols:
         leaderboard_cols.append(col)
 
-st.dataframe(player_df[leaderboard_cols].head(15), use_container_width=True)
+st.dataframe(merged[leaderboard_cols].head(15), use_container_width=True)
 st.caption("Sorted by HR Logit Score (most predictive for home runs). Player names are from MLB.com API.")
 
 # ------------ SHOW TOP FEATURES PER PLAYER ------------
 st.header("🔍 Top Features by Contribution (per player)")
 with st.expander("Show Top Weighted Features for Each Player in Leaderboard"):
-    for idx, row in player_df.head(15).iterrows():
+    for idx, row in merged.head(15).iterrows():
         st.subheader(f"{int(row['Rank'])}. {row['Player']} ({row['batter_id']})")
         feat_scores = get_top_feats(row)
         feat_table = pd.DataFrame(feat_scores, columns=["Feature", "Value", "Weight", "Score Contribution"])
@@ -223,5 +220,3 @@ with st.expander("Show Top Weighted Features for Each Player in Leaderboard"):
 st.caption(
     "• Top features are shown by largest score impact (weight × value). Logistic score determines probability of HR. "
     "Upload new CSVs to refresh leaderboard."
-)
-    
