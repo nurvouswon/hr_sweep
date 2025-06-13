@@ -93,7 +93,7 @@ def fetch_weather(city, date_str):
         url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={city}&dt={date_str}"
         resp = requests.get(url, timeout=7)
         data = resp.json()
-day = data.get("forecast", {}).get("forecastday", [{}])[0].get("day", {})
+    day = data.get("forecast", {}).get("forecastday", [{}])[0].get("day", {})
         temp = day.get("avgtemp_f", 72)
         humidity = day.get("avghumidity", 55)
         wind_mph = day.get("maxwind_mph", 7)
