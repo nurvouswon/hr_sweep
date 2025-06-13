@@ -220,3 +220,4 @@ with st.expander("Show Top Weighted Features for Each Player in Leaderboard"):
 st.caption(
     "• Top features are shown by largest score impact (weight × value). Logistic score determines probability of HR. "
     "Upload new CSVs to refresh leaderboard."
+)
