@@ -203,3 +203,79 @@ st.markdown("""
 - Tab 1: Upload BOTH today's lineups/matchups and historical event-level file, download merged file for prediction.
 - Tab 2: Upload event-level files, run bot, check full diagnostics if features are missing!
 """)
+# ======================
+# === FULL AUDIT REPORT
+# ======================
+import io
+
+st.markdown("---")
+st.header("🔍 Full Audit Report: Model, Data, and Features")
+
+if uploaded_train is not None and uploaded_live is not None:
+
+    st.subheader("1️⃣ Feature Set Alignment")
+    st.write(f"Model features used ({len(model_features)}): {model_features}")
+    features_train = set(train_df.columns)
+    features_live = set(live_df.columns)
+    missing_from_live = [f for f in model_features if f not in live_df.columns]
+    missing_from_train = [f for f in model_features if f not in train_df.columns]
+    st.text(f"Features in history but missing from live: {missing_from_live}")
+    st.text(f"Features in live but missing from history: {missing_from_train}")
+
+    st.subheader("2️⃣ Per-Feature Value Counts & Null Rates")
+    audit_stats = []
+    for col in model_features:
+        tr_unique = train_df[col].nunique() if col in train_df else None
+        tr_null = train_df[col].isna().sum() if col in train_df else None
+        lv_unique = live_df[col].nunique() if col in live_df else None
+        lv_null = live_df[col].isna().sum() if col in live_df else None
+        audit_stats.append({
+            "feature": col,
+            "train_unique": tr_unique,
+            "train_nulls": tr_null,
+            "live_unique": lv_unique,
+            "live_nulls": lv_null
+        })
+    audit_df = pd.DataFrame(audit_stats)
+    st.dataframe(audit_df)
+    st.download_button(
+        "⬇️ Download Audit Table (CSV)",
+        data=audit_df.to_csv(index=False),
+        file_name="hrbot_audit_table.csv"
+    )
+
+    st.subheader("3️⃣ Example Rows")
+    st.write("**Training sample:**")
+    st.dataframe(train_df[model_features + (['hr_outcome'] if 'hr_outcome' in train_df else [])].head(3))
+    st.write("**Live sample:**")
+    st.dataframe(live_df[model_features].head(3))
+
+    st.subheader("4️⃣ Prediction Probabilities (Distribution)")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    ax.hist(live_df['xgb_prob'], bins=30, alpha=0.7)
+    ax.set_title("Predicted HR Probabilities (Live/Today)")
+    ax.set_xlabel("HR Probability")
+    ax.set_ylabel("Count")
+    st.pyplot(fig)
+
+    # Downloadable text audit
+    audit_text = io.StringIO()
+    print("MLB HR Bot Full Audit Report", file=audit_text)
+    print("\n== Model Features Used ==", file=audit_text)
+    print(model_features, file=audit_text)
+    print("\n== Features in History but Missing from Live ==", file=audit_text)
+    print(missing_from_live, file=audit_text)
+    print("\n== Features in Live but Missing from History ==", file=audit_text)
+    print(missing_from_train, file=audit_text)
+    print("\n== Feature Stats ==", file=audit_text)
+    print(audit_df.to_string(), file=audit_text)
+    print("\n== Training Sample ==", file=audit_text)
+    print(train_df[model_features].head(3).to_string(), file=audit_text)
+    print("\n== Live Sample ==", file=audit_text)
+    print(live_df[model_features].head(3).to_string(), file=audit_text)
+    st.download_button(
+        "⬇️ Download Full Audit Report (TXT)",
+        data=audit_text.getvalue(),
+        file_name="hrbot_full_audit_report.txt"
+    )
