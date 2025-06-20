@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import xgboost as xgb
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="MLB HR Bot Live Predictor", layout="wide")
-
 st.title("MLB HR Bot Live Predictor (No Hindsight Bias)")
 
 st.markdown("""
@@ -54,7 +54,7 @@ with col2:
 with col3:
     threshold_step = st.number_input("Threshold Step", value=0.01, min_value=0.01, max_value=0.10, step=0.01)
 
-predict_btn = st.button("🚀 Generate Today's HR Bot Picks")
+predict_btn = st.button("🚀 Generate Today's HR Bot Picks & Diagnostics")
 
 if predict_btn:
     if uploaded_train is None or uploaded_live is None:
@@ -62,7 +62,6 @@ if predict_btn:
         st.stop()
 
     with st.spinner("Processing..."):
-
         train_df = pd.read_csv(uploaded_train)
         live_df = pd.read_csv(uploaded_live)
 
@@ -79,30 +78,85 @@ if predict_btn:
             numeric_features.remove('hr_outcome')
         model_features = [f for f in numeric_features if f in live_df.columns]
 
+        # === Diagnostics Panel: Show Features Used ===
+        st.markdown("### 🔍 Diagnostics & Audit Panel")
+        st.write(f"**Number of features used:** {len(model_features)}")
+        st.write(f"**Model features:** {model_features}")
+
+        # Missing values check (for audit)
+        nulls_report = pd.DataFrame({
+            'nulls_train': train_df[model_features].isnull().sum(),
+            'nulls_live': live_df[model_features].isnull().sum()
+        })
+        st.markdown("#### Null Values in Features")
+        st.dataframe(nulls_report)
+
+        # Value distributions (train/live) for each feature
+        st.markdown("#### Feature Value Ranges (Train/Live)")
+        feat_ranges = []
+        for col in model_features:
+            feat_ranges.append({
+                "feature": col,
+                "train_min": np.nanmin(train_df[col]),
+                "train_max": np.nanmax(train_df[col]),
+                "train_mean": np.nanmean(train_df[col]),
+                "live_min": np.nanmin(live_df[col]),
+                "live_max": np.nanmax(live_df[col]),
+                "live_mean": np.nanmean(live_df[col]),
+            })
+        feat_ranges_df = pd.DataFrame(feat_ranges)
+        st.dataframe(feat_ranges_df)
+
+        # === XGBoost Model Fit ===
         train_X = train_df[model_features].fillna(0)
         train_y = train_df['hr_outcome'].astype(int)
 
-        # === Train XGBoost Model ===
-        xgb_clf = xgb.XGBClassifier(n_estimators=50, max_depth=4, learning_rate=0.08,
-                                    subsample=0.8, colsample_bytree=0.8, eval_metric='logloss', n_jobs=-1, use_label_encoder=False)
+        xgb_clf = xgb.XGBClassifier(
+            n_estimators=50, max_depth=4, learning_rate=0.08,
+            subsample=0.8, colsample_bytree=0.8, eval_metric='logloss', n_jobs=-1, use_label_encoder=False
+        )
         xgb_clf.fit(train_X, train_y)
         live_X = live_df[model_features].fillna(0)
         live_df['xgb_prob'] = xgb_clf.predict_proba(live_X)[:, 1]
 
+        # === Feature Importance Audit ===
+        importances = xgb_clf.feature_importances_
+        fi_df = pd.DataFrame({'feature': model_features, 'importance': importances}).sort_values('importance', ascending=False)
+        st.markdown("#### XGBoost Feature Importances")
+        st.dataframe(fi_df.head(25))
+        st.bar_chart(fi_df.set_index('feature').head(15))
+
+        # === Score Distribution ===
+        st.markdown("#### Predicted HR Probability Distribution (All Batters Today)")
+        fig, ax = plt.subplots()
+        ax.hist(live_df['xgb_prob'], bins=30, edgecolor='black')
+        ax.set_xlabel("Predicted HR Probability")
+        ax.set_ylabel("Number of Batters")
+        st.pyplot(fig)
+
+        st.write(f"**Summary Stats (Today's Probabilities):**")
+        st.write(live_df['xgb_prob'].describe())
+
         # === Picks Per Threshold ===
         results = []
+        audit_rows = []
         thresholds = np.arange(threshold_min, threshold_max+0.001, threshold_step)
         for thresh in thresholds:
             mask = live_df['xgb_prob'] >= thresh
-            picked = live_df.loc[mask]
+            picked = live_df.loc[mask].copy()
             results.append({
                 'threshold': round(thresh, 3),
                 'num_picks': int(mask.sum()),
                 'picked_players': list(picked.get('batter_name', picked.get('player name', picked.get('batter_id'))))
             })
-
-        # === Output Table ===
+            # For audit: Store all rows and scores for this threshold
+            for _, row in picked.iterrows():
+                audit_row = row.to_dict()
+                audit_row['threshold'] = thresh
+                audit_row['picked'] = True
+                audit_rows.append(audit_row)
         picks_df = pd.DataFrame(results)
+
         st.header("Results: HR Bot Picks by Threshold")
         st.dataframe(picks_df)
         st.download_button(
@@ -111,11 +165,25 @@ if predict_btn:
             file_name="today_hr_bot_picks_by_threshold.csv"
         )
 
+        # === Per-batter audit: Downloadable full file of all batters, scores, features, and pick flag
+        st.markdown("### 📝 Downloadable Full Audit/Diagnostics CSV")
+        full_audit = live_df.copy()
+        full_audit['picked_any_threshold'] = False
+        for thresh in thresholds:
+            full_audit[f"pick_{round(thresh,3)}"] = full_audit['xgb_prob'] >= thresh
+            full_audit['picked_any_threshold'] |= full_audit['xgb_prob'] >= thresh
+        st.dataframe(full_audit.head(20))
+        st.download_button(
+            "⬇️ Download Full Audit CSV (All Batters/All Features/All Scores)",
+            data=full_audit.to_csv(index=False),
+            file_name="full_batter_scoring_audit.csv"
+        )
+
         st.markdown("#### All Picks (Threshold Sweep):")
         for _, row in picks_df.iterrows():
             st.write(f"**Threshold {row['threshold']}**: {row['picked_players']}")
 
-        st.success("Done! These are the official HR bot picks for today at each threshold.")
+        st.success("Done! These are the official HR bot picks for today at each threshold. **Audit and diagnostics now available.**")
 
 st.markdown("""
 ---
