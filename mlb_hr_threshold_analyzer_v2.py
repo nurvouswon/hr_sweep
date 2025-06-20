@@ -3,10 +3,11 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import precision_score, recall_score, f1_score
 import matplotlib.pyplot as plt
+import io
 
-st.set_page_config("MLB HR Model Analyzer", layout="wide")
-st.title("⚾ MLB HR Model Threshold Analyzer & Leaderboard App")
-st.caption("Upload event-level CSV with `hr_outcome`, `logit_prob`, `xgb_prob`. Get optimal threshold, daily & player leaderboards, plots, downloads.")
+st.set_page_config("MLB HR Model Threshold Analyzer", layout="wide")
+st.title("⚾ MLB HR Model Threshold Analyzer & Leaderboard App (All-in-One Output)")
+st.caption("Upload event-level CSV with `hr_outcome`, `logit_prob`, `xgb_prob`. App finds optimal threshold, runs leaderboards, gives you a SINGLE combined CSV to upload for analysis.")
 
 def threshold_sweep(df, prob_col, true_col='hr_outcome', t_min=0.01, t_max=0.20, step=0.01):
     thresholds = np.arange(t_min, t_max+step, step)
@@ -82,6 +83,19 @@ def player_leaderboard(df, prob_col, threshold, name_col='batter_name', true_col
     leaderboard = leaderboard.sort_values('picked_hr', ascending=False)
     return leaderboard
 
+def combine_results_to_csv(sweep_df, backtests, playerlbs, model_name):
+    output = io.StringIO()
+    # Threshold Sweep
+    output.write(f"### {model_name} - Threshold Sweep\n")
+    sweep_df.to_csv(output, index=False)
+    # For each threshold
+    for thr, daily_bt in backtests.items():
+        output.write(f"\n### {model_name} - Daily Backtest @ threshold={thr:.3f}\n")
+        daily_bt.to_csv(output, index=False)
+        output.write(f"\n### {model_name} - Player Leaderboard @ threshold={thr:.3f}\n")
+        playerlbs[thr].to_csv(output, index=False)
+    return output.getvalue()
+
 uploaded = st.file_uploader("Upload Scored Event-Level CSV", type=["csv"])
 if uploaded:
     df = pd.read_csv(uploaded)
@@ -92,14 +106,12 @@ if uploaded:
         st.error("Your file must contain at least one model probability column named 'logit_prob' or 'xgb_prob'.")
         st.stop()
 
-    # Sweep and show results for each available model
     for prob_col in available_models:
         st.header(f"Model: `{prob_col}`")
         sweep_df, best_thr, best_row = threshold_sweep(df, prob_col)
         st.write("#### Threshold Sweep Table (click to expand)")
         st.dataframe(sweep_df.style.format(precision=3), use_container_width=True)
         st.write(f"**Optimal threshold (F1):** `{best_thr}` — F1 = {best_row['f1_score']:.3f}, Precision = {best_row['precision']:.3f}, Recall = {best_row['recall']:.3f}, Picks = {best_row['picks']}")
-        st.download_button(f"⬇️ Download Sweep Results for {prob_col}", sweep_df.to_csv(index=False), file_name=f"sweep_{prob_col}.csv")
 
         # Plots
         st.subheader("Threshold Sweep Plots")
@@ -113,22 +125,23 @@ if uploaded:
         ax.set_title(f"Threshold vs. Precision/Recall/F1 for {prob_col}")
         st.pyplot(fig)
 
-        # Pick thresholds to run backtest
+        # For one CSV download, gather all backtests/leaderboards
         thresholds_to_run = [best_thr, 0.10, 0.13]
         thresholds_to_run = sorted(set(thresholds_to_run))
-        st.write(f"#### Full-Season Backtest at Thresholds: {', '.join([str(t) for t in thresholds_to_run])}")
+        backtests = {}
+        playerlbs = {}
 
         for thr in thresholds_to_run:
             st.subheader(f"Backtest & Leaderboards at threshold = {thr:.3f} (model `{prob_col}`)")
             daily_bt = daily_backtest(df, prob_col, thr)
             st.markdown("##### Daily Summary")
             st.dataframe(daily_bt[['date', 'picks', 'TP', 'FP', 'FN', 'precision', 'recall', 'f1_score']].style.format(precision=3), use_container_width=True)
-            st.download_button(f"⬇️ Download Daily Backtest {prob_col} @ {thr:.3f}", daily_bt.to_csv(index=False), file_name=f"backtest_{prob_col}_thr{thr:.3f}.csv")
+            backtests[thr] = daily_bt
 
             st.markdown("##### Per-Player HR Leaderboard")
             p_lb = player_leaderboard(df, prob_col, thr)
             st.dataframe(p_lb.style.format(precision=3), use_container_width=True)
-            st.download_button(f"⬇️ Download Player Leaderboard {prob_col} @ {thr:.3f}", p_lb.to_csv(index=False), file_name=f"player_leaderboard_{prob_col}_thr{thr:.3f}.csv")
+            playerlbs[thr] = p_lb
 
             # Player summary plot
             top_picks = p_lb.head(20)
@@ -141,7 +154,11 @@ if uploaded:
             plt.tight_layout()
             st.pyplot(fig2)
 
-    st.info("Done! Download sweep, daily and player leaderboard CSVs, then upload here for expert analysis and insights.")
+        # COMBINED CSV DOWNLOAD
+        combined_csv = combine_results_to_csv(sweep_df, backtests, playerlbs, prob_col)
+        st.download_button(f"⬇️ Download ALL Results for {prob_col}", combined_csv, file_name=f"all_results_{prob_col}.csv")
+
+    st.info("All results in one CSV per model. Upload here for deep analysis!")
 
 else:
     st.info("Please upload a CSV with columns like `hr_outcome`, `logit_prob`, and/or `xgb_prob`.")
