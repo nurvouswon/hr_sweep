@@ -1,11 +1,19 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import xgboost as xgb
 from datetime import datetime, timedelta
+import xgboost as xgb
 
 st.set_page_config(page_title="MLB HR Bot Live Predictor", layout="wide")
+
 st.title("MLB HR Bot Live Predictor (No Hindsight Bias)")
+
+tab1, tab2 = st.tabs(["1️⃣ Fetch & Feature Engineer Data", "2️⃣ Upload & Analyze"])
+
+# ---- UTILITY FUNCTIONS ----
+
+def dedup_columns(df):
+    return df.loc[:, ~df.columns.duplicated()]
 
 def robust_numeric_columns(df):
     cols = []
@@ -25,257 +33,208 @@ def clean_id(x):
     except Exception:
         return str(x).strip()
 
-def dedup_columns(df):
-    return df.loc[:, ~df.columns.duplicated()]
+def get_all_stat_rolling_cols():
+    roll_base = ['launch_speed', 'launch_angle', 'hit_distance_sc', 'woba_value', 'release_speed',
+                 'release_spin_rate', 'spin_axis', 'pfx_x', 'pfx_z']
+    windows = [3, 5, 7, 14]
+    cols = []
+    for prefix in ['B_', 'P_']:
+        for base in roll_base:
+            for w in windows:
+                cols.append(f"{prefix}{base}_{w}")
+    for typ in ['B_vsP_hand_HR_', 'P_vsB_hand_HR_', 'B_pitchtype_HR_', 'P_pitchtype_HR_']:
+        for w in windows:
+            cols.append(f"{typ}{w}")
+    for w in [7, 14, 30]:
+        cols.append(f"park_hand_HR_{w}")
+    cols += [
+        'hard_hit_rate_20', 'sweet_spot_rate_20', 'relative_wind_angle',
+        'relative_wind_sin', 'relative_wind_cos'
+    ]
+    return cols
 
-# -- TAB SETUP --
-tab1, tab2 = st.tabs(["1️⃣ Fetch & Feature Engineer Data", "2️⃣ Upload & Analyze"])
+# ------------------------- TAB 1: GENERATE TODAY CSV -------------------------
 
-# ===================== TAB 1 =====================
 with tab1:
-    st.header("Fetch Statcast Data & Generate Features")
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", value=datetime.today() - timedelta(days=7))
-    with col2:
-        end_date = st.date_input("End Date", value=datetime.today())
+    st.header("🔄 Generate Today's Batter Event-Level CSV (with merged rolling/stat features from history)")
 
-    st.markdown("##### Upload Today's Lineups/Matchups CSV (Required: mlb_id/batter_id, player_name, etc)")
-    uploaded_lineups = st.file_uploader("Upload Today's Lineups/Matchups CSV", type="csv", key="todaylineup")
-    st.markdown("##### Upload Historical Event-Level CSV (must have all rolling/stat features, 'batter_id', and 'game_date')")
-    uploaded_hist_ev = st.file_uploader("Upload Historical Event-Level CSV", type="csv", key="eventlevel")
+    uploaded_today_lineups = st.file_uploader(
+        "Upload Today's Lineups/Matchups CSV (Required: must contain mlb_id/batter_id, player_name, etc)",
+        type="csv", key="todaylineup"
+    )
+    uploaded_sample_hist = st.file_uploader(
+        "Upload Historical Event-Level CSV (must have all rolling/stat features, 'batter_id', and 'game_date')",
+        type="csv", key="samplehist"
+    )
 
-    if uploaded_lineups is not None and uploaded_hist_ev is not None:
-        # -- Load data --
-        today_lineups = pd.read_csv(uploaded_lineups)
-        hist = pd.read_csv(uploaded_hist_ev)
-        # Standardize column names
+    if uploaded_today_lineups and uploaded_sample_hist:
+        today_lineups = pd.read_csv(uploaded_today_lineups)
+        hist = pd.read_csv(uploaded_sample_hist)
+        st.success(f"Loaded {len(today_lineups)} lineups, {len(hist)} historical events.")
+
+        # Normalize col names
         today_lineups.columns = [c.strip().lower().replace(" ", "_") for c in today_lineups.columns]
         hist.columns = [c.strip().lower().replace(" ", "_") for c in hist.columns]
-        # Find merge id
+
         id_col = "mlb_id" if "mlb_id" in today_lineups.columns else "batter_id"
-        if id_col not in today_lineups.columns:
-            st.error("No mlb_id or batter_id column in today's lineups.")
+        if id_col not in today_lineups.columns or "batter_id" not in hist.columns:
+            st.error("Both files must have 'mlb_id' or 'batter_id'.")
             st.stop()
+
         today_lineups[id_col] = today_lineups[id_col].astype(str)
-        if "batter_id" not in hist.columns:
-            st.error("No batter_id column in event-level history.")
-            st.stop()
-        hist["batter_id"] = hist["batter_id"].astype(str)
-        # Rolling/stat feature columns in history (include all B_, P_, *_rate_20, park_hand_HR, hand splits, pitchtype splits)
-        rolling_cols = [c for c in hist.columns if (
-            c.startswith('b_') or c.startswith('p_') or c.endswith('_rate_20') or
-            c.startswith('park_hand_hr_') or c.startswith('b_vsp_hand_hr_') or c.startswith('p_vsb_hand_hr_') or
-            c.startswith('b_pitchtype_hr_') or c.startswith('p_pitchtype_hr_')
-        )]
-        # Use latest event per batter
-        if "game_date" in hist.columns:
+        hist['batter_id'] = hist['batter_id'].astype(str)
+
+        # Get last rolling/stat features for each batter
+        if 'game_date' in hist.columns:
             hist['game_date'] = pd.to_datetime(hist['game_date'], errors='coerce')
-            last_feats = hist.sort_values('game_date').groupby('batter_id').tail(1)
-        else:
-            last_feats = hist.groupby('batter_id').tail(1)
+        rolling_cols = [c for c in hist.columns if (
+            c.startswith('b_') or c.startswith('p_') or 
+            c.startswith('park_hand_hr_') or 
+            c.endswith('_rate_20') or 
+            c.startswith('b_vsp_hand_hr_') or 
+            c.startswith('p_vsb_hand_hr_') or 
+            c.startswith('b_pitchtype_hr_') or 
+            c.startswith('p_pitchtype_hr_')
+        )]
+
+        last_feats = hist.sort_values('game_date').groupby('batter_id').tail(1)
         last_feats = last_feats[['batter_id'] + rolling_cols].copy()
-        st.info(f"Found {len(last_feats)} batters with latest rolling/stat features.")
-        # Merge to lineups
         merged = today_lineups.merge(last_feats, left_on=id_col, right_on='batter_id', how='left', suffixes=('', '_roll'))
-        # --- FORCE all rolling/stat columns from history to exist in today's merged, fill with NaN if missing
-        for c in rolling_cols:
-            if c not in merged.columns:
-                merged[c] = np.nan
-        # Optionally fill missing statcast context columns
-        context_cols = ['city', 'park', 'stadium', 'time', 'temp', 'wind_mph', 'wind_dir', 'humidity', 'condition']
-        for col in context_cols:
-            if col not in merged.columns:
-                merged[col] = None
+
         st.write("Sample of Today's Event-Level CSV (with merged rolling/stat features):")
-        st.dataframe(merged.head(20))
-        # --- Diagnostics ---
-        # Null report for rolling/stat features
+        st.dataframe(merged.head(30))
+        null_report = merged[rolling_cols].isnull().sum().sort_values(ascending=False)
         st.markdown("#### Null report for rolling/stat features in output:")
-        roll_diag = merged[rolling_cols].isnull().sum().sort_values(ascending=False)
-        st.text(roll_diag.to_string())
-        # Weather/context diagnostics
-        st.markdown("#### Weather/context columns in output after merge:")
-        st.dataframe(merged[context_cols].drop_duplicates())
-        # Column order diagnostics (optional)
-        sample_ev_file = st.file_uploader("Upload a Sample Historical Event-Level CSV (to align column order, optional)", type="csv", key="samplecolalign")
-        if sample_ev_file:
-            ref_ev = pd.read_csv(sample_ev_file, nrows=1)
-            hist_cols = [c for c in ref_ev.columns if not c.lower().startswith("unnamed")]
-            extra_cols = [c for c in merged.columns if c not in hist_cols]
-            merged = merged.reindex(columns=hist_cols + extra_cols)
-        # Download today's event-level CSV
-        st.success(f"Created today's event-level file: {len(merged)} batters. All rolling/stat columns now present (where available).")
+        st.text(null_report.to_string())
+
+        # Download merged output
+        merged_out_cols = [c for c in merged.columns if not c.startswith("unnamed")]
         st.download_button(
             "⬇️ Download Today's Event-Level CSV (for Prediction App, with merged features)",
-            data=merged.to_csv(index=False),
+            data=merged[merged_out_cols].to_csv(index=False),
             file_name=f"event_level_today_full_{datetime.now().strftime('%Y_%m_%d')}.csv"
         )
-        # Extra diagnostics: show which features will be used for modeling
-        st.markdown("#### Diagnostics: Columns in today's and historical event-level file:")
-        st.write("Today's event-level columns:", merged.columns.tolist())
-        st.write("History event-level columns:", hist.columns.tolist())
+        st.info("Tab 1 complete. Use this file in Tab 2 below.")
 
-# ===================== TAB 2 =====================
+# ---------------------- TAB 2: PREDICT & AUDIT -------------------------------
+
 with tab2:
     st.header("Upload Event-Level CSVs & Run Model")
     uploaded_train = st.file_uploader("Upload Training Event-Level CSV (with hr_outcome)", type="csv", key="train_ev")
     uploaded_live = st.file_uploader("Upload Today's Event-Level CSV (with merged features, NO hr_outcome)", type="csv", key="live_ev")
-    # Threshold controls
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        threshold_min = st.number_input("Min HR Prob Threshold", value=0.13, min_value=0.01, max_value=0.5, step=0.01)
+        threshold_min = st.number_input("Min HR Prob Threshold", value=0.01, min_value=0.01, max_value=0.5, step=0.01)
     with col2:
-        threshold_max = st.number_input("Max HR Prob Threshold", value=0.20, min_value=0.01, max_value=0.5, step=0.01)
+        threshold_max = st.number_input("Max HR Prob Threshold", value=0.13, min_value=0.01, max_value=0.5, step=0.01)
     with col3:
         threshold_step = st.number_input("Threshold Step", value=0.01, min_value=0.01, max_value=0.10, step=0.01)
-    predict_btn = st.button("🚀 Generate Today's HR Bot Picks")
+
+    predict_btn = st.button("🚀 Run HR Bot Picks and Audit")
+
     if predict_btn:
         if uploaded_train is None or uploaded_live is None:
             st.warning("Please upload BOTH files (historical and today's event-level CSV).")
             st.stop()
-        with st.spinner("Processing..."):
-            train_df = pd.read_csv(uploaded_train)
-            live_df = pd.read_csv(uploaded_live)
-            # --- Standardize col names
-            train_df.columns = [c.strip().lower().replace(" ", "_") for c in train_df.columns]
-            live_df.columns = [c.strip().lower().replace(" ", "_") for c in live_df.columns]
-            # --- Force all train numeric features into live, fill with NaN if missing
-            for c in train_df.columns:
-                if c not in live_df.columns:
-                    live_df[c] = np.nan
-            # Prep IDs
-            for df in [train_df, live_df]:
-                if 'batter_id' in df.columns:
-                    df['batter_id'] = df['batter_id'].apply(clean_id)
-                elif 'batter' in df.columns:
-                    df['batter_id'] = df['batter'].apply(clean_id)
-            # Model features: only intersection of robust numerics in both, >1 unique
-            numeric_features = robust_numeric_columns(train_df)
-            if 'hr_outcome' in numeric_features:
-                numeric_features.remove('hr_outcome')
-            model_features = [f for f in numeric_features if f in live_df.columns and live_df[f].nunique() > 1 and train_df[f].nunique() > 1]
-            st.info(f"Model features used ({len(model_features)}): {model_features}")
-            if len(model_features) == 0:
-                st.error("No usable features found in BOTH files. Check diagnostics in Tab 1.")
-                st.stop()
-            # Diagnostics: show columns missing from either file
-            st.write("Features in history but missing from live:", [c for c in numeric_features if c not in live_df.columns])
-            st.write("Features in live but missing from history:", [c for c in live_df.columns if c not in numeric_features])
-            # Show columns with only 1 unique value (single-valued)
-            st.write("Features with only one unique value (train):", {c: train_df[c].nunique() for c in train_df.columns if train_df[c].nunique() == 1})
-            st.write("Features with only one unique value (live):", {c: live_df[c].nunique() for c in live_df.columns if live_df[c].nunique() == 1})
-            # --- Train XGBoost Model
-            train_X = train_df[model_features].fillna(0)
-            train_y = train_df['hr_outcome'].astype(int)
-            xgb_clf = xgb.XGBClassifier(n_estimators=50, max_depth=4, learning_rate=0.08, subsample=0.8, colsample_bytree=0.8, eval_metric='logloss', n_jobs=-1, use_label_encoder=False)
-            xgb_clf.fit(train_X, train_y)
-            live_X = live_df[model_features].fillna(0)
-            live_df['xgb_prob'] = xgb_clf.predict_proba(live_X)[:, 1]
-            # Picks Per Threshold
-            results = []
-            thresholds = np.arange(threshold_min, threshold_max+0.001, threshold_step)
-            for thresh in thresholds:
-                mask = live_df['xgb_prob'] >= thresh
-                picked = live_df.loc[mask]
-                player_col = 'player_name' if 'player_name' in picked.columns else ('batter_id' if 'batter_id' in picked.columns else picked.columns[0])
-                results.append({
-                    'threshold': round(thresh, 3),
-                    'num_picks': int(mask.sum()),
-                    'picked_players': list(picked[player_col])
-                })
-            picks_df = pd.DataFrame(results)
-            st.header("Results: HR Bot Picks by Threshold")
-            st.dataframe(picks_df)
-            st.download_button(
-                "⬇️ Download Picks by Threshold (CSV)",
-                data=picks_df.to_csv(index=False),
-                file_name="today_hr_bot_picks_by_threshold.csv"
-            )
-            st.markdown("#### All Picks (Threshold Sweep):")
-            for _, row in picks_df.iterrows():
-                st.write(f"**Threshold {row['threshold']}**: {row['picked_players']}")
-            st.success("Done! These are the official HR bot picks for today at each threshold.")
 
-st.markdown("""
+        train_df = pd.read_csv(uploaded_train)
+        live_df = pd.read_csv(uploaded_live)
+
+        # Prep IDs if needed
+        for df in [train_df, live_df]:
+            if 'batter_id' in df.columns:
+                df['batter_id'] = df['batter_id'].apply(clean_id)
+            elif 'batter' in df.columns:
+                df['batter_id'] = df['batter'].apply(clean_id)
+
+        # Features
+        numeric_features = robust_numeric_columns(train_df)
+        if 'hr_outcome' in numeric_features:
+            numeric_features.remove('hr_outcome')
+        model_features = [f for f in numeric_features if f in live_df.columns]
+
+        train_X = train_df[model_features].fillna(0)
+        train_y = train_df['hr_outcome'].astype(int)
+
+        # Train XGBoost
+        xgb_clf = xgb.XGBClassifier(n_estimators=50, max_depth=4, learning_rate=0.08,
+                                    subsample=0.8, colsample_bytree=0.8, eval_metric='logloss', n_jobs=-1, use_label_encoder=False)
+        xgb_clf.fit(train_X, train_y)
+        live_X = live_df[model_features].fillna(0)
+        live_df['xgb_prob'] = xgb_clf.predict_proba(live_X)[:, 1]
+
+        # Picks per threshold
+        results = []
+        thresholds = np.arange(threshold_min, threshold_max+0.001, threshold_step)
+        for thresh in thresholds:
+            mask = live_df['xgb_prob'] >= thresh
+            picked = live_df.loc[mask]
+            display_name_col = next((col for col in ['player_name', 'batter_name', 'batter_id'] if col in picked.columns), picked.columns[0])
+            results.append({
+                'threshold': round(thresh, 3),
+                'num_picks': int(mask.sum()),
+                'picked_players': list(picked[display_name_col])
+            })
+
+        picks_df = pd.DataFrame(results)
+        st.header("Results: HR Bot Picks by Threshold")
+        st.dataframe(picks_df)
+        st.download_button(
+            "⬇️ Download Picks by Threshold (CSV)",
+            data=picks_df.to_csv(index=False),
+            file_name="today_hr_bot_picks_by_threshold.csv"
+        )
+        st.markdown("#### All Picks (Threshold Sweep):")
+        for _, row in picks_df.iterrows():
+            st.write(f"**Threshold {row['threshold']}**: {row['picked_players']}")
+
+        # ============= FULL AUDIT REPORT ==============
+        st.markdown("---")
+        st.header("🔍 Full Audit Report: Model, Data, Features, and Nulls")
+
+        # Features Used
+        st.write(f"Model features used ({len(model_features)}): {model_features}")
+
+        # Missing features diagnostics
+        hist_cols = set(train_df.columns)
+        live_cols = set(live_df.columns)
+        missing_from_live = [c for c in model_features if c not in live_cols]
+        missing_from_train = [c for c in live_cols if c not in hist_cols]
+        st.write("**Features in history but missing from live:**")
+        st.write(missing_from_live)
+        st.write("**Features in live but missing from history:**")
+        st.write(missing_from_train)
+
+        # Features with only one unique value
+        st.write("**Features with only one unique value (train):**")
+        st.write({c: train_df[c].nunique() for c in train_df.columns if train_df[c].nunique() == 1})
+        st.write("**Features with only one unique value (live):**")
+        st.write({c: live_df[c].nunique() for c in live_df.columns if live_df[c].nunique() == 1})
+
+        # Features with nulls
+        st.write("**Null count for model features (train):**")
+        st.write(train_df[model_features].isnull().sum().sort_values(ascending=False))
+        st.write("**Null count for model features (live):**")
+        st.write(live_df[model_features].isnull().sum().sort_values(ascending=False))
+
+        # Stats: unique values, sample, value range
+        st.write("**Sample (train):**")
+        st.dataframe(train_df[model_features].head(20))
+        st.write("**Sample (live):**")
+        st.dataframe(live_df[model_features].head(20))
+
+        # Distributions/ranges
+        st.write("**Feature ranges (train):**")
+        st.write(train_df[model_features].agg(['min', 'max', 'mean']).T)
+        st.write("**Feature ranges (live):**")
+        st.write(live_df[model_features].agg(['min', 'max', 'mean']).T)
+
+        st.success("Audit complete! Check all above sections for detailed pipeline integrity.")
+
+        st.markdown("""
 ---
-**Instructions:**  
+**Instructions:**
 - Tab 1: Upload BOTH today's lineups/matchups and historical event-level file, download merged file for prediction.
 - Tab 2: Upload event-level files, run bot, check full diagnostics if features are missing!
 """)
-# ======================
-# === FULL AUDIT REPORT
-# ======================
-import io
-
-st.markdown("---")
-st.header("🔍 Full Audit Report: Model, Data, and Features")
-
-if uploaded_train is not None and uploaded_live is not None:
-
-    st.subheader("1️⃣ Feature Set Alignment")
-    st.write(f"Model features used ({len(model_features)}): {model_features}")
-    features_train = set(train_df.columns)
-    features_live = set(live_df.columns)
-    missing_from_live = [f for f in model_features if f not in live_df.columns]
-    missing_from_train = [f for f in model_features if f not in train_df.columns]
-    st.text(f"Features in history but missing from live: {missing_from_live}")
-    st.text(f"Features in live but missing from history: {missing_from_train}")
-
-    st.subheader("2️⃣ Per-Feature Value Counts & Null Rates")
-    audit_stats = []
-    for col in model_features:
-        tr_unique = train_df[col].nunique() if col in train_df else None
-        tr_null = train_df[col].isna().sum() if col in train_df else None
-        lv_unique = live_df[col].nunique() if col in live_df else None
-        lv_null = live_df[col].isna().sum() if col in live_df else None
-        audit_stats.append({
-            "feature": col,
-            "train_unique": tr_unique,
-            "train_nulls": tr_null,
-            "live_unique": lv_unique,
-            "live_nulls": lv_null
-        })
-    audit_df = pd.DataFrame(audit_stats)
-    st.dataframe(audit_df)
-    st.download_button(
-        "⬇️ Download Audit Table (CSV)",
-        data=audit_df.to_csv(index=False),
-        file_name="hrbot_audit_table.csv"
-    )
-
-    st.subheader("3️⃣ Example Rows")
-    st.write("**Training sample:**")
-    st.dataframe(train_df[model_features + (['hr_outcome'] if 'hr_outcome' in train_df else [])].head(3))
-    st.write("**Live sample:**")
-    st.dataframe(live_df[model_features].head(3))
-
-    st.subheader("4️⃣ Prediction Probabilities (Distribution)")
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots()
-    ax.hist(live_df['xgb_prob'], bins=30, alpha=0.7)
-    ax.set_title("Predicted HR Probabilities (Live/Today)")
-    ax.set_xlabel("HR Probability")
-    ax.set_ylabel("Count")
-    st.pyplot(fig)
-
-    # Downloadable text audit
-    audit_text = io.StringIO()
-    print("MLB HR Bot Full Audit Report", file=audit_text)
-    print("\n== Model Features Used ==", file=audit_text)
-    print(model_features, file=audit_text)
-    print("\n== Features in History but Missing from Live ==", file=audit_text)
-    print(missing_from_live, file=audit_text)
-    print("\n== Features in Live but Missing from History ==", file=audit_text)
-    print(missing_from_train, file=audit_text)
-    print("\n== Feature Stats ==", file=audit_text)
-    print(audit_df.to_string(), file=audit_text)
-    print("\n== Training Sample ==", file=audit_text)
-    print(train_df[model_features].head(3).to_string(), file=audit_text)
-    print("\n== Live Sample ==", file=audit_text)
-    print(live_df[model_features].head(3).to_string(), file=audit_text)
-    st.download_button(
-        "⬇️ Download Full Audit Report (TXT)",
-        data=audit_text.getvalue(),
-        file_name="hrbot_full_audit_report.txt"
-    )
