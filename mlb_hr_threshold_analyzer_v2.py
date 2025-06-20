@@ -1,10 +1,22 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from sklearn.linear_model import LogisticRegression
 import xgboost as xgb
-from sklearn.metrics import precision_score, recall_score
+
+st.set_page_config(page_title="MLB HR Bot Live Predictor", layout="wide")
+
+st.title("MLB HR Bot Live Predictor (No Hindsight Bias)")
+
+st.markdown("""
+This standalone app lets you generate **live, unbiased HR picks** for any day, just like your backtests.
+- **Upload two files:**  
+    1️⃣ *Historical Event-Level CSV* (**with** `hr_outcome` for training)  
+    2️⃣ *Today's Event-Level CSV* (**no** `hr_outcome`, all features/lineup for today's slate)
+- The model is trained only on history, and scores today with *zero lookahead*.
+- Picks are displayed and downloadable for a sweep of thresholds (.13 to .20 by default).
+
+---
+""")
 
 def clean_id(x):
     try:
@@ -27,109 +39,88 @@ def robust_numeric_columns(df):
             continue
     return cols
 
-st.set_page_config(page_title="True OOS HR Simulator", layout="wide")
-st.title("🔬 Out-of-Sample MLB HR Backtest (No Hindsight Bias)")
+# === File Uploads ===
+st.header("Step 1: Upload Data")
+uploaded_train = st.file_uploader("Upload Training Event-Level CSV (with hr_outcome)", type="csv", key="train_ev")
+uploaded_live = st.file_uploader("Upload Today's Event-Level CSV (NO hr_outcome)", type="csv", key="live_ev")
 
-st.markdown("""
-Upload two CSVs:  
-1. **Full event-level MLB data (March 19–June 16)**: all features, must have `game_date` and `hr_outcome`  
-2. **Blind event-level data (June 17–18)**: all features, must have `game_date`—**NO HR outcome!**
+# === Threshold Controls ===
+st.header("Step 2: Set HR Probability Thresholds")
+col1, col2, col3 = st.columns(3)
+with col1:
+    threshold_min = st.number_input("Min HR Prob Threshold", value=0.13, min_value=0.01, max_value=0.5, step=0.01)
+with col2:
+    threshold_max = st.number_input("Max HR Prob Threshold", value=0.20, min_value=0.01, max_value=0.5, step=0.01)
+with col3:
+    threshold_step = st.number_input("Threshold Step", value=0.01, min_value=0.01, max_value=0.10, step=0.01)
 
-Run a rolling "true out-of-sample" test: for each date, only data up to *before* that day is used for training.  
-Results are shown for all thresholds 0.13–0.20.
-""")
+predict_btn = st.button("🚀 Generate Today's HR Bot Picks")
 
-csv1 = st.file_uploader("1️⃣ Upload March 19–June 16 Event-Level CSV", type="csv", key="main")
-csv2 = st.file_uploader("2️⃣ Upload Blind June 17–18 Event-Level CSV", type="csv", key="future")
-
-thresholds = np.round(np.arange(0.13, 0.201, 0.01), 3)
-
-if csv1 and csv2 and st.button("Run OOS Simulator"):
-    df_main = pd.read_csv(csv1)
-    df_future = pd.read_csv(csv2)
-
-    # Clean up and combine
-    for df in [df_main, df_future]:
-        if 'game_date' in df.columns:
-            df['game_date'] = pd.to_datetime(df['game_date']).dt.strftime("%Y-%m-%d")
-        else:
-            st.error("Missing game_date in at least one CSV!")
-            st.stop()
-        if 'batter_id' not in df.columns and 'batter' in df.columns:
-            df['batter_id'] = df['batter']
-        df['batter_id'] = df['batter_id'].apply(clean_id)
-
-    if 'hr_outcome' not in df_main.columns:
-        st.error("Main (historical) CSV missing hr_outcome column!")
+if predict_btn:
+    if uploaded_train is None or uploaded_live is None:
+        st.warning("Please upload BOTH files (historical and today's event-level CSV).")
         st.stop()
 
-    # Combine, mark known and unknown outcome
-    df_main['set'] = 'main'
-    df_future['set'] = 'future'
-    df_future['hr_outcome'] = np.nan  # explicitly make unknown
-    df_all = pd.concat([df_main, df_future], ignore_index=True)
-    df_all = dedup_columns(df_all)
-    df_all['game_date'] = pd.to_datetime(df_all['game_date']).dt.strftime("%Y-%m-%d")
+    with st.spinner("Processing..."):
 
-    all_dates = sorted(df_all['game_date'].unique())
-    summary_rows = []
+        train_df = pd.read_csv(uploaded_train)
+        live_df = pd.read_csv(uploaded_live)
 
-    for threshold in thresholds:
-        for test_date in all_dates:
-            # Only predict for June 17 and 18 (can expand later)
-            if test_date not in ["2025-06-17", "2025-06-18"]:
-                continue
+        # === Prep IDs ===
+        for df in [train_df, live_df]:
+            if 'batter_id' in df.columns:
+                df['batter_id'] = df['batter_id'].apply(clean_id)
+            elif 'batter' in df.columns:
+                df['batter_id'] = df['batter'].apply(clean_id)
 
-            # Split OOS
-            train = df_all[df_all['game_date'] < test_date].copy()
-            test = df_all[df_all['game_date'] == test_date].copy()
+        # === Model Features ===
+        numeric_features = robust_numeric_columns(train_df)
+        if 'hr_outcome' in numeric_features:
+            numeric_features.remove('hr_outcome')
+        model_features = [f for f in numeric_features if f in live_df.columns]
 
-            # Filter for events with valid hr_outcome for training
-            train = train[train['hr_outcome'].notnull()]
-            if len(train) < 20 or len(test) < 1:
-                continue
+        train_X = train_df[model_features].fillna(0)
+        train_y = train_df['hr_outcome'].astype(int)
 
-            model_features = robust_numeric_columns(train)
-            model_features = [c for c in model_features if c != 'hr_outcome']
+        # === Train XGBoost Model ===
+        xgb_clf = xgb.XGBClassifier(n_estimators=50, max_depth=4, learning_rate=0.08,
+                                    subsample=0.8, colsample_bytree=0.8, eval_metric='logloss', n_jobs=-1, use_label_encoder=False)
+        xgb_clf.fit(train_X, train_y)
+        live_X = live_df[model_features].fillna(0)
+        live_df['xgb_prob'] = xgb_clf.predict_proba(live_X)[:, 1]
 
-            # XGBoost model (change to LogisticRegression if you want both)
-            X_train = train[model_features].fillna(0)
-            y_train = train['hr_outcome'].astype(int)
-            X_test = test[model_features].fillna(0)
-
-            xgb_model = xgb.XGBClassifier(n_estimators=30, max_depth=3, learning_rate=0.08, eval_metric='logloss', use_label_encoder=False)
-            xgb_model.fit(X_train, y_train)
-            test['xgb_prob'] = xgb_model.predict_proba(X_test)[:, 1]
-            test['xgb_hr_pred'] = (test['xgb_prob'] > threshold).astype(int)
-
-            # Aggregate picks for day
-            picked = test.loc[test['xgb_hr_pred'] == 1, :]
-            picked_names = picked['batter_name'].tolist() if 'batter_name' in picked.columns else picked['batter_id'].tolist()
-            num_picks = len(picked)
-            # Count actual HRs, if available
-            if test['hr_outcome'].notnull().any():
-                hr_hit = picked[picked['hr_outcome'] == 1]
-                actual_hrs = int(hr_hit['hr_outcome'].sum())
-                # Precision, recall for picked set (if outcomes available)
-                if num_picks > 0:
-                    precision = actual_hrs / num_picks
-                else:
-                    precision = None
-            else:
-                actual_hrs = None
-                precision = None
-
-            # Record summary
-            summary_rows.append({
-                "date": test_date,
-                "threshold": threshold,
-                "num_picks": num_picks,
-                "picked_players": picked_names,
-                "actual_hrs": actual_hrs,
-                "precision": precision
+        # === Picks Per Threshold ===
+        results = []
+        thresholds = np.arange(threshold_min, threshold_max+0.001, threshold_step)
+        for thresh in thresholds:
+            mask = live_df['xgb_prob'] >= thresh
+            picked = live_df.loc[mask]
+            results.append({
+                'threshold': round(thresh, 3),
+                'num_picks': int(mask.sum()),
+                'picked_players': list(picked.get('batter_name', picked.get('player name', picked.get('batter_id'))))
             })
 
-    summary = pd.DataFrame(summary_rows)
-    st.dataframe(summary)
-    st.download_button("⬇️ Download Full OOS Backtest Results CSV", data=summary.to_csv(index=False), file_name="oos_backtest_summary.csv")
-    st.success("Simulation complete. Analyze results above! 🚀")
+        # === Output Table ===
+        picks_df = pd.DataFrame(results)
+        st.header("Results: HR Bot Picks by Threshold")
+        st.dataframe(picks_df)
+        st.download_button(
+            "⬇️ Download Picks by Threshold (CSV)",
+            data=picks_df.to_csv(index=False),
+            file_name="today_hr_bot_picks_by_threshold.csv"
+        )
+
+        st.markdown("#### All Picks (Threshold Sweep):")
+        for _, row in picks_df.iterrows():
+            st.write(f"**Threshold {row['threshold']}**: {row['picked_players']}")
+
+        st.success("Done! These are the official HR bot picks for today at each threshold.")
+
+st.markdown("""
+---
+**Instructions for daily use:**  
+- Use Statcast/lineup tools to generate today's event-level features for all batters (no `hr_outcome`).  
+- Upload with your up-to-date historical event file.  
+- Bot will select exactly like backtests: *no hindsight, no leaderboard bias, only pure picks!*  
+""")
