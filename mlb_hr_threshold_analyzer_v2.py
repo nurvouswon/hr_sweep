@@ -1,164 +1,108 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_score, recall_score, f1_score
-import matplotlib.pyplot as plt
-import io
+from datetime import datetime
 
-st.set_page_config("MLB HR Model Threshold Analyzer", layout="wide")
-st.title("⚾ MLB HR Model Threshold Analyzer & Leaderboard App (All-in-One Output)")
-st.caption("Upload event-level CSV with `hr_outcome`, `logit_prob`, `xgb_prob`. App finds optimal threshold, runs leaderboards, gives you a SINGLE combined CSV to upload for analysis.")
+st.title("⚾ MLB HR Rolling Backtest — XGBoost, .13 to .20 Threshold Sweep")
 
-def threshold_sweep(df, prob_col, true_col='hr_outcome', t_min=0.01, t_max=0.20, step=0.01):
-    thresholds = np.arange(t_min, t_max+step, step)
-    results = []
+# ---- Upload ----
+st.markdown("### Upload your full event-level HR CSV (must include date, HR label, player, and all features):")
+uploaded = st.file_uploader("Upload event-level features CSV", type=["csv"])
+if uploaded is None:
+    st.stop()
+
+df = pd.read_csv(uploaded)
+if 'date' not in df.columns:
+    st.error("Your CSV must include a 'date' column (YYYY-MM-DD)!")
+    st.stop()
+if 'hr_outcome' not in df.columns:
+    st.error("Your CSV must include an 'hr_outcome' column (1=HR, 0=not HR)!")
+    st.stop()
+if 'player_name' not in df.columns:
+    st.error("Your CSV must include a 'player_name' column!")
+    st.stop()
+
+date_col = 'date'
+hr_col = 'hr_outcome'
+player_col = 'player_name'
+prob_col = 'xgb_prob' if 'xgb_prob' in df.columns else None
+
+# Features for XGBoost: Use only numeric columns, drop identifiers/labels
+id_cols = [date_col, hr_col, player_col]
+ignore_cols = id_cols + ['game_pk', 'game_date']  # add other identifier cols if needed
+X_all = df.drop(columns=[c for c in ignore_cols if c in df.columns], errors='ignore')
+X_num = X_all.select_dtypes(include=[np.number])
+
+df[date_col] = pd.to_datetime(df[date_col]).dt.date
+
+# All thresholds
+thresholds = np.arange(0.13, 0.21, 0.01)
+thresholds = np.round(thresholds, 2)
+
+results = []
+dates = sorted(df[date_col].unique())
+
+progress = st.progress(0, text="Initializing rolling backtest...")
+
+# Main rolling window loop
+for i, this_date in enumerate(dates):
+    train_mask = df[date_col] < this_date
+    test_mask = df[date_col] == this_date
+    if train_mask.sum() < 50 or test_mask.sum() == 0:
+        continue
+
+    X_train, y_train = X_num[train_mask], df.loc[train_mask, hr_col]
+    X_test, y_test = X_num[test_mask], df.loc[test_mask, hr_col]
+    names_test = df.loc[test_mask, player_col].values
+
+    # XGBoost setup
+    xgb_model = xgb.XGBClassifier(n_estimators=200, max_depth=4, use_label_encoder=False, eval_metric='logloss')
+    xgb_model.fit(X_train, y_train)
+
+    pred_prob = xgb_model.predict_proba(X_test)[:, 1]
+
     for thresh in thresholds:
-        pred = (df[prob_col] > thresh).astype(int)
-        tp = ((pred == 1) & (df[true_col] == 1)).sum()
-        fp = ((pred == 1) & (df[true_col] == 0)).sum()
-        fn = ((pred == 0) & (df[true_col] == 1)).sum()
-        tn = ((pred == 0) & (df[true_col] == 0)).sum()
-        precision = precision_score(df[true_col], pred, zero_division=0)
-        recall = recall_score(df[true_col], pred, zero_division=0)
-        f1 = f1_score(df[true_col], pred, zero_division=0)
+        picks_mask = pred_prob >= thresh
+        picks = np.where(picks_mask)[0]
+        picked_names = list(names_test[picks])
+        picked_hrs = list(np.array(picked_names)[y_test.values[picks]==1]) if len(picks) else []
+        missed_hrs = list(names_test[(~picks_mask) & (y_test.values == 1)])
+        TP = sum(y_test.values[picks] == 1)
+        FP = sum(y_test.values[picks] == 0)
+        FN = sum((~picks_mask) & (y_test.values == 1))
+        TN = sum((~picks_mask) & (y_test.values == 0))
+        precision = TP / (TP + FP) if (TP + FP) else 0
+        recall = TP / (TP + FN) if (TP + FN) else 0
+        f1 = 2*precision*recall/(precision+recall) if (precision+recall) else 0
         results.append({
-            "threshold": round(thresh, 3),
-            "picks": int(pred.sum()),
-            "TP": int(tp),
-            "FP": int(fp),
-            "FN": int(fn),
-            "TN": int(tn),
-            "precision": precision,
-            "recall": recall,
-            "f1_score": f1
+            'date': this_date,
+            'threshold': thresh,
+            'picks': len(picks),
+            'TP': TP, 'FP': FP, 'FN': FN, 'TN': TN,
+            'precision': precision, 'recall': recall, 'f1_score': f1,
+            'picked_players': picked_names,
+            'picked_hr_players': picked_hrs,
+            'missed_hr_players': missed_hrs
         })
-    df_sweep = pd.DataFrame(results)
-    best_row = df_sweep.loc[df_sweep['f1_score'].idxmax()]
-    return df_sweep, float(best_row['threshold']), best_row.to_dict()
+    progress.progress((i+1)/len(dates), f"Rolling backtest: {i+1}/{len(dates)} days complete")
 
-def daily_backtest(df, prob_col, threshold, date_col='game_date', true_col='hr_outcome', name_col='batter_name'):
-    backtest = []
-    for day, group in df.groupby(date_col):
-        pred = (group[prob_col] > threshold).astype(int)
-        actual = group[true_col]
-        picked = group.loc[pred == 1, name_col].tolist() if name_col in group.columns else []
-        picked_hr = group.loc[(pred == 1) & (actual == 1), name_col].tolist() if name_col in group.columns else []
-        missed_hr = group.loc[(pred == 0) & (actual == 1), name_col].tolist() if name_col in group.columns else []
-        tp = ((pred == 1) & (actual == 1)).sum()
-        fp = ((pred == 1) & (actual == 0)).sum()
-        fn = ((pred == 0) & (actual == 1)).sum()
-        tn = ((pred == 0) & (actual == 0)).sum()
-        precision = precision_score(actual, pred, zero_division=0)
-        recall = recall_score(actual, pred, zero_division=0)
-        f1 = f1_score(actual, pred, zero_division=0)
-        backtest.append({
-            "date": day,
-            "picks": int(pred.sum()),
-            "TP": int(tp),
-            "FP": int(fp),
-            "FN": int(fn),
-            "TN": int(tn),
-            "precision": precision,
-            "recall": recall,
-            "f1_score": f1,
-            "picked_players": picked,
-            "picked_hr_players": picked_hr,
-            "missed_hr_players": missed_hr,
-        })
-    return pd.DataFrame(backtest).sort_values("date")
+results_df = pd.DataFrame(results)
+st.success(f"Backtest finished for {len(dates)} days, {len(thresholds)} thresholds.")
 
-def player_leaderboard(df, prob_col, threshold, name_col='batter_name', true_col='hr_outcome'):
-    pred = (df[prob_col] > threshold).astype(int)
-    leaderboard = df.copy()
-    leaderboard['picked'] = pred
-    leaderboard['hit'] = (pred == 1) & (df[true_col] == 1)
-    leaderboard = leaderboard.groupby(name_col).agg(
-        total_events = (true_col, "count"),
-        picked_count = ('picked', 'sum'),
-        hr_count = (true_col, "sum"),
-        picked_hr = ('hit', 'sum')
-    ).reset_index()
-    leaderboard['pick_precision'] = leaderboard['picked_hr'] / leaderboard['picked_count']
-    leaderboard['pick_precision'] = leaderboard['pick_precision'].fillna(0)
-    leaderboard = leaderboard.sort_values('picked_hr', ascending=False)
-    return leaderboard
+st.markdown("### Download full rolling backtest results (all thresholds, all days):")
+st.download_button("Download CSV", results_df.to_csv(index=False), file_name="rolling_backtest_xgb.csv", mime="text/csv")
 
-def combine_results_to_csv(sweep_df, backtests, playerlbs, model_name):
-    output = io.StringIO()
-    # Threshold Sweep
-    output.write(f"### {model_name} - Threshold Sweep\n")
-    sweep_df.to_csv(output, index=False)
-    # For each threshold
-    for thr, daily_bt in backtests.items():
-        output.write(f"\n### {model_name} - Daily Backtest @ threshold={thr:.3f}\n")
-        daily_bt.to_csv(output, index=False)
-        output.write(f"\n### {model_name} - Player Leaderboard @ threshold={thr:.3f}\n")
-        playerlbs[thr].to_csv(output, index=False)
-    return output.getvalue()
+# Optional: show summary table in-app
+show_table = st.checkbox("Show daily results table")
+if show_table:
+    st.dataframe(results_df)
 
-uploaded = st.file_uploader("Upload Scored Event-Level CSV", type=["csv"])
-if uploaded:
-    df = pd.read_csv(uploaded)
-    df.columns = [str(c).strip().lower() for c in df.columns]
-    st.success(f"Loaded {len(df)} events, columns: {', '.join(df.columns[:20])}...")
-    available_models = [c for c in ['logit_prob', 'xgb_prob'] if c in df.columns]
-    if not available_models:
-        st.error("Your file must contain at least one model probability column named 'logit_prob' or 'xgb_prob'.")
-        st.stop()
-
-    for prob_col in available_models:
-        st.header(f"Model: `{prob_col}`")
-        sweep_df, best_thr, best_row = threshold_sweep(df, prob_col)
-        st.write("#### Threshold Sweep Table (click to expand)")
-        st.dataframe(sweep_df.style.format(precision=3), use_container_width=True)
-        st.write(f"**Optimal threshold (F1):** `{best_thr}` — F1 = {best_row['f1_score']:.3f}, Precision = {best_row['precision']:.3f}, Recall = {best_row['recall']:.3f}, Picks = {best_row['picks']}")
-
-        # Plots
-        st.subheader("Threshold Sweep Plots")
-        fig, ax = plt.subplots(figsize=(8,5))
-        ax.plot(sweep_df['threshold'], sweep_df['precision'], label="Precision")
-        ax.plot(sweep_df['threshold'], sweep_df['recall'], label="Recall")
-        ax.plot(sweep_df['threshold'], sweep_df['f1_score'], label="F1")
-        ax.set_xlabel("Threshold")
-        ax.set_ylabel("Score")
-        ax.legend()
-        ax.set_title(f"Threshold vs. Precision/Recall/F1 for {prob_col}")
-        st.pyplot(fig)
-
-        # For one CSV download, gather all backtests/leaderboards
-        thresholds_to_run = [best_thr, 0.10, 0.13]
-        thresholds_to_run = sorted(set(thresholds_to_run))
-        backtests = {}
-        playerlbs = {}
-
-        for thr in thresholds_to_run:
-            st.subheader(f"Backtest & Leaderboards at threshold = {thr:.3f} (model `{prob_col}`)")
-            daily_bt = daily_backtest(df, prob_col, thr)
-            st.markdown("##### Daily Summary")
-            st.dataframe(daily_bt[['date', 'picks', 'TP', 'FP', 'FN', 'precision', 'recall', 'f1_score']].style.format(precision=3), use_container_width=True)
-            backtests[thr] = daily_bt
-
-            st.markdown("##### Per-Player HR Leaderboard")
-            p_lb = player_leaderboard(df, prob_col, thr)
-            st.dataframe(p_lb.style.format(precision=3), use_container_width=True)
-            playerlbs[thr] = p_lb
-
-            # Player summary plot
-            top_picks = p_lb.head(20)
-            fig2, ax2 = plt.subplots(figsize=(10,5))
-            ax2.bar(top_picks['batter_name'], top_picks['picked_hr'], label="HRs as Picked", color='g')
-            ax2.bar(top_picks['batter_name'], top_picks['picked_count'], alpha=0.3, label="Total Picks", color='b')
-            plt.xticks(rotation=45, ha="right", fontsize=9)
-            plt.legend()
-            plt.title(f"Top 20 Players: Picked HRs & Total Picks at thr={thr:.2f}")
-            plt.tight_layout()
-            st.pyplot(fig2)
-
-        # COMBINED CSV DOWNLOAD
-        combined_csv = combine_results_to_csv(sweep_df, backtests, playerlbs, prob_col)
-        st.download_button(f"⬇️ Download ALL Results for {prob_col}", combined_csv, file_name=f"all_results_{prob_col}.csv")
-
-    st.info("All results in one CSV per model. Upload here for deep analysis!")
-
-else:
-    st.info("Please upload a CSV with columns like `hr_outcome`, `logit_prob`, and/or `xgb_prob`.")
+st.markdown("""
+---
+**Instructions:**  
+- Use this app to generate a full rolling out-of-sample backtest, sweeping all thresholds from .13 to .20.
+- Download the CSV and send it to me (ChatGPT) for recap, analysis, or further breakdown by player, team, date, etc.
+""")
