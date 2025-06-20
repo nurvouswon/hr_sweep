@@ -2,128 +2,106 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="MLB HR Backtest Analyzer", layout="wide")
+st.set_page_config(page_title="MLB XGBoost Backtest/Blind Future Picks", layout="wide")
 
-st.title("⚾ MLB HR Model Backtester & Threshold Sweeper")
+st.title("MLB XGBoost Backtester & Blind Future Picker")
+st.write("""
+- Upload your main event-level scored CSV for the season (must have `game_date`, `xgb_prob`, and `batter_name` or similar).
+- Optionally upload a **blind/future** CSV (e.g., for June 17–19, with the same columns, but no HR outcome known).
+- The app will show, for each threshold (0.13–0.20), the model's picks *per day*.
+""")
 
-# ---- UPLOAD ----
-uploaded = st.file_uploader("Upload event-level CSV (with game_date or date column)", type=["csv"])
-if not uploaded:
-    st.stop()
+# --- Main Season Upload ---
+st.header("1️⃣ Upload Main Scored Event-Level CSV (Season)")
+main_csv = st.file_uploader("Main Event-Level CSV", type="csv", key="main_csv")
 
-# ---- LOAD & AUTO-FIX DATE COLUMN ----
-df = pd.read_csv(uploaded, low_memory=False)
+# --- Blind/Future Upload ---
+st.header("2️⃣ (Optional) Upload Blind/Future Scored Event-Level CSV (e.g., June 17–19 only)")
+blind_csv = st.file_uploader("Blind/Future Event-Level CSV", type="csv", key="blind_csv")
 
-# Fix: Accept `game_date`, or attempt to parse other date-like columns
-date_col = None
-for candidate in ["date", "game_date", "Date", "GAME_DATE"]:
-    if candidate in df.columns:
-        date_col = candidate
-        break
+def prepare_event_df(df):
+    # Checks and column normalizations
+    if "game_date" not in df.columns:
+        raise ValueError("Your CSV must include a 'game_date' column (YYYY-MM-DD)!")
+    if "xgb_prob" not in df.columns:
+        raise ValueError("Your CSV must include an 'xgb_prob' column (model probabilities)!")
+    if "batter_name" not in df.columns:
+        if "player_name" in df.columns:
+            df["batter_name"] = df["player_name"]
+        elif "batter" in df.columns:
+            df["batter_name"] = df["batter"]
+        elif "batter_id" in df.columns:
+            df["batter_name"] = df["batter_id"]
+        else:
+            df["batter_name"] = "Unknown"
+    # Always ensure game_date is str (not datetime)
+    df["game_date"] = df["game_date"].astype(str)
+    return df
 
-if not date_col:
-    # Try to auto-detect a date column
-    date_candidates = [c for c in df.columns if "date" in c.lower()]
-    if date_candidates:
-        date_col = date_candidates[0]
-    else:
-        st.error("No date or game_date column found! Please add one to your CSV.")
-        st.stop()
+def sweep_thresholds_and_display(df, sweep_name=""):
+    # Run threshold sweep, output picks by day/threshold
+    rows = []
+    for threshold in np.arange(0.13, 0.201, 0.01):
+        picks = df[df["xgb_prob"] >= round(threshold, 4)].copy()
+        if picks.empty:
+            continue
+        picks_day = (
+            picks.groupby("game_date")["batter_name"]
+            .apply(list)
+            .reset_index(name="picked_players")
+        )
+        picks_day["threshold"] = round(threshold, 3)
+        picks_day["num_picks"] = picks_day["picked_players"].apply(len)
+        picks_day["sweep"] = sweep_name
+        rows.append(picks_day)
+    if not rows:
+        return pd.DataFrame()
+    result_df = pd.concat(rows, ignore_index=True)
+    return result_df
 
-# Standardize to 'date' column (YYYY-MM-DD)
-df['date'] = pd.to_datetime(df[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
-if df['date'].isna().all():
-    st.error(f"Failed to parse {date_col} into dates! Please check your file.")
-    st.stop()
+main_results = None
+blind_results = None
 
-# ---- CHOOSE THRESHOLDS ----
-st.markdown("**Choose thresholds to sweep (inclusive):**")
-col1, col2, col3 = st.columns(3)
-thresh_start = col1.number_input("Threshold start", value=0.13, step=0.01, min_value=0.01, max_value=1.0)
-thresh_end = col2.number_input("Threshold end", value=0.20, step=0.01, min_value=0.01, max_value=1.0)
-thresh_step = col3.number_input("Threshold step", value=0.01, step=0.01, min_value=0.001, max_value=1.0)
-if thresh_end < thresh_start:
-    st.warning("Threshold end must be >= start.")
-    st.stop()
+# --- Main Picks Analysis ---
+if main_csv is not None:
+    st.subheader("Main Season: Threshold Sweep (.13–.20)")
+    main_df = pd.read_csv(main_csv)
+    try:
+        main_df = prepare_event_df(main_df)
+        main_results = sweep_thresholds_and_display(main_df, sweep_name="main")
+        st.dataframe(main_results, use_container_width=True)
+        st.download_button(
+            "⬇️ Download Main Season Picks by Threshold",
+            data=main_results.to_csv(index=False),
+            file_name="main_season_picks_by_threshold.csv",
+        )
+    except Exception as e:
+        st.error(f"Error with main CSV: {e}")
 
-# ---- SELECT MODEL PROB COLUMN ----
-prob_cols = [c for c in df.columns if 'prob' in c]
-if not prob_cols:
-    st.error("No model probability columns found! (looked for columns with 'prob' in name, e.g. xgb_prob or logit_prob)")
-    st.stop()
-prob_col = st.selectbox("Model probability column", prob_cols, index=0)
+# --- Blind/Future Picks Analysis ---
+if blind_csv is not None:
+    st.subheader("Blind/Future: Threshold Sweep (.13–.20)")
+    blind_df = pd.read_csv(blind_csv)
+    try:
+        blind_df = prepare_event_df(blind_df)
+        blind_results = sweep_thresholds_and_display(blind_df, sweep_name="blind")
+        st.dataframe(blind_results, use_container_width=True)
+        st.download_button(
+            "⬇️ Download Blind/Future Picks by Threshold",
+            data=blind_results.to_csv(index=False),
+            file_name="blind_future_picks_by_threshold.csv",
+        )
+    except Exception as e:
+        st.error(f"Error with blind/future CSV: {e}")
 
-# ---- SET HR OUTCOME COLUMN ----
-hr_outcome_col = None
-for col in ['hr_outcome', 'HR', 'is_hr', 'hr']:
-    if col in df.columns:
-        hr_outcome_col = col
-        break
-if not hr_outcome_col:
-    st.warning("No HR outcome column found, using 'events'=='home_run' if available.")
-    if 'events' in df.columns:
-        df['hr_outcome'] = df['events'].str.lower() == 'home_run'
-        hr_outcome_col = 'hr_outcome'
-    else:
-        st.error("No HR outcome or events column found in CSV. Can't score results.")
-        st.stop()
+# --- Comparison/Instructions ---
+st.header("How to Use These Results")
+st.markdown("""
+- **Main picks**: What your XGBoost model would have picked for each day (and threshold) over the historical period.
+- **Blind/future picks**: Upload an event-level CSV for dates (e.g., June 17–19) where you have no HR outcomes, to get unbiased "future" predictions by the model.
+- For both, download the results and analyze how your model would have performed at each threshold. Give the pick CSVs to your Analyzer Bot for a full breakdown.
+""")
 
-df[hr_outcome_col] = df[hr_outcome_col].astype(int)
+st.success("App ready! Upload your CSVs and run your threshold sweeps above.")
 
-# ---- THRESHOLD SWEEP BACKTEST ----
-results = []
-for t in np.arange(thresh_start, thresh_end + thresh_step, thresh_step):
-    t = np.round(t, 6)  # to avoid floating point drift
-    preds = (df[prob_col] >= t).astype(int)
-    TP = ((preds == 1) & (df[hr_outcome_col] == 1)).sum()
-    FP = ((preds == 1) & (df[hr_outcome_col] == 0)).sum()
-    FN = ((preds == 0) & (df[hr_outcome_col] == 1)).sum()
-    TN = ((preds == 0) & (df[hr_outcome_col] == 0)).sum()
-    picks = preds.sum()
-    precision = TP / picks if picks > 0 else 0
-    recall = TP / (TP + FN) if (TP + FN) > 0 else 0
-    f1 = 2*precision*recall/(precision+recall) if precision+recall > 0 else 0
-    results.append(dict(threshold=t, picks=picks, TP=TP, FP=FP, FN=FN, TN=TN,
-                       precision=precision, recall=recall, f1_score=f1))
-sweep_df = pd.DataFrame(results)
-st.subheader(f"Threshold Sweep Results ({prob_col})")
-st.dataframe(sweep_df, use_container_width=True)
-st.line_chart(sweep_df.set_index("threshold")[["precision", "recall", "f1_score"]])
-
-# ---- DAILY BACKTEST AT TOP 3 THRESHOLDS ----
-top_thresholds = sweep_df.sort_values("f1_score", ascending=False).head(3)['threshold'].tolist()
-st.markdown("### Daily Backtest at Top 3 Thresholds (by F1)")
-daily_results = []
-for t in top_thresholds:
-    t = np.round(t, 6)
-    group = []
-    for date, g in df.groupby("date"):
-        picked = g[g[prob_col] >= t]
-        tp = picked[hr_outcome_col].sum()
-        fp = (picked[hr_outcome_col] == 0).sum()
-        fn = g[(g[prob_col] < t) & (g[hr_outcome_col] == 1)].shape[0]
-        tn = (g[prob_col] < t).sum() - fn
-        picks = picked.shape[0]
-        precision = tp / picks if picks else 0
-        recall = tp / (tp + fn) if (tp + fn) else 0
-        f1 = 2*precision*recall/(precision+recall) if precision+recall else 0
-        group.append(dict(date=date, threshold=t, picks=picks, TP=tp, FP=fp, FN=fn, TN=tn,
-                          precision=precision, recall=recall, f1_score=f1,
-                          picked_players=";".join(picked['player name'].astype(str).unique()[:30]) if 'player name' in picked else "N/A"
-        ))
-    daily_results.extend(group)
-daily_df = pd.DataFrame(daily_results)
-st.dataframe(daily_df, use_container_width=True)
-
-# ---- EXPORT ALL RESULTS ----
-merged = df[["date", "player name", prob_col, hr_outcome_col]]
-for t in np.arange(thresh_start, thresh_end + thresh_step, thresh_step):
-    merged[f"pick_at_{t:.3f}"] = (merged[prob_col] >= t).astype(int)
-csv = sweep_df.to_csv(index=False)
-st.download_button("Download Threshold Sweep CSV", csv, file_name="threshold_sweep_results.csv")
-csv2 = daily_df.to_csv(index=False)
-st.download_button("Download Daily Backtest Results", csv2, file_name="daily_backtest_results.csv")
-csv3 = merged.to_csv(index=False)
-st.download_button("Download All Picks by Threshold", csv3, file_name="all_picks_by_threshold.csv")
-
-st.success("✅ Done! This app auto-handles your date column and makes all backtests easy.")
+# -------------- END OF APP --------------
