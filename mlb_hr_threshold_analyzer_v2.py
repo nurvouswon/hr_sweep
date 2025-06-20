@@ -1,23 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from datetime import datetime, timedelta
 import xgboost as xgb
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="MLB HR Bot Live Predictor", layout="wide")
-st.title("MLB HR Bot Live Predictor (No Hindsight Bias)")
-
-st.markdown("""
-This standalone app lets you generate **live, unbiased HR picks** for any day, just like your backtests.
-- **Upload two files:**  
-    1️⃣ *Historical Event-Level CSV* (**with** `hr_outcome` for training)  
-    2️⃣ *Today's Event-Level CSV* (**no** `hr_outcome`, all features/lineup for today's slate)
-- The model is trained only on history, and scores today with *zero lookahead*.
-- Picks are displayed and downloadable for a sweep of thresholds (.13 to .20 by default).
-
----
-""")
-
+# ---------------- Utility functions ---------------- #
 def clean_id(x):
     try:
         if pd.isna(x): return None
@@ -39,124 +27,193 @@ def robust_numeric_columns(df):
             continue
     return cols
 
-# === File Uploads ===
-st.header("Step 1: Upload Data")
-uploaded_train = st.file_uploader("Upload Training Event-Level CSV (with hr_outcome)", type="csv", key="train_ev")
-uploaded_live = st.file_uploader("Upload Today's Event-Level CSV (NO hr_outcome)", type="csv", key="live_ev")
+def get_all_stat_rolling_cols():
+    roll_base = ['launch_speed', 'launch_angle', 'hit_distance_sc', 'woba_value',
+                 'release_speed', 'release_spin_rate', 'spin_axis', 'pfx_x', 'pfx_z']
+    windows = [3, 5, 7, 14]
+    cols = []
+    for prefix in ['B_', 'P_']:
+        for base in roll_base:
+            for w in windows:
+                cols.append(f"{prefix}{base}_{w}")
+    for typ in ['B_vsP_hand_HR_', 'P_vsB_hand_HR_', 'B_pitchtype_HR_', 'P_pitchtype_HR_']:
+        for w in windows:
+            cols.append(f"{typ}{w}")
+    for w in [7, 14, 30]:
+        cols.append(f"park_hand_HR_{w}")
+    cols += [
+        'hard_hit_rate_20', 'sweet_spot_rate_20', 'relative_wind_angle',
+        'relative_wind_sin', 'relative_wind_cos'
+    ]
+    return cols
 
-# === Threshold Controls ===
-st.header("Step 2: Set HR Probability Thresholds")
-col1, col2, col3 = st.columns(3)
-with col1:
-    threshold_min = st.number_input("Min HR Prob Threshold", value=0.13, min_value=0.01, max_value=0.5, step=0.01)
-with col2:
-    threshold_max = st.number_input("Max HR Prob Threshold", value=0.20, min_value=0.01, max_value=0.5, step=0.01)
-with col3:
-    threshold_step = st.number_input("Threshold Step", value=0.01, min_value=0.01, max_value=0.10, step=0.01)
+# ---------------- Streamlit App ---------------- #
+st.set_page_config(page_title="MLB HR Bot Live Predictor", layout="wide")
+st.title("MLB HR Bot Live Predictor (No Hindsight Bias)")
 
-predict_btn = st.button("🚀 Generate Today's HR Bot Picks & Diagnostics")
+tab1, tab2 = st.tabs(["1️⃣ Fetch & Feature Engineer Data", "2️⃣ Upload & Analyze"])
 
-if predict_btn:
-    if uploaded_train is None or uploaded_live is None:
-        st.warning("Please upload BOTH files (historical and today's event-level CSV).")
-        st.stop()
+with tab1:
+    st.header("🔄 Generate Today's Batter Event-Level CSV (with merged rolling/stat features from history)")
+    st.markdown("""
+    - **Step 1:** Upload Today's Lineups/Matchups CSV (must have at least `mlb_id`/`batter_id`, `player_name`, `team_code`, and `game_date`).
+    - **Step 2:** Upload *Historical Event-Level CSV* (all rolling/stat columns, `batter_id`, and `game_date` required).
+    - The app will merge in the latest rolling/stat features for each batter.
+    """)
+    
+    uploaded_today_lineups = st.file_uploader(
+        "Upload Today's Lineups/Matchups CSV (Required)", type="csv", key="todaylineup"
+    )
+    uploaded_sample_hist = st.file_uploader(
+        "Upload Historical Event-Level CSV (Required)", type="csv", key="samplehist"
+    )
 
-    with st.spinner("Processing..."):
+    merge_btn = st.button("🔗 Generate Today's Batter Event-Level CSV (with merged rolling/stat features)")
+
+    if merge_btn:
+        if not uploaded_today_lineups or not uploaded_sample_hist:
+            st.warning("Please upload BOTH today’s lineup/matchups and a sample historical event-level CSV.")
+            st.stop()
+        today_lineups = pd.read_csv(uploaded_today_lineups)
+        hist = pd.read_csv(uploaded_sample_hist)
+        # Normalize columns
+        tcols = [c.strip().lower().replace(" ", "_") for c in today_lineups.columns]
+        today_lineups.columns = tcols
+
+        # Key for join is MLB ID (batter_id, mlb_id, etc)
+        id_col = None
+        if "mlb_id" in today_lineups.columns:
+            id_col = "mlb_id"
+        elif "batter_id" in today_lineups.columns:
+            id_col = "batter_id"
+        else:
+            st.error("Could not find mlb_id/batter_id in lineups file.")
+            st.stop()
+        # Key for hist = 'batter_id'
+        if 'batter_id' not in hist.columns:
+            st.error("No 'batter_id' column in historical CSV.")
+            st.stop()
+        today_lineups[id_col] = today_lineups[id_col].astype(str)
+        hist['batter_id'] = hist['batter_id'].astype(str)
+
+        # Latest rolling/stat features for each batter from historical data
+        if 'game_date' in hist.columns:
+            hist['game_date'] = pd.to_datetime(hist['game_date'], errors='coerce')
+        rolling_cols = [c for c in hist.columns if (
+            c.startswith('b_') or c.startswith('p_') or 
+            c.startswith('park_hand_hr_') or 
+            c.endswith('_rate_20') or 
+            c.startswith('b_vsp_hand_hr_') or 
+            c.startswith('p_vsb_hand_hr_') or 
+            c.startswith('b_pitchtype_hr_') or 
+            c.startswith('p_pitchtype_hr_')
+        )]
+        last_feats = hist.sort_values('game_date').groupby('batter_id').tail(1)
+        last_feats = last_feats[['batter_id'] + rolling_cols].copy()
+        st.info(f"Found {len(last_feats)} batters with latest rolling/stat features.")
+
+        merged = today_lineups.merge(last_feats, left_on=id_col, right_on='batter_id', how='left', suffixes=('', '_roll'))
+        # Fill required columns if missing
+        context_cols = ['city', 'park', 'stadium', 'time', 'temp', 'wind_mph', 'wind_dir', 'humidity', 'condition']
+        for col in context_cols:
+            if col not in merged.columns:
+                merged[col] = None
+
+        st.markdown("#### Sample of Today's Event-Level CSV (with merged rolling/stat features):")
+        st.dataframe(merged.head(20))
+        null_report = merged[rolling_cols].isnull().sum().sort_values(ascending=False)
+        st.markdown("#### Null report for rolling/stat features in output:")
+        st.text(null_report.to_string())
+        st.markdown("#### Weather/context columns in output:")
+        st.dataframe(merged[context_cols].drop_duplicates())
+
+        # Column order
+        hist_cols = [c for c in hist.columns if not c.startswith("unnamed")]
+        extra_cols = [c for c in merged.columns if c not in hist_cols]
+        merged = merged.reindex(columns=hist_cols + extra_cols)
+        merged_out_cols = [c for c in merged.columns if not c.startswith("unnamed")]
+        st.success(f"Created today's event-level file: {len(merged)} batters. All rolling/stat columns now present (where available).")
+        st.download_button(
+            "⬇️ Download Today's Event-Level CSV (for Prediction App, with merged features)",
+            data=merged[merged_out_cols].to_csv(index=False),
+            file_name=f"event_level_today_full_{datetime.now().strftime('%Y_%m_%d')}.csv"
+        )
+        merged['rolling_stat_count'] = merged[rolling_cols].notnull().sum(axis=1)
+        st.markdown("#### Non-null rolling/stat feature count per batter:")
+        pname = 'player_name' if 'player_name' in merged.columns else merged.columns[0]
+        st.dataframe(merged[[pname, 'rolling_stat_count']].sort_values('rolling_stat_count', ascending=False).head(25))
+
+with tab2:
+    st.header("Step 2: Upload Event-Level Files and Predict HRs")
+    uploaded_train = st.file_uploader("Upload Historical Event-Level CSV (with hr_outcome)", type="csv", key="train_ev")
+    uploaded_live = st.file_uploader("Upload Today's Event-Level CSV (with merged features, no hr_outcome)", type="csv", key="live_ev")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        threshold_min = st.number_input("Min HR Prob Threshold", value=0.13, min_value=0.01, max_value=0.5, step=0.01)
+    with col2:
+        threshold_max = st.number_input("Max HR Prob Threshold", value=0.20, min_value=0.01, max_value=0.5, step=0.01)
+    with col3:
+        threshold_step = st.number_input("Threshold Step", value=0.01, min_value=0.01, max_value=0.10, step=0.01)
+
+    predict_btn = st.button("🚀 Generate Today's HR Bot Picks")
+
+    if predict_btn:
+        if uploaded_train is None or uploaded_live is None:
+            st.warning("Please upload BOTH files (historical and today's event-level CSV).")
+            st.stop()
         train_df = pd.read_csv(uploaded_train)
         live_df = pd.read_csv(uploaded_live)
 
-        # === Prep IDs ===
         for df in [train_df, live_df]:
             if 'batter_id' in df.columns:
                 df['batter_id'] = df['batter_id'].apply(clean_id)
             elif 'batter' in df.columns:
                 df['batter_id'] = df['batter'].apply(clean_id)
 
-        # === Model Features ===
+        # Strict feature match: only use columns present in both, excluding hr_outcome
         numeric_features = robust_numeric_columns(train_df)
         if 'hr_outcome' in numeric_features:
             numeric_features.remove('hr_outcome')
         model_features = [f for f in numeric_features if f in live_df.columns]
+        # Enforce same order!
+        model_features = [f for f in model_features if f in live_df.columns]
+        X_train = train_df[model_features].fillna(0)
+        y_train = train_df['hr_outcome'].astype(int)
+        X_live = live_df[model_features].fillna(0)
 
-        # === Diagnostics Panel: Show Features Used ===
-        st.markdown("### 🔍 Diagnostics & Audit Panel")
-        st.write(f"**Number of features used:** {len(model_features)}")
-        st.write(f"**Model features:** {model_features}")
+        st.info(f"Model features used ({len(model_features)}): {model_features}")
 
-        # Missing values check (for audit)
-        nulls_report = pd.DataFrame({
-            'nulls_train': train_df[model_features].isnull().sum(),
-            'nulls_live': live_df[model_features].isnull().sum()
-        })
-        st.markdown("#### Null Values in Features")
-        st.dataframe(nulls_report)
+        # Null report diagnostics
+        st.markdown("#### Null/zero feature report (live data):")
+        st.text(X_live.isnull().sum().sort_values(ascending=False).to_string())
+        st.text((X_live == 0).sum().sort_values(ascending=False).to_string())
 
-        # Value distributions (train/live) for each feature
-        st.markdown("#### Feature Value Ranges (Train/Live)")
-        feat_ranges = []
-        for col in model_features:
-            feat_ranges.append({
-                "feature": col,
-                "train_min": np.nanmin(train_df[col]),
-                "train_max": np.nanmax(train_df[col]),
-                "train_mean": np.nanmean(train_df[col]),
-                "live_min": np.nanmin(live_df[col]),
-                "live_max": np.nanmax(live_df[col]),
-                "live_mean": np.nanmean(live_df[col]),
-            })
-        feat_ranges_df = pd.DataFrame(feat_ranges)
-        st.dataframe(feat_ranges_df)
+        # Train XGBoost and predict
+        xgb_clf = xgb.XGBClassifier(n_estimators=50, max_depth=4, learning_rate=0.08,
+                                    subsample=0.8, colsample_bytree=0.8, eval_metric='logloss', n_jobs=-1, use_label_encoder=False)
+        xgb_clf.fit(X_train, y_train)
+        live_df['xgb_prob'] = xgb_clf.predict_proba(X_live)[:, 1]
 
-        # === XGBoost Model Fit ===
-        train_X = train_df[model_features].fillna(0)
-        train_y = train_df['hr_outcome'].astype(int)
-
-        xgb_clf = xgb.XGBClassifier(
-            n_estimators=50, max_depth=4, learning_rate=0.08,
-            subsample=0.8, colsample_bytree=0.8, eval_metric='logloss', n_jobs=-1, use_label_encoder=False
-        )
-        xgb_clf.fit(train_X, train_y)
-        live_X = live_df[model_features].fillna(0)
-        live_df['xgb_prob'] = xgb_clf.predict_proba(live_X)[:, 1]
-
-        # === Feature Importance Audit ===
-        importances = xgb_clf.feature_importances_
-        fi_df = pd.DataFrame({'feature': model_features, 'importance': importances}).sort_values('importance', ascending=False)
-        st.markdown("#### XGBoost Feature Importances")
-        st.dataframe(fi_df.head(25))
-        st.bar_chart(fi_df.set_index('feature').head(15))
-
-        # === Score Distribution ===
-        st.markdown("#### Predicted HR Probability Distribution (All Batters Today)")
+        # Diagnostics: plot output histogram
+        st.markdown("#### Histogram of predicted HR probabilities for today:")
         fig, ax = plt.subplots()
-        ax.hist(live_df['xgb_prob'], bins=30, edgecolor='black')
-        ax.set_xlabel("Predicted HR Probability")
-        ax.set_ylabel("Number of Batters")
+        ax.hist(live_df['xgb_prob'], bins=30)
+        ax.set_xlabel('HR Probability')
+        ax.set_ylabel('Number of Batters')
         st.pyplot(fig)
 
-        st.write(f"**Summary Stats (Today's Probabilities):**")
-        st.write(live_df['xgb_prob'].describe())
-
-        # === Picks Per Threshold ===
-        results = []
-        audit_rows = []
+        # Table of results by threshold
         thresholds = np.arange(threshold_min, threshold_max+0.001, threshold_step)
+        results = []
         for thresh in thresholds:
             mask = live_df['xgb_prob'] >= thresh
-            picked = live_df.loc[mask].copy()
+            picked = live_df.loc[mask]
             results.append({
                 'threshold': round(thresh, 3),
                 'num_picks': int(mask.sum()),
-                'picked_players': list(picked.get('batter_name', picked.get('player name', picked.get('batter_id'))))
+                'picked_players': list(picked.get('player_name', picked.get('batter_id')))
             })
-            # For audit: Store all rows and scores for this threshold
-            for _, row in picked.iterrows():
-                audit_row = row.to_dict()
-                audit_row['threshold'] = thresh
-                audit_row['picked'] = True
-                audit_rows.append(audit_row)
         picks_df = pd.DataFrame(results)
-
         st.header("Results: HR Bot Picks by Threshold")
         st.dataframe(picks_df)
         st.download_button(
@@ -165,30 +222,16 @@ if predict_btn:
             file_name="today_hr_bot_picks_by_threshold.csv"
         )
 
-        # === Per-batter audit: Downloadable full file of all batters, scores, features, and pick flag
-        st.markdown("### 📝 Downloadable Full Audit/Diagnostics CSV")
-        full_audit = live_df.copy()
-        full_audit['picked_any_threshold'] = False
-        for thresh in thresholds:
-            full_audit[f"pick_{round(thresh,3)}"] = full_audit['xgb_prob'] >= thresh
-            full_audit['picked_any_threshold'] |= full_audit['xgb_prob'] >= thresh
-        st.dataframe(full_audit.head(20))
-        st.download_button(
-            "⬇️ Download Full Audit CSV (All Batters/All Features/All Scores)",
-            data=full_audit.to_csv(index=False),
-            file_name="full_batter_scoring_audit.csv"
-        )
-
         st.markdown("#### All Picks (Threshold Sweep):")
         for _, row in picks_df.iterrows():
             st.write(f"**Threshold {row['threshold']}**: {row['picked_players']}")
 
-        st.success("Done! These are the official HR bot picks for today at each threshold. **Audit and diagnostics now available.**")
+        st.success("Done! These are the official HR bot picks for today at each threshold.")
 
-st.markdown("""
----
-**Instructions for daily use:**  
-- Use Statcast/lineup tools to generate today's event-level features for all batters (no `hr_outcome`).  
-- Upload with your up-to-date historical event file.  
-- Bot will select exactly like backtests: *no hindsight, no leaderboard bias, only pure picks!*  
-""")
+    st.markdown("""
+    ---
+    **Instructions for daily use:**  
+    - Use Tab 1 to generate your merged one-row-per-batter CSV for today.
+    - Upload with your historical event-level file (must have rolling/stat features and `hr_outcome`).
+    - Bot selects *exactly* like your backtests: no hindsight, no leaderboard bias!
+    """)
