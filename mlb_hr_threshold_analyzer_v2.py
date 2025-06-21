@@ -1,116 +1,197 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from datetime import datetime
+from io import StringIO
 
 st.header("2️⃣ Upload Event-Level CSVs & Run Model")
 
-uploaded_train = st.file_uploader("Upload Training Event-Level CSV (with hr_outcome)", type="csv", key="traincsv")
-uploaded_live = st.file_uploader("Upload Today's Event-Level CSV (with merged features, NO hr_outcome)", type="csv", key="livecsv")
+# --- Upload CSVs ---
+st.markdown("#### Upload Training Event-Level CSV (with hr_outcome)")
+train_file = st.file_uploader("Upload Training Event-Level CSV", type="csv", key="trainfile")
+st.markdown("#### Upload Today's Event-Level CSV (with merged features, NO hr_outcome)")
+live_file = st.file_uploader("Upload Today's Event-Level CSV", type="csv", key="livefile")
 
-min_thresh = st.number_input("Min HR Prob Threshold", 0.0, 1.0, 0.01, 0.01)
-max_thresh = st.number_input("Max HR Prob Threshold", 0.0, 1.0, 0.15, 0.01)
-thresh_step = st.number_input("Threshold Step", 0.001, 0.2, 0.01, 0.01)
+min_thr = st.number_input("Min HR Prob Threshold", 0.00, 0.5, 0.01, step=0.01)
+max_thr = st.number_input("Max HR Prob Threshold", 0.01, 0.5, 0.15, step=0.01)
+step_thr = st.number_input("Threshold Step", 0.01, 0.1, 0.01, step=0.01)
 
-if uploaded_train and uploaded_live:
-    train_df = pd.read_csv(uploaded_train)
-    live_df = pd.read_csv(uploaded_live)
+if train_file and live_file:
+    train_df = pd.read_csv(train_file)
+    live_df = pd.read_csv(live_file)
 
-    # --- Column normalization for reliability ---
-    train_df.columns = [c.strip().lower().replace(" ", "_") for c in train_df.columns]
-    live_df.columns = [c.strip().lower().replace(" ", "_") for c in live_df.columns]
+    # Feature filter debug (PRESERVE!)
+    st.markdown("### 🔍 Audit Report:")
+    train_cols = set(train_df.columns)
+    live_cols = set(live_df.columns)
+    intersect = [c for c in train_cols if c in live_cols]
 
-    # --- Identify candidate features ---
-    ycol = "hr_outcome"
-    drop_cols = [
-        "hr_outcome", "batter_id", "player_name", "game_date", "mlb_id",
-        "events", "description", "stand", "p_throws"
-    ]
-    # Exclude non-numeric and all-null columns from training
-    train_features = [
-        c for c in train_df.columns
-        if c not in drop_cols
-        and pd.api.types.is_numeric_dtype(train_df[c])
-        and not train_df[c].isnull().all()
-    ]
-    # Remove constant features in train
-    train_features = [c for c in train_features if train_df[c].nunique(dropna=True) > 1]
-
-    # --- Only use features present in BOTH and are numeric in live
-    model_features = [
-        c for c in train_features
-        if c in live_df.columns
-        and pd.api.types.is_numeric_dtype(live_df[c])
-        and not live_df[c].isnull().all()
-    ]
-
-    # ==== Audit Report Construction ====
-    audit = {}
-    audit['model_features'] = model_features
-    audit['features_in_history_not_live'] = sorted([c for c in train_features if c not in live_df.columns])
-    audit['features_in_live_not_history'] = sorted([c for c in live_df.columns if c not in train_features])
-    audit['features_constant_train'] = sorted([c for c in train_features if train_df[c].nunique(dropna=True) <= 1])
-    audit['features_constant_live'] = sorted([c for c in model_features if live_df[c].nunique(dropna=True) <= 1])
-    audit['features_allnull_train'] = sorted([c for c in train_features if train_df[c].isnull().all()])
-    audit['features_allnull_live'] = sorted([c for c in model_features if live_df[c].isnull().all()])
-    audit['train_nulls'] = train_df[model_features].isnull().sum().sort_values(ascending=False).head(20)
-    audit['live_nulls'] = live_df[model_features].isnull().sum().sort_values(ascending=False).head(20)
-    audit['train_n'] = len(train_df)
-    audit['live_n'] = len(live_df)
-
-    # === Display Audit Summary ===
-    st.subheader("🔍 Audit Report:")
+    # Robust model feature filtering
+    numeric_cols = [c for c in intersect if pd.api.types.is_numeric_dtype(train_df[c]) and c != "hr_outcome"]
+    train_feats = [c for c in numeric_cols if train_df[c].nunique(dropna=False) > 1 and train_df[c].notnull().any()]
+    live_feats = [c for c in numeric_cols if live_df[c].nunique(dropna=False) > 1 and live_df[c].notnull().any()]
+    model_features = [c for c in train_feats if c in live_feats]
     st.write(f"Model features used ({len(model_features)}): {model_features}")
-    st.write(f"Features in history but missing from live: {audit['features_in_history_not_live']}")
-    st.write(f"Features in live but missing from history: {audit['features_in_live_not_history']}")
-    st.write(f"Features dropped (constant in train): {audit['features_constant_train']}")
-    st.write(f"Features dropped (constant in live): {audit['features_constant_live']}")
-    st.write(f"Features dropped (all-null in train): {audit['features_allnull_train']}")
-    st.write(f"Features dropped (all-null in live): {audit['features_allnull_live']}")
-    st.write(f"Null count in live file (top 20):")
-    st.dataframe(audit['live_nulls'])
-    st.write(f"Null count in train file (top 20):")
-    st.dataframe(audit['train_nulls'])
-    st.write(f"Train events: {audit['train_n']}, Live events: {audit['live_n']}")
 
-    # === Downloadable Audit Report ===
-    audit_report = pd.DataFrame({
-        "features_used": pd.Series(model_features),
-        "features_missing_in_live": pd.Series(audit['features_in_history_not_live']),
-        "features_missing_in_history": pd.Series(audit['features_in_live_not_history'])
-    })
-    st.download_button("⬇️ Download Audit Report CSV", data=audit_report.to_csv(index=False), file_name="mlb_hr_model_audit_report.csv")
+    missing_in_live = [c for c in train_feats if c not in live_feats]
+    missing_in_train = [c for c in live_feats if c not in train_feats]
+    st.write("Features in history but missing from live:", missing_in_live)
+    st.write("Features in live but missing from history:", missing_in_train)
 
-    # ==== Modeling ====
-    st.markdown("---")
-    X_train = train_df[model_features].fillna(0)
-    y_train = train_df[ycol].astype(int)
+    dropped_constant_train = [c for c in numeric_cols if train_df[c].nunique(dropna=False) <= 1]
+    dropped_constant_live = [c for c in numeric_cols if live_df[c].nunique(dropna=False) <= 1]
+    st.write("Features dropped (constant in train):", dropped_constant_train)
+    st.write("Features dropped (constant in live):", dropped_constant_live)
+    dropped_null_train = [c for c in numeric_cols if train_df[c].isnull().all()]
+    dropped_null_live = [c for c in numeric_cols if live_df[c].isnull().all()]
+    st.write("Features dropped (all-null in train):", dropped_null_train)
+    st.write("Features dropped (all-null in live):", dropped_null_live)
+    st.write("Null count in live file (top 20):")
+    st.write(live_df.isnull().sum().sort_values(ascending=False).head(20))
+    st.write("Null count in train file (top 20):")
+    st.write(train_df.isnull().sum().sort_values(ascending=False).head(20))
+    st.write(f"Train events: {len(train_df)}, Live events: {len(live_df)}")
+
+    # --- Model Fit & Predict ---
+    from sklearn.linear_model import LogisticRegression
+
+    model = LogisticRegression(max_iter=200, solver="liblinear")
+    X = train_df[model_features].fillna(0)
+    y = train_df['hr_outcome'].astype(int)
+    model.fit(X, y)
+
+    # Score live
     X_live = live_df[model_features].fillna(0)
+    hr_probs = model.predict_proba(X_live)[:, 1]
+    live_df["hr_pred_prob"] = hr_probs
 
-    model = LogisticRegression(max_iter=1000, solver='liblinear')
-    model.fit(X_train, y_train)
-    live_df['hr_prob'] = model.predict_proba(X_live)[:, 1]
+    # Output sweep
+    st.markdown("### Results: HR Bot Picks by Threshold")
+    out_report = {}
+    thresholds = np.arange(min_thr, max_thr + step_thr, step_thr)
+    for thr in thresholds:
+        picks = live_df.loc[live_df["hr_pred_prob"] >= thr, "player_name"].tolist()
+        out_report[thr] = picks
+        st.write(f"Threshold {thr:.2f}: {picks}")
 
-    # ==== Threshold Sweep & Picks ====
-    st.subheader("Results: HR Bot Picks by Threshold")
-    picks_by_thresh = {}
-    for t in np.arange(min_thresh, max_thresh + thresh_step, thresh_step):
-        picks = (
-            live_df.loc[live_df['hr_prob'] >= t, 'player_name'].tolist()
-            if 'player_name' in live_df.columns
-            else live_df.loc[live_df['hr_prob'] >= t].index.tolist()
-        )
-        picks_by_thresh[round(t, 3)] = picks
+    st.markdown("Done! These are the official HR bot picks for today at each threshold.")
 
-    st.write("All Picks (Threshold Sweep):")
-    for t in sorted(picks_by_thresh.keys()):
-        st.write(f"Threshold {t}: {picks_by_thresh[t]}")
+    # --- ENHANCED AUDIT DOWNLOADS ---
+    # Lowercase col compare for safety
+    train_cols_lower = set([c.lower() for c in train_df.columns])
+    live_cols_lower = set([c.lower() for c in live_df.columns])
+    used_features = [c for c in model_features if c.lower() in live_cols_lower and c.lower() in train_cols_lower]
+    missing_in_live_lower = [c for c in train_feats if c.lower() not in live_cols_lower]
+    missing_in_train_lower = [c for c in live_feats if c.lower() not in train_cols_lower]
 
-    # === Download Full Results ===
-    st.download_button("⬇️ Download HR Bot Probabilities",
-        data=live_df.to_csv(index=False),
-        file_name=f"hr_bot_probs_{datetime.now().strftime('%Y_%m_%d')}.csv"
-    )
-else:
-    st.warning("Please upload BOTH a training event-level CSV (with hr_outcome) and a live/today event-level CSV (with merged features).")
+    train_nulls = train_df[model_features].isnull().mean().sort_values(ascending=False) if model_features else pd.Series()
+    live_nulls = live_df[model_features].isnull().mean().sort_values(ascending=False) if model_features else pd.Series()
+
+    def get_constant_cols(df, cols):
+        return [c for c in cols if df[c].nunique(dropna=False) <= 1]
+
+    train_constant = get_constant_cols(train_df, model_features)
+    live_constant = get_constant_cols(live_df, model_features)
+
+    # Column mapping/merge suggestions (fuzzy, for debugging pipeline)
+    def suggest_col_map(missing, present):
+        suggestions = []
+        for m in missing:
+            for p in present:
+                if m.replace('_','').lower() == p.replace('_','').lower():
+                    suggestions.append((m, p))
+        return suggestions
+
+    mapping_suggestions = suggest_col_map(missing_in_live, live_cols) + suggest_col_map(missing_in_train, train_cols)
+    mapping_suggestions = list(set(mapping_suggestions))
+
+    def group_feature_type(col):
+        cl = col.lower()
+        if 'hr' in cl and 'rate' in cl:
+            return 'HR Rate'
+        if 'launch_speed' in cl or 'exit_velocity' in cl:
+            return 'Batted Ball'
+        if 'pitchtype' in cl or 'pitch_' in cl or cl.startswith('p_'):
+            return 'Pitch'
+        if 'park' in cl or 'stadium' in cl:
+            return 'Park/Env'
+        if 'wind' in cl or 'temp' in cl or 'humidity' in cl:
+            return 'Weather'
+        if 'woba' in cl or 'xwoba' in cl:
+            return 'Advanced Stat'
+        if 'b_' in cl or 'p_' in cl:
+            return 'Rolling'
+        if cl in ['batter_id','mlb_id','game_date','player_name']:
+            return 'Meta'
+        return 'Other'
+
+    feature_summary = pd.DataFrame({
+        'feature': model_features,
+        'type': [group_feature_type(c) for c in model_features],
+        'train_null_frac': [train_df[c].isnull().mean() for c in model_features],
+        'live_null_frac': [live_df[c].isnull().mean() for c in model_features],
+        'constant_in_train': [c in train_constant for c in model_features],
+        'constant_in_live': [c in live_constant for c in model_features]
+    })
+
+    # Feature importance from model, if possible
+    try:
+        importances = None
+        if hasattr(model, "feature_importances_"):
+            importances = model.feature_importances_
+        elif hasattr(model, "coef_"):
+            importances = model.coef_[0]
+        if importances is not None:
+            feature_summary = feature_summary.set_index('feature')
+            feature_summary['importance'] = pd.Series(importances, index=model_features)
+            feature_summary = feature_summary.reset_index()
+    except Exception:
+        pass
+
+    # Audit summary text
+    audit_summary = {
+        "n_train_cols": len(train_cols),
+        "n_live_cols": len(live_cols),
+        "n_used": len(model_features),
+        "n_missing_in_live": len(missing_in_live),
+        "n_missing_in_train": len(missing_in_train),
+        "n_constant_in_train": len(train_constant),
+        "n_constant_in_live": len(live_constant)
+    }
+    audit_text = StringIO()
+    print("===== MLB HR Model Audit Report =====", file=audit_text)
+    for k,v in audit_summary.items():
+        print(f"{k}: {v}", file=audit_text)
+    print("\n-- Features used (model input):", file=audit_text)
+    print(model_features, file=audit_text)
+    print("\n-- Features in history but missing from live:", file=audit_text)
+    print(missing_in_live, file=audit_text)
+    print("\n-- Features in live but missing from history:", file=audit_text)
+    print(missing_in_train, file=audit_text)
+    print("\n-- Features with high nulls in live (top 10):", file=audit_text)
+    print(live_nulls.head(10), file=audit_text)
+    print("\n-- Features with high nulls in train (top 10):", file=audit_text)
+    print(train_nulls.head(10), file=audit_text)
+    print("\n-- Constant features in train:", file=audit_text)
+    print(train_constant, file=audit_text)
+    print("\n-- Constant features in live:", file=audit_text)
+    print(live_constant, file=audit_text)
+    print("\n-- Suggested column mapping:", file=audit_text)
+    for a,b in mapping_suggestions:
+        print(f"{a} ↔ {b}", file=audit_text)
+    print("\n-- Feature coverage by type:", file=audit_text)
+    print(feature_summary['type'].value_counts(), file=audit_text)
+    audit_text = audit_text.getvalue()
+
+    st.markdown("### 📋 Detailed Model Audit Report")
+    st.code(audit_text)
+    st.markdown("#### Features/Stats Table (sortable)")
+    st.dataframe(feature_summary.sort_values(by="importance" if "importance" in feature_summary.columns else "feature", ascending=False))
+    st.download_button("⬇️ Download Full Audit Text (.txt)", audit_text, file_name="mlb_hr_model_audit_report.txt")
+    st.download_button("⬇️ Download Feature Summary (.csv)", feature_summary.to_csv(index=False), file_name="mlb_hr_feature_summary.csv")
+
+    # Download column suggestions
+    if mapping_suggestions:
+        mapping_df = pd.DataFrame(mapping_suggestions, columns=["missing_column", "possible_match"])
+        st.markdown("#### ⚡ Column Rename/Join Suggestions")
+        st.dataframe(mapping_df)
+        st.download_button("⬇️ Download Column Mapping Suggestions (.csv)", mapping_df.to_csv(index=False), file_name="mlb_hr_col_mapping_suggestions.csv")
