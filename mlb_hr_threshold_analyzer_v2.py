@@ -25,24 +25,33 @@ if train_file and live_file:
     live_cols = set(live_df.columns)
     intersect = [c for c in train_cols if c in live_cols]
 
-    # Robust model feature filtering
-    numeric_cols = [c for c in intersect if pd.api.types.is_numeric_dtype(train_df[c]) and c != "hr_outcome"]
-    train_feats = [c for c in numeric_cols if train_df[c].nunique(dropna=False) > 1 and train_df[c].notnull().any()]
-    live_feats = [c for c in numeric_cols if live_df[c].nunique(dropna=False) > 1 and live_df[c].notnull().any()]
-    model_features = [c for c in train_feats if c in live_feats]
+    # EXTRA DEBUG: Print full intersect and column properties
+    st.write("Intersect columns:", intersect)
+    for c in sorted(intersect):
+        st.write(f"Col: {c}  | train dtype: {train_df[c].dtype}  | live dtype: {live_df[c].dtype}  | train unique: {train_df[c].nunique(dropna=False)}  | live unique: {live_df[c].nunique(dropna=False)}  | train null: {train_df[c].isnull().mean()}  | live null: {live_df[c].isnull().mean()}")
+
+    # Maximally permissive model feature filter: keep all intersecting columns except id/meta columns, drop only constant/all-null in either file
+    meta_drop = ['hr_outcome','player_name']
+    model_features = [
+        c for c in intersect
+        if c not in meta_drop
+        and train_df[c].notnull().any() and live_df[c].notnull().any()
+        and train_df[c].nunique(dropna=False)>1 and live_df[c].nunique(dropna=False)>1
+    ]
     st.write(f"Model features used ({len(model_features)}): {model_features}")
 
-    missing_in_live = [c for c in train_feats if c not in live_feats]
-    missing_in_train = [c for c in live_feats if c not in train_feats]
+    # Rest of audit unchanged
+    missing_in_live = [c for c in model_features if c not in live_df.columns]
+    missing_in_train = [c for c in model_features if c not in train_df.columns]
     st.write("Features in history but missing from live:", missing_in_live)
     st.write("Features in live but missing from history:", missing_in_train)
 
-    dropped_constant_train = [c for c in numeric_cols if train_df[c].nunique(dropna=False) <= 1]
-    dropped_constant_live = [c for c in numeric_cols if live_df[c].nunique(dropna=False) <= 1]
+    dropped_constant_train = [c for c in intersect if train_df[c].nunique(dropna=False) <= 1]
+    dropped_constant_live = [c for c in intersect if live_df[c].nunique(dropna=False) <= 1]
     st.write("Features dropped (constant in train):", dropped_constant_train)
     st.write("Features dropped (constant in live):", dropped_constant_live)
-    dropped_null_train = [c for c in numeric_cols if train_df[c].isnull().all()]
-    dropped_null_live = [c for c in numeric_cols if live_df[c].isnull().all()]
+    dropped_null_train = [c for c in intersect if train_df[c].isnull().all()]
+    dropped_null_live = [c for c in intersect if live_df[c].isnull().all()]
     st.write("Features dropped (all-null in train):", dropped_null_train)
     st.write("Features dropped (all-null in live):", dropped_null_live)
     st.write("Null count in live file (top 20):")
@@ -80,8 +89,8 @@ if train_file and live_file:
     train_cols_lower = set([c.lower() for c in train_df.columns])
     live_cols_lower = set([c.lower() for c in live_df.columns])
     used_features = [c for c in model_features if c.lower() in live_cols_lower and c.lower() in train_cols_lower]
-    missing_in_live_lower = [c for c in train_feats if c.lower() not in live_cols_lower]
-    missing_in_train_lower = [c for c in live_feats if c.lower() not in train_cols_lower]
+    missing_in_live_lower = [c for c in model_features if c.lower() not in live_cols_lower]
+    missing_in_train_lower = [c for c in model_features if c.lower() not in train_cols_lower]
 
     train_nulls = train_df[model_features].isnull().mean().sort_values(ascending=False) if model_features else pd.Series()
     live_nulls = live_df[model_features].isnull().mean().sort_values(ascending=False) if model_features else pd.Series()
