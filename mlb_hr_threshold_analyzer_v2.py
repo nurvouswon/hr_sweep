@@ -19,64 +19,102 @@ if train_file and live_file:
     train_df = pd.read_csv(train_file)
     live_df = pd.read_csv(live_file)
 
-    # Show all intersect columns for debug
-    intersect = [c for c in train_df.columns if c in live_df.columns]
-    st.write("Intersect columns:\n", intersect)
+    # Show intersect columns and basic audit
+    train_cols = set(train_df.columns)
+    live_cols = set(live_df.columns)
+    intersect_cols = [c for c in train_cols if c in live_cols]
 
-    # --- Fix: Only use *numeric* columns for model ---
-    # Check numeric in both train and live
-    numeric_cols = [
-        c for c in intersect
-        if pd.api.types.is_numeric_dtype(train_df[c]) and pd.api.types.is_numeric_dtype(live_df[c])
-        and c != "hr_outcome"
-    ]
+    st.subheader("🔍 Audit Report:")
+    st.write("**Intersect columns:**", intersect_cols)
 
-    # Drop all-null or constant columns in BOTH files
-    def is_valid_numeric(col):
-        return (
-            train_df[col].notnull().any() and train_df[col].nunique(dropna=True) > 1 and
-            live_df[col].notnull().any() and live_df[col].nunique(dropna=True) > 1
-        )
-    model_features = [c for c in numeric_cols if is_valid_numeric(c)]
-    st.write(f"Model features used ({len(model_features)}): {model_features}")
+    # Feature-by-feature audit table
+    audit_rows = []
+    for col in intersect_cols:
+        t_dtype = str(train_df[col].dtype)
+        l_dtype = str(live_df[col].dtype)
+        t_unique = train_df[col].nunique(dropna=False)
+        l_unique = live_df[col].nunique(dropna=False)
+        t_null = train_df[col].isnull().mean()
+        l_null = live_df[col].isnull().mean()
+        audit_rows.append({
+            "col": col,
+            "train dtype": t_dtype,
+            "live dtype": l_dtype,
+            "train unique": t_unique,
+            "live unique": l_unique,
+            "train null": round(t_null, 4),
+            "live null": round(l_null, 4)
+        })
+    audit_table = pd.DataFrame(audit_rows)
+    st.dataframe(audit_table)
 
-    # Also show dtypes for double-debug
-    st.write(pd.DataFrame({
-        'col': model_features,
-        'train_dtype': [str(train_df[c].dtype) for c in model_features],
-        'live_dtype': [str(live_df[c].dtype) for c in model_features],
-        'train_null': [train_df[c].isnull().mean() for c in model_features],
-        'live_null': [live_df[c].isnull().mean() for c in model_features],
-        'train_unique': [train_df[c].nunique(dropna=True) for c in model_features],
-        'live_unique': [live_df[c].nunique(dropna=True) for c in model_features],
-    }))
+    # Step 1: Numeric in BOTH, not hr_outcome
+    num_both = []
+    for col in intersect_cols:
+        if (
+            pd.api.types.is_numeric_dtype(train_df[col]) and
+            pd.api.types.is_numeric_dtype(live_df[col]) and
+            col != "hr_outcome"
+        ):
+            num_both.append(col)
 
-    # Dropped (all null or constant) columns
-    dropped_null_or_const = [c for c in intersect if (
-        train_df[c].isnull().all() and live_df[c].isnull().all()
-    ) or (
-        train_df[c].nunique(dropna=True) <= 1 and live_df[c].nunique(dropna=True) <= 1
-    )]
-    st.write("Dropped (all null both):", dropped_null_or_const)
-    st.write("Dropped (constant in both):", dropped_null_or_const)
+    st.write("**Numeric in both train & live:**", num_both)
 
-    # --- Model Fit & Predict ---
-    from sklearn.linear_model import LogisticRegression
+    # Step 2: Not all-null in either
+    not_null = [c for c in num_both if not train_df[c].isnull().all() and not live_df[c].isnull().all()]
+    st.write("**Not all-null in both files:**", not_null)
 
-    X = train_df[model_features].fillna(0)
-    y = train_df['hr_outcome'].astype(int)
-    model = LogisticRegression(max_iter=200, solver="liblinear")
-    model.fit(X, y)
+    # Step 3: Not constant in BOTH files
+    not_constant = [c for c in not_null if train_df[c].nunique(dropna=False) > 1 and live_df[c].nunique(dropna=False) > 1]
+    st.write("**Not constant in both files:**", not_constant)
 
-    X_live = live_df[model_features].fillna(0)
-    hr_probs = model.predict_proba(X_live)[:, 1]
-    live_df["hr_pred_prob"] = hr_probs
+    # Model features used
+    model_features = not_constant
+    st.write(f"**Model features used ({len(model_features)}):** {model_features}")
 
-    # Output sweep
-    st.markdown("### Results: HR Bot Picks by Threshold")
-    thresholds = np.arange(min_thr, max_thr + step_thr, step_thr)
-    for thr in thresholds:
-        picks = live_df.loc[live_df["hr_pred_prob"] >= thr, "player_name"].tolist()
-        st.write(f"Threshold {thr:.2f}: {picks}")
+    # --- Diagnostics for why columns are dropped ---
+    dropped_all_null = [c for c in num_both if train_df[c].isnull().all() or live_df[c].isnull().all()]
+    dropped_constant = [c for c in not_null if train_df[c].nunique(dropna=False) <= 1 or live_df[c].nunique(dropna=False) <= 1]
+    dropped_not_numeric = [c for c in intersect_cols if c not in num_both and c != "hr_outcome"]
+
+    st.write("**Dropped (all null in either file):**", dropped_all_null)
+    st.write("**Dropped (constant in either file):**", dropped_constant)
+    st.write("**Dropped (not numeric in both):**", dropped_not_numeric)
+
+    # Optional: show dtypes for dropped not numeric columns
+    if dropped_not_numeric:
+        nonnum_types = [(c, train_df[c].dtype, live_df[c].dtype) for c in dropped_not_numeric]
+        st.write("**Dropped non-numeric dtypes:**", nonnum_types)
+
+    # Final X, y, and model run
+    if model_features:
+        from sklearn.linear_model import LogisticRegression
+        model = LogisticRegression(max_iter=200, solver="liblinear")
+        X = train_df[model_features].fillna(0)
+        y = train_df['hr_outcome'].astype(int)
+        model.fit(X, y)
+
+        # Score live
+        X_live = live_df[model_features].fillna(0)
+        hr_probs = model.predict_proba(X_live)[:, 1]
+        live_df["hr_pred_prob"] = hr_probs
+
+        # Output sweep
+        st.markdown("### Results: HR Bot Picks by Threshold")
+        out_report = {}
+        thresholds = np.arange(min_thr, max_thr + step_thr, step_thr)
+        for thr in thresholds:
+            picks = live_df.loc[live_df["hr_pred_prob"] >= thr, "player_name"].tolist()
+            out_report[thr] = picks
+            st.write(f"Threshold {thr:.2f}: {picks}")
+    else:
+        st.error("No model features passed filtering. Check audit and dropped features above.")
 
     st.markdown("Done! These are the official HR bot picks for today at each threshold.")
+
+    # Download full audit table
+    st.download_button(
+        "⬇️ Download Audit Table (.csv)",
+        audit_table.to_csv(index=False),
+        file_name="mlb_hr_feature_audit_table.csv"
+    )
