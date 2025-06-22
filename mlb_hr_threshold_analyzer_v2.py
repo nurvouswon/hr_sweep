@@ -6,116 +6,155 @@ from sklearn.preprocessing import LabelEncoder
 
 st.header("2️⃣ Upload Event-Level CSVs & Run Model")
 
-# ---- Uploaders ----
+# --- CSV Uploaders
 train_file = st.file_uploader("Upload Training Event-Level CSV (with hr_outcome)", type="csv", key="train_csv")
 live_file = st.file_uploader("Upload Today's Event-Level CSV (with merged features, NO hr_outcome)", type="csv", key="live_csv")
 
-min_thr = st.number_input("Min HR Prob Threshold", min_value=0.0, max_value=1.0, value=0.05, step=0.01)
-max_thr = st.number_input("Max HR Prob Threshold", min_value=0.0, max_value=1.0, value=0.20, step=0.01)
-step_thr = st.number_input("Threshold Step", min_value=0.001, max_value=0.2, value=0.01, step=0.001)
+min_threshold = st.number_input("Min HR Prob Threshold", 0.0, 1.0, 0.05, 0.01)
+max_threshold = st.number_input("Max HR Prob Threshold", 0.0, 1.0, 0.20, 0.01)
+threshold_step = st.number_input("Threshold Step", 0.001, 0.2, 0.01, 0.001)
 
-if train_file and live_file:
+if train_file is not None and live_file is not None:
+    # --- Load Data
     df_train = pd.read_csv(train_file)
     df_live = pd.read_csv(live_file)
-    st.write(f"Training file loaded! {df_train.shape[0]:,} rows, {df_train.shape[1]} columns.")
-    st.write(f"Today's file loaded! {df_live.shape[0]:,} rows, {df_live.shape[1]} columns.")
+    st.success(f"Training file loaded! {len(df_train):,} rows, {df_train.shape[1]} columns.")
+    st.success(f"Today's file loaded! {len(df_live):,} rows, {df_live.shape[1]} columns.")
+    
+    # --- Standardize column names (lowercase, underscores)
+    def clean_col(c):
+        return c.lower().replace("-", "_").replace(" ", "_")
+    df_train.columns = [clean_col(c) for c in df_train.columns]
+    df_live.columns = [clean_col(c) for c in df_live.columns]
+    
+    # --- Feature Mapping Helper
+    def match_col(col, columns):
+        """Find best-matching col (case/underscore-insensitive)"""
+        col = col.lower().replace("-", "_")
+        matches = [c for c in columns if c.lower().replace("-", "_") == col]
+        return matches[0] if matches else None
 
-    # --- Diagnostics: Feature Intersections ---
-    train_cols = set(df_train.columns.str.lower())
-    live_cols = set(df_live.columns.str.lower())
-    train_only = sorted(train_cols - live_cols)
-    live_only = sorted(live_cols - train_cols)
-    both = sorted(train_cols & live_cols)
-
+    # --- Feature Diagnostics
+    train_cols = set(df_train.columns)
+    live_cols = set(df_live.columns)
+    missing_from_live = sorted(list(train_cols - live_cols))
+    missing_from_train = sorted(list(live_cols - train_cols))
     st.markdown("### 🩺 Feature Diagnostics Table (train/live overlap)")
-    if train_only:
-        st.write("**Features in train missing from live:**", train_only)
-    if live_only:
-        st.write("**Features in live missing from train:**", live_only)
+    st.write("**Features in train missing from live:**", missing_from_live)
+    st.write("**Features in live missing from train:**", missing_from_train)
+    
+    # Dtype checks (show only if mismatch)
+    dtype_debug = []
+    for col in (train_cols & live_cols):
+        if df_train[col].dtype != df_live[col].dtype:
+            dtype_debug.append(f"{col}: train={df_train[col].dtype}, live={df_live[col].dtype}")
+    if dtype_debug:
+        st.warning("⚠️ Dtype mismatches detected! " + "; ".join(dtype_debug))
+    
+    # --- HR Outcome col
+    hr_col = match_col("hr_outcome", df_train.columns)
+    if not hr_col:
+        st.error("No `hr_outcome` column found in training data.")
+        st.stop()
 
-    # Dtype audit (optional, advanced debug)
-    dtype_mismatches = []
-    for c in both:
-        if c in df_train.columns and c in df_live.columns:
-            if str(df_train[c].dtype) != str(df_live[c].dtype):
-                dtype_mismatches.append((c, str(df_train[c].dtype), str(df_live[c].dtype)))
-    if dtype_mismatches:
-        st.warning("⚠️ Dtype mismatches detected!\n" + "\n".join([f"{x[0]}: train={x[1]}, live={x[2]}" for x in dtype_mismatches]))
+    # --- Numeric/Categorical Split
+    num_feats = []
+    cat_feats = []
+    for c in df_train.columns:
+        if c == hr_col:
+            continue
+        if df_train[c].dtype in [np.float32, np.float64, np.int32, np.int64]:
+            num_feats.append(c)
+        else:
+            if len(df_train[c].unique()) <= 30:  # treat as categorical if small cardinality
+                cat_feats.append(c)
+            else:
+                num_feats.append(c)
 
-    # Normalize column names to lowercase for matching
-    df_train.columns = df_train.columns.str.lower()
-    df_live.columns = df_live.columns.str.lower()
+    # --- Strict: use only features present in both AND non-null
+    features_to_use = []
+    for c in df_train.columns:
+        if c == hr_col: continue
+        c_live = match_col(c, df_live.columns)
+        if c_live is None:
+            continue
+        if df_train[c].notnull().sum() == 0: continue
+        if df_live[c_live].notnull().sum() == 0: continue
+        features_to_use.append(c)
 
-    # Use only features present in BOTH train and live, and not all-null in either
-    candidate_feats = [c for c in both if df_train[c].notnull().sum() > 0 and df_live[c].notnull().sum() > 0]
-    # Remove obvious metadata/object columns not suitable for regression
-    not_allowed = {'game_date','player_name','description','events','stadium','city','team_code','mlb_id','weather','position','batting_order','time','game_number','home_team','away_team','pitch_type'}
-    features_to_use = [c for c in candidate_feats if c not in not_allowed]
-    # Exclude object columns not categorical
-    object_cols = [c for c in features_to_use if df_train[c].dtype == "object" or df_live[c].dtype == "object"]
-    # Only keep categorical object columns with <20 unique values in both
-    cat_feats = [c for c in object_cols if max(df_train[c].nunique(), df_live[c].nunique()) < 20]
-    # Remove non-categorical objects from features to use
-    features_to_use = [c for c in features_to_use if c not in object_cols or c in cat_feats]
-
-    st.write(f"Final features used ({len(features_to_use)}):")
+    # Final feature map
+    st.markdown("**Final features used ({}):**".format(len(features_to_use)))
     st.write(features_to_use)
 
-    # Audit for nulls
-    st.write("#### Null Fraction (train):")
-    st.write(df_train[features_to_use].isnull().mean())
-    st.write("#### Null Fraction (live):")
-    st.write(df_live[features_to_use].isnull().mean())
+    # Null fraction audit
+    null_report = pd.DataFrame({
+        'feature': features_to_use,
+        'null_frac_train': [df_train[c].isnull().mean() for c in features_to_use],
+        'null_frac_live': [df_live[match_col(c, df_live.columns)].isnull().mean() for c in features_to_use]
+    })
+    st.dataframe(null_report, height=250)
 
-    # Prepare features
-    X_train = df_train[features_to_use].copy()
-    X_live = df_live[features_to_use].copy()
+    # Dtype Fixes
+    if 'batter_id' in df_train.columns:
+        df_train['batter_id'] = pd.to_numeric(df_train['batter_id'], errors='coerce').astype('Int64')
+    if 'batter_id' in df_live.columns:
+        df_live['batter_id'] = pd.to_numeric(df_live['batter_id'], errors='coerce').astype('Int64')
+    # force "park" to str if it exists in both
+    if 'park' in df_train.columns and 'park' in df_live.columns:
+        df_train['park'] = df_train['park'].astype(str)
+        df_live['park'] = df_live['park'].astype(str)
 
-    # Handle categoricals safely (fit on union, fillna "NA")
-    for c in cat_feats:
-        train_vals = X_train[c].fillna("NA").astype(str)
-        live_vals = X_live[c].fillna("NA").astype(str)
-        le = LabelEncoder()
-        le.fit(pd.concat([train_vals, live_vals]).unique())
-        X_train[c] = le.transform(train_vals)
-        X_live[c] = le.transform(live_vals)
+    # --- Build X/y for train/live
+    X_train = pd.DataFrame({c: df_train[c] for c in features_to_use})
+    X_live = pd.DataFrame({c: df_live[match_col(c, df_live.columns)] for c in features_to_use})
+    y_train = df_train[hr_col].fillna(0).astype(int)
 
-    # Fill numeric nulls with train median
-    num_feats = [c for c in features_to_use if c not in cat_feats]
-    for c in num_feats:
-        X_train[c] = X_train[c].fillna(X_train[c].median())
-        X_live[c] = X_live[c].fillna(X_train[c].median())
+    # Label Encoding
+    for c in features_to_use:
+        if X_train[c].dtype == object or str(X_train[c].dtype).startswith("category"):
+            # Fit on TRAIN, transform both, with fallback for unknowns in LIVE
+            le = LabelEncoder()
+            X_train[c] = X_train[c].astype(str).fillna("unknown")
+            le.fit(list(X_train[c].unique()))
+            X_train[c] = le.transform(X_train[c])
+            # Apply to live, unknowns to special index
+            X_live[c] = X_live[c].astype(str).fillna("unknown")
+            known_labels = set(le.classes_)
+            X_live[c] = [le.transform([x])[0] if x in known_labels else -1 for x in X_live[c]]
 
-    # Ready for model
-    if "hr_outcome" in df_train.columns:
-        y_train = df_train["hr_outcome"]
-        try:
-            model = LogisticRegression(max_iter=500)
-            model.fit(X_train, y_train)
-            st.success(f"Model fit OK with {len(features_to_use)} features.")
+    # --- Model Fit
+    try:
+        model = LogisticRegression(max_iter=500)
+        model.fit(X_train, y_train)
+        y_pred_proba = model.predict_proba(X_live)[:,1]
+        st.success(f"Model fit OK with {len(features_to_use)} features.")
+    except Exception as e:
+        st.error(f"Model fitting or prediction failed: {e}")
+        st.stop()
 
-            # Predict live probs
-            probs = model.predict_proba(X_live)[:,1]
-            df_preds = df_live.copy()
-            df_preds["HR_Prob"] = probs
+    # --- Show sliders again for clarity
+    st.markdown("#### Threshold Controls")
+    min_threshold = st.number_input("Min HR Prob Threshold", 0.0, 1.0, float(min_threshold), 0.01, key="min_thr_show")
+    max_threshold = st.number_input("Max HR Prob Threshold", 0.0, 1.0, float(max_threshold), 0.01, key="max_thr_show")
+    threshold_step = st.number_input("Threshold Step", 0.001, 0.2, float(threshold_step), 0.001, key="step_thr_show")
 
-            # Threshold controls
-            st.write("### Threshold Controls")
-            thrs = np.arange(min_thr, max_thr + step_thr/2, step_thr)
-            out = []
-            for t in thrs:
-                n = (df_preds["HR_Prob"] >= t).sum()
-                out.append({"Threshold": round(t, 3), "Num_Predicted": int(n)})
-            st.dataframe(pd.DataFrame(out))
+    # --- HR Bot Picks For Each Threshold
+    st.subheader("Bot Picks For Each HR Prob Threshold")
+    thresholds = np.arange(min_threshold, max_threshold + threshold_step/2, threshold_step)
+    df_live_disp = df_live.copy()
+    df_live_disp["HR_Prob"] = y_pred_proba
 
-            st.write("### Live HR Probabilities")
-            st.dataframe(df_preds[["player_name","HR_Prob"] + [c for c in features_to_use if c in df_preds.columns]].sort_values("HR_Prob", ascending=False).head(25))
-
-        except Exception as e:
-            st.error(f"Model fitting or prediction failed: {e}")
-
-    else:
-        st.warning("Training CSV does not contain 'hr_outcome' column.")
+    for th in thresholds:
+        picks = df_live_disp[df_live_disp["HR_Prob"] >= th].copy()
+        picks = picks.sort_values("HR_Prob", ascending=False)
+        st.markdown(f"**Threshold ≥ {th:.3f}** &mdash; {len(picks)} picks")
+        if not picks.empty:
+            show_cols = ["player_name", "team_code", "batter_id", "HR_Prob"] + \
+                [c for c in ["batting_order", "position", "stadium", "game_date", "hard_hit_rate_20", "sweet_spot_rate_20"]
+                if c in picks.columns]
+            st.dataframe(picks[show_cols].reset_index(drop=True), use_container_width=True)
+        else:
+            st.info("No picks at this threshold.")
 
 else:
-    st.info("Please upload BOTH training and today's CSV files.")
+    st.info("Please upload both the training and today's CSV files above to run the analyzer.")
