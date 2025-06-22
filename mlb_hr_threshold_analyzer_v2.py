@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder
+from xgboost import XGBClassifier  # ← NEW import
 
 st.header("2️⃣ Upload Event-Level CSVs & Run Model")
 
@@ -100,15 +100,24 @@ if train_file and live_file:
         X_live[c] = le.transform(X_live[c])
         encoders[c] = le
 
-    # Fit model
+    # Fit XGBoost model
     try:
         y_train = df_train["hr_outcome"].astype(int)
-        model = LogisticRegression(max_iter=500)
+        model = XGBClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            use_label_encoder=False,
+            eval_metric="logloss",
+            verbosity=0
+        )
         model.fit(X_train, y_train)
         y_pred_proba = model.predict_proba(X_live)[:, 1]
         df_live_out = df_live.copy()
         df_live_out["hr_prob"] = y_pred_proba
-        st.success(f"Model fit OK with {len(features_to_use)} features.")
+        st.success(f"Model fit OK with {len(features_to_use)} features (XGBoost).")
     except Exception as e:
         st.error(f"Model fitting or prediction failed: {e}")
         st.stop()
