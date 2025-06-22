@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from xgboost import XGBClassifier  # ← NEW import
+import matplotlib.pyplot as plt  # for feature importance plot
 
 st.header("2️⃣ Upload Event-Level CSVs & Run Model")
 
@@ -46,7 +47,6 @@ if train_file and live_file:
     features_to_use = []
     for c in candidate_feats:
         if (df_train[c].notnull().sum() > 0) and (df_live[c].notnull().sum() > 0):
-            # Remove columns that are constant in both (e.g., always 0 or always same string)
             if df_train[c].nunique(dropna=True) > 1 or df_live[c].nunique(dropna=True) > 1:
                 features_to_use.append(c)
 
@@ -118,6 +118,17 @@ if train_file and live_file:
         df_live_out = df_live.copy()
         df_live_out["hr_prob"] = y_pred_proba
         st.success(f"Model fit OK with {len(features_to_use)} features (XGBoost).")
+
+        # --------- FEATURE IMPORTANCE SECTION ---------
+        st.subheader("Feature Importance (Top 20)")
+        importances = model.feature_importances_
+        feat_imp = pd.Series(importances, index=features_to_use)
+        top_feats = feat_imp.sort_values(ascending=False).head(20)
+        st.bar_chart(top_feats)
+        # Show table version too
+        st.dataframe(top_feats.reset_index().rename(columns={"index": "Feature", 0: "Importance"}))
+        # ---------------------------------------------
+
     except Exception as e:
         st.error(f"Model fitting or prediction failed: {e}")
         st.stop()
