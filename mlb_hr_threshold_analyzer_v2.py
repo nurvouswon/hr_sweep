@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
-from xgboost import XGBClassifier  # ← NEW import
+from xgboost import XGBClassifier
 
 st.header("2️⃣ Upload Event-Level CSVs & Run Model")
 
@@ -25,7 +25,7 @@ if train_file and live_file:
     st.success(f"Training file loaded! {df_train.shape[0]:,} rows, {df_train.shape[1]} columns.")
     st.success(f"Today's file loaded! {df_live.shape[0]:,} rows, {df_live.shape[1]} columns.")
 
-    # Display feature diagnostics
+    # Diagnostic table
     st.markdown("### 🩺 Feature Diagnostics Table (train/live overlap)")
     train_cols = set(df_train.columns.str.lower())
     live_cols = set(df_live.columns.str.lower())
@@ -36,71 +36,74 @@ if train_file and live_file:
     st.write("**Features in live missing from train:**")
     st.write(missing_in_train if missing_in_train else "None")
 
-    # Standardize column names to lower case for easier matching
+    # Standardize column names
     df_train.columns = [c.lower() for c in df_train.columns]
     df_live.columns = [c.lower() for c in df_live.columns]
 
-    # Get intersection for modeling
+    # Intersecting features
     candidate_feats = [c for c in df_train.columns if c in df_live.columns and c not in ("hr_outcome",)]
-    # Drop columns that are all null or all constant in either
+    # Remove all-null/all-constant columns
     features_to_use = []
     for c in candidate_feats:
         if (df_train[c].notnull().sum() > 0) and (df_live[c].notnull().sum() > 0):
-            # Remove columns that are constant in both (e.g., always 0 or always same string)
             if df_train[c].nunique(dropna=True) > 1 or df_live[c].nunique(dropna=True) > 1:
                 features_to_use.append(c)
 
-    # Show dtype mismatches
+    # Dtype harmonization
+    cat_feats = [c for c in features_to_use if str(df_train[c].dtype) in ("object", "category", "string")]
+    num_feats = [c for c in features_to_use if c not in cat_feats]
+
     dtype_problems = []
     for c in features_to_use:
         if c in df_train.columns and c in df_live.columns:
-            if str(df_train[c].dtype) != str(df_live[c].dtype):
-                dtype_problems.append(f"{c}: train={df_train[c].dtype}, live={df_live[c].dtype}")
+            # Only care if not both categorical or both numeric
+            dt1, dt2 = str(df_train[c].dtype), str(df_live[c].dtype)
+            if (dt1 != dt2) and not (
+                dt1 in ("object", "string", "category") and dt2 in ("object", "string", "category")
+            ):
+                dtype_problems.append(f"{c}: train={dt1}, live={dt2}")
     if dtype_problems:
         st.warning("⚠️ Dtype mismatches detected! " + "; ".join(dtype_problems))
 
     st.write(f"**Final features used ({len(features_to_use)}):**")
     st.write(features_to_use)
-
-    # Show null fraction
     st.write("Null Fraction (train):")
     st.write(df_train[features_to_use].isnull().mean())
     st.write("Null Fraction (live):")
     st.write(df_live[features_to_use].isnull().mean())
 
-    # Preprocess for model
-    X_train = df_train[features_to_use].copy()
-    X_live = df_live[features_to_use].copy()
+    # Impute/convert numeric features to float32
+    for c in num_feats:
+        df_train[c] = pd.to_numeric(df_train[c], errors="coerce").astype(np.float32)
+        df_train[c] = df_train[c].fillna(df_train[c].mean())
+        df_live[c] = pd.to_numeric(df_live[c], errors="coerce").astype(np.float32)
+        df_live[c] = df_live[c].fillna(df_train[c].mean())
 
-    # Find categorical features (object or string)
-    cat_feats = [c for c in features_to_use if str(X_train[c].dtype) in ("object", "category", "string")]
+    # Categorical features: string with NA
+    for c in cat_feats:
+        df_train[c] = df_train[c].astype(str).fillna("NA")
+        df_live[c] = df_live[c].astype(str).fillna("NA")
 
-    # Impute missing numerics with mean; categorical with "NA"
-    for c in features_to_use:
-        if c in cat_feats:
-            X_train[c] = X_train[c].astype(str).fillna("NA")
-            X_live[c] = X_live[c].astype(str).fillna("NA")
-        else:
-            X_train[c] = pd.to_numeric(X_train[c], errors="coerce")
-            X_train[c] = X_train[c].fillna(X_train[c].mean())
-            X_live[c] = pd.to_numeric(X_live[c], errors="coerce")
-            X_live[c] = X_live[c].fillna(X_train[c].mean())  # use train mean
-
-    # Encode categorical
+    # LabelEncode categoricals (train on train set; expand for new live values)
     encoders = {}
     for c in cat_feats:
         le = LabelEncoder()
-        X_train[c] = le.fit_transform(X_train[c])
-        # If live has unseen values, assign them a special code
-        live_vals = pd.Series(X_live[c].unique())
+        df_train[c] = le.fit_transform(df_train[c])
+        # For live: add any unseen categories to encoder
+        live_vals = pd.Series(df_live[c].unique())
         new_vals = live_vals[~live_vals.isin(le.classes_)]
         if not new_vals.empty:
             le_classes = np.concatenate([le.classes_, new_vals])
             le.classes_ = le_classes
-        X_live[c] = le.transform(X_live[c])
+        df_live[c] = le.transform(df_live[c])
         encoders[c] = le
 
-    # Fit XGBoost model
+    # Strict feature order for both sets
+    X_train = df_train[features_to_use].copy()
+    X_live = df_live[features_to_use].copy()
+    X_live = X_live[X_train.columns.tolist()]
+
+    # Train XGBoost
     try:
         y_train = df_train["hr_outcome"].astype(int)
         model = XGBClassifier(
@@ -122,7 +125,7 @@ if train_file and live_file:
         st.error(f"Model fitting or prediction failed: {e}")
         st.stop()
 
-    # Show threshold controls and picks
+    # Show picks at each threshold
     st.markdown("### Threshold Controls")
     st.write(f"Min HR Prob Threshold: {min_thr}")
     st.write(f"Max HR Prob Threshold: {max_thr}")
@@ -136,15 +139,16 @@ if train_file and live_file:
     else:
         player_col = features_to_use[0]  # fallback
 
-    # Show bot picks for each threshold
     for thr in np.arange(min_thr, max_thr + step, step):
         picks = df_live_out[df_live_out["hr_prob"] >= thr].copy()
         if not picks.empty:
             st.subheader(f"Players with HR Prob ≥ {thr:.2f} ({len(picks)} picks)")
-            st.dataframe(
-                picks[[player_col, "batter_id"] + [c for c in picks.columns if c not in [player_col, "batter_id", "hr_prob"]] + ["hr_prob"]]
-                .sort_values("hr_prob", ascending=False).reset_index(drop=True)
+            display_cols = (
+                [player_col, "batter_id"]
+                + [c for c in picks.columns if c not in [player_col, "batter_id", "hr_prob"]]
+                + ["hr_prob"]
             )
+            st.dataframe(picks[display_cols].sort_values("hr_prob", ascending=False).reset_index(drop=True))
         else:
             st.write(f"No players at threshold ≥ {thr:.2f}")
 
