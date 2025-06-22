@@ -1,139 +1,131 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from io import StringIO
+from sklearn.linear_model import LogisticRegression
 
 st.header("2️⃣ Upload Event-Level CSVs & Run Model")
 
-# --- Upload CSVs ---
-st.markdown("#### Upload Training Event-Level CSV (with hr_outcome)")
-train_file = st.file_uploader("Upload Training Event-Level CSV", type="csv", key="trainfile")
-st.markdown("#### Upload Today's Event-Level CSV (with merged features, NO hr_outcome)")
-live_file = st.file_uploader("Upload Today's Event-Level CSV", type="csv", key="livefile")
+# ---- 1. FILE UPLOADS ----
+train_file = st.file_uploader("Upload Training Event-Level CSV (with hr_outcome)", type="csv", key="train")
+live_file = st.file_uploader("Upload Today's Event-Level CSV (with merged features, NO hr_outcome)", type="csv", key="live")
 
-min_thr = st.number_input("Min HR Prob Threshold", 0.00, 0.5, 0.01, step=0.01)
-max_thr = st.number_input("Max HR Prob Threshold", 0.01, 0.5, 0.15, step=0.01)
-step_thr = st.number_input("Threshold Step", 0.01, 0.1, 0.01, step=0.01)
+min_threshold = st.number_input("Min HR Prob Threshold", value=0.05, min_value=0.0, max_value=1.0, step=0.01)
+max_threshold = st.number_input("Max HR Prob Threshold", value=0.20, min_value=0.0, max_value=1.0, step=0.01)
+threshold_step = st.number_input("Threshold Step", value=0.01, min_value=0.001, max_value=1.0, step=0.01)
 
 if train_file and live_file:
     train_df = pd.read_csv(train_file)
     live_df = pd.read_csv(live_file)
 
-    # --- Deep Feature Diagnostics ---
+    # --------- 2. FEATURE DIAGNOSTICS AND ROBUST SELECTION ----------
     st.subheader("🩺 Deep Feature Diagnostics")
 
+    # Lowercase columns for intersection
+    train_cols = set([c.lower() for c in train_df.columns])
+    live_cols = set([c.lower() for c in live_df.columns])
+    common_cols = train_cols & live_cols
+
+    # Use original casing from train file (for better modeling)
+    def find_real_case(colname, columns):
+        for c in columns:
+            if c.lower() == colname:
+                return c
+        return colname
+
+    # Get canonical names
+    canon_cols = [find_real_case(col, train_df.columns) for col in common_cols]
+
+    feature_diagnostics = []
+    candidate_features = []
+
+    for col in canon_cols:
+        t = train_df[col]
+        l = live_df[col] if col in live_df.columns else live_df[[c for c in live_df.columns if c.lower() == col.lower()][0]]
+
+        # Try to align dtypes if possible
+        if t.dtype != l.dtype:
+            try:
+                if np.issubdtype(t.dtype, np.number) and np.issubdtype(l.dtype, np.number):
+                    t = t.astype(float)
+                    l = l.astype(float)
+            except Exception:
+                pass
+
+        t_null_frac = t.isnull().mean()
+        l_null_frac = l.isnull().mean()
+        t_unique = t.nunique(dropna=True)
+        l_unique = l.nunique(dropna=True)
+        # Allow all but all-null columns
+        if (t_null_frac < 1.0) and (l_null_frac < 1.0):
+            if np.issubdtype(t.dtype, np.number) or np.issubdtype(l.dtype, np.number):
+                candidate_features.append(col)
+        feature_diagnostics.append({
+            "feature": col,
+            "train_dtype": str(t.dtype),
+            "live_dtype": str(l.dtype),
+            "train_unique": t_unique,
+            "live_unique": l_unique,
+            "train_null_frac": round(t_null_frac, 3),
+            "live_null_frac": round(l_null_frac, 3),
+        })
+
+    # ---- Diagnostic Outputs ----
     st.markdown("**Live file columns:**")
-    for i in range(0, len(live_df.columns), 100):
-        st.write(f"[{i} - {min(i+100, len(live_df.columns))}]")
-        st.write(list(live_df.columns[i:i+100]))
-
+    st.code(str(list(live_df.columns)))
     st.markdown("**Train file columns:**")
-    for i in range(0, len(train_df.columns), 100):
-        st.write(f"[{i} - {min(i+100, len(train_df.columns))}]")
-        st.write(list(train_df.columns[i:i+100]))
-
-    # Non-null cols
+    st.code(str(list(train_df.columns)))
     st.markdown("**Live columns with non-null values:**")
-    st.write(list(live_df.columns[live_df.notnull().any()]))
+    st.code(str([c for c in live_df.columns if live_df[c].notnull().any()]))
     st.markdown("**Train columns with non-null values:**")
-    st.write(list(train_df.columns[train_df.notnull().any()]))
-
-    # All-null cols
+    st.code(str([c for c in train_df.columns if train_df[c].notnull().any()]))
     st.markdown("**Live columns ALL null:**")
-    st.write(list(live_df.columns[live_df.isnull().all()]))
+    st.code(str([c for c in live_df.columns if live_df[c].isnull().all()]))
     st.markdown("**Train columns ALL null:**")
-    st.write(list(train_df.columns[train_df.isnull().all()]))
+    st.code(str([c for c in train_df.columns if train_df[c].isnull().all()]))
+    st.markdown("**Feature audit of live data:**")
+    st.dataframe(pd.DataFrame(feature_diagnostics))
 
-    # Sample dtype check
-    if 'batter_id' in train_df and 'batter_id' in live_df:
-        st.write(f"batter_id dtype in train: {train_df['batter_id'].dtype}")
-        st.write(f"batter_id dtype in live: {live_df['batter_id'].dtype}")
-
-    if 'player_name' in train_df and 'player_name' in live_df:
-        st.write(f"player_name dtype in train: {train_df['player_name'].dtype}")
-        st.write(f"player_name dtype in live: {live_df['player_name'].dtype}")
-
-    # --- Feature-by-feature diagnostics ---
-    st.markdown("### 🔍 Feature Audit Table (train/live overlap)")
-    train_cols = set(train_df.columns)
-    live_cols = set(live_df.columns)
-    intersect = [c for c in train_cols if c in live_cols]
-    feat_diag = []
-    for c in intersect:
-        diag = {
-            'feature': c,
-            'train_dtype': str(train_df[c].dtype),
-            'live_dtype': str(live_df[c].dtype),
-            'train_unique': train_df[c].nunique(dropna=False),
-            'live_unique': live_df[c].nunique(dropna=False),
-            'train_null_frac': np.round(train_df[c].isnull().mean(), 4),
-            'live_null_frac': np.round(live_df[c].isnull().mean(), 4),
-            'train_all_null': train_df[c].isnull().all(),
-            'live_all_null': live_df[c].isnull().all(),
-            'train_constant': train_df[c].nunique(dropna=False) <= 1,
-            'live_constant': live_df[c].nunique(dropna=False) <= 1,
-        }
-        feat_diag.append(diag)
-    feat_diag_df = pd.DataFrame(feat_diag)
-    st.dataframe(feat_diag_df, use_container_width=True)
-
-    # RELAXED filter: all numeric/categorical features that are not all null in both files
-    candidate_features = [
-        c for c in intersect
-        if (pd.api.types.is_numeric_dtype(train_df[c]) or pd.api.types.is_numeric_dtype(live_df[c]))
-        and (not train_df[c].isnull().all())
-        and (not live_df[c].isnull().all())
-        and c != 'hr_outcome'
-    ]
     st.markdown("#### 🟡 Candidate Numeric Features (relaxed):")
     st.write(candidate_features)
 
-    # STRICT: Model features must be numeric, at least 2 unique, not all-null in either file
-    def is_feature_valid(col):
-        if col == "hr_outcome":
-            return False
-        tdt = train_df[col].dtype
-        ldt = live_df[col].dtype
-        if pd.api.types.is_numeric_dtype(tdt) or pd.api.types.is_numeric_dtype(ldt):
-            tu = train_df[col].nunique(dropna=True)
-            lu = live_df[col].nunique(dropna=True)
-            return (tu > 1) and (lu > 1) and (not train_df[col].isnull().all()) and (not live_df[col].isnull().all())
-        # If object/categorical, allow only if both files have low-cardinality, at least 2 unique non-null, and not all-null
-        if (tdt == 'object' and ldt == 'object'):
-            tu = train_df[col].nunique(dropna=True)
-            lu = live_df[col].nunique(dropna=True)
-            return (tu > 1) and (lu > 1) and (tu < 20) and (lu < 20) and (not train_df[col].isnull().all()) and (not live_df[col].isnull().all())
-        return False
+    # -------------- 3. MODELING AND PREDICTIONS -----------------
+    # Check minimum features for model fit
+    usable_features = candidate_features.copy()
+    if "hr_outcome" in train_df.columns:
+        st.markdown("#### 🟢 Model Features Used (strict):")
+        st.write(usable_features)
 
-    model_features = [c for c in intersect if is_feature_valid(c)]
-    st.markdown("#### 🟢 Model Features Used (strict):")
-    st.write(model_features)
+        X = train_df[usable_features].fillna(0)
+        y = train_df["hr_outcome"].astype(int)
 
-    # --- Model Fit & Predict ---
-    if len(model_features) < 2:
-        st.error("❗ Less than 2 usable features detected for modeling! Check feature audit above or relax filter.")
+        model = LogisticRegression(max_iter=1000)
+        try:
+            model.fit(X, y)
+            st.success(f"Model fit OK with {len(usable_features)} features.")
+
+            # Predict on live (fillna=0 for now)
+            live_pred_df = live_df[usable_features].fillna(0)
+            probs = model.predict_proba(live_pred_df)[:,1]
+            live_df['HR_Prob'] = probs
+
+            # Threshold sweep
+            thresholds = np.arange(min_threshold, max_threshold + threshold_step, threshold_step)
+            results = {}
+            for thr in thresholds:
+                picks = live_df[live_df['HR_Prob'] >= thr]
+                results[round(thr, 3)] = list(picks['player_name'])
+
+            st.markdown("### Results: HR Bot Picks by Threshold")
+            for thr, picks in results.items():
+                st.write(f"**Threshold {thr:.3f}**: {picks}")
+
+            # Show table
+            st.dataframe(live_df[['player_name', 'HR_Prob'] + [f for f in usable_features if f != 'player_name']])
+
+        except Exception as e:
+            st.error(f"Model fitting or prediction failed: {e}")
+
     else:
-        from sklearn.linear_model import LogisticRegression
-        model = LogisticRegression(max_iter=200, solver="liblinear")
-        X = train_df[model_features].fillna(0)
-        y = train_df['hr_outcome'].astype(int)
-        model.fit(X, y)
-
-        # Score live
-        X_live = live_df[model_features].fillna(0)
-        hr_probs = model.predict_proba(X_live)[:, 1]
-        live_df["hr_pred_prob"] = hr_probs
-
-        # Output sweep
-        st.markdown("### Results: HR Bot Picks by Threshold")
-        out_report = {}
-        thresholds = np.arange(min_thr, max_thr + step_thr, step_thr)
-        for thr in thresholds:
-            picks = live_df.loc[live_df["hr_pred_prob"] >= thr, "player_name"].tolist()
-            out_report[thr] = picks
-            st.write(f"Threshold {thr:.2f}: {picks}")
-
-        st.markdown("Done! These are the official HR bot picks for today at each threshold.")
-
-    st.markdown("---")
-    st.markdown("**Full feature diagnostics and audit shown above. If features are missing, check null/constant counts in train/live or relax the filter.**")
+        st.warning("Your training file must have the 'hr_outcome' column for modeling.")
+else:
+    st.info("Upload both CSV files to begin.")
