@@ -1,187 +1,160 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import io
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder
 
 st.header("2️⃣ Upload Event-Level CSVs & Run Model")
 
-# Uploaders
-train_file = st.file_uploader(
-    "Upload Training Event-Level CSV (with hr_outcome)", type=["csv"], key="train_csv"
-)
-live_file = st.file_uploader(
-    "Upload Today's Event-Level CSV (with merged features, NO hr_outcome)", type=["csv"], key="live_csv"
-)
-
-# Threshold controls
-min_thr = st.number_input("Min HR Prob Threshold", min_value=0.0, max_value=1.0, value=0.05, step=0.01)
-max_thr = st.number_input("Max HR Prob Threshold", min_value=0.0, max_value=1.0, value=0.20, step=0.01)
-step = st.number_input("Threshold Step", min_value=0.001, max_value=0.2, value=0.01, step=0.01)
+# ---- File Uploaders ----
+train_file = st.file_uploader("Upload Training Event-Level CSV (with hr_outcome)", type="csv", key="train")
+live_file = st.file_uploader("Upload Today's Event-Level CSV (with merged features, NO hr_outcome)", type="csv", key="live")
 
 if train_file and live_file:
     df_train = pd.read_csv(train_file)
     df_live = pd.read_csv(live_file)
     st.success(f"Training file loaded! {df_train.shape[0]:,} rows, {df_train.shape[1]} columns.")
     st.success(f"Today's file loaded! {df_live.shape[0]:,} rows, {df_live.shape[1]} columns.")
-
-    # Display feature diagnostics
-    st.markdown("### 🩺 Feature Diagnostics Table (train/live overlap)")
+    
+    # ---- Threshold controls ----
+    st.subheader("Min HR Prob Threshold")
+    min_thresh = st.number_input("Min HR Prob Threshold", value=0.05, min_value=0.0, max_value=1.0, step=0.01)
+    st.subheader("Max HR Prob Threshold")
+    max_thresh = st.number_input("Max HR Prob Threshold", value=0.20, min_value=0.0, max_value=1.0, step=0.01)
+    st.subheader("Threshold Step")
+    thresh_step = st.number_input("Threshold Step", value=0.01, min_value=0.001, max_value=1.0, step=0.01)
+    
+    # ---- Feature Alignment and Diagnostics ----
     train_cols = set(df_train.columns.str.lower())
     live_cols = set(df_live.columns.str.lower())
-    missing_in_live = sorted([c for c in train_cols if c not in live_cols])
-    missing_in_train = sorted([c for c in live_cols if c not in train_cols])
+    missing_in_live = sorted([c for c in df_train.columns if c.lower() not in live_cols])
+    missing_in_train = sorted([c for c in df_live.columns if c.lower() not in train_cols])
+    
+    # Auto-match features: strict intersection, then clean up dtypes
+    features_to_use = sorted([c for c in df_train.columns if c in df_live.columns and c != "hr_outcome"])
+    dtype_problems = {}
+    for c in features_to_use:
+        if str(df_train[c].dtype) != str(df_live[c].dtype):
+            dtype_problems[c] = f"train={df_train[c].dtype}, live={df_live[c].dtype}"
+            # Try to fix most common mismatch (int vs float)
+            if (np.issubdtype(df_train[c].dtype, np.integer) and np.issubdtype(df_live[c].dtype, np.floating)) or (np.issubdtype(df_train[c].dtype, np.floating) and np.issubdtype(df_live[c].dtype, np.integer)):
+                df_train[c] = pd.to_numeric(df_train[c], errors="coerce")
+                df_live[c] = pd.to_numeric(df_live[c], errors="coerce")
+            # Or fallback: force both to string if object
+            elif df_train[c].dtype == "O" or df_live[c].dtype == "O":
+                df_train[c] = df_train[c].astype(str)
+                df_live[c] = df_live[c].astype(str)
+
+    # Drop features that are all null in train or live
+    features_to_use = [c for c in features_to_use if df_train[c].notnull().sum() > 0 and df_live[c].notnull().sum() > 0]
+
+    # Detect categorical/object features (not to be dropped, but to be encoded)
+    cat_feats = [c for c in features_to_use if df_train[c].dtype == "O" or df_live[c].dtype == "O"]
+
+    # Show diagnostics
+    st.markdown("### 🩺 Feature Diagnostics Table (train/live overlap)")
     st.write("**Features in train missing from live:**")
     st.write(missing_in_live if missing_in_live else "None")
     st.write("**Features in live missing from train:**")
     st.write(missing_in_train if missing_in_train else "None")
-
-    # Standardize column names to lower case for easier matching
-    df_train.columns = [c.lower() for c in df_train.columns]
-    df_live.columns = [c.lower() for c in df_live.columns]
-
-    # Get intersection for modeling
-    candidate_feats = [c for c in df_train.columns if c in df_live.columns and c not in ("hr_outcome",)]
-    # Drop columns that are all null or all constant in either
-    features_to_use = []
-    for c in candidate_feats:
-        if (df_train[c].notnull().sum() > 0) and (df_live[c].notnull().sum() > 0):
-            # Remove columns that are constant in both (e.g., always 0 or always same string)
-            if df_train[c].nunique(dropna=True) > 1 or df_live[c].nunique(dropna=True) > 1:
-                features_to_use.append(c)
-
-    # Show dtype mismatches
-    dtype_problems = []
-    for c in features_to_use:
-        if c in df_train.columns and c in df_live.columns:
-            if str(df_train[c].dtype) != str(df_live[c].dtype):
-                dtype_problems.append(f"{c}: train={df_train[c].dtype}, live={df_live[c].dtype}")
     if dtype_problems:
-        st.warning("⚠️ Dtype mismatches detected! " + "; ".join(dtype_problems))
+        st.warning(f"Dtype mismatches detected! {', '.join([f'{k}: {v}' for k, v in dtype_problems.items()])}")
 
     st.write(f"**Final features used ({len(features_to_use)}):**")
     st.write(features_to_use)
-
-    # Show null fraction
     st.write("Null Fraction (train):")
     st.write(df_train[features_to_use].isnull().mean())
     st.write("Null Fraction (live):")
     st.write(df_live[features_to_use].isnull().mean())
-
-    # Preprocess for model
+    
+    # ---- Fit Model on Train, Predict on Live ----
     X_train = df_train[features_to_use].copy()
+    y_train = df_train["hr_outcome"].astype(int) if "hr_outcome" in df_train.columns else None
     X_live = df_live[features_to_use].copy()
 
-    # Find categorical features (object or string)
-    cat_feats = [c for c in features_to_use if str(X_train[c].dtype) in ("object", "category", "string")]
-
-    # Impute missing numerics with mean; categorical with "NA"
-    for c in features_to_use:
-        if c in cat_feats:
-            X_train[c] = X_train[c].astype(str).fillna("NA")
-            X_live[c] = X_live[c].astype(str).fillna("NA")
-        else:
-            X_train[c] = pd.to_numeric(X_train[c], errors="coerce")
-            X_train[c] = X_train[c].fillna(X_train[c].mean())
-            X_live[c] = pd.to_numeric(X_live[c], errors="coerce")
-            X_live[c] = X_live[c].fillna(X_train[c].mean())  # use train mean
-
-    # Encode categorical
-    encoders = {}
+    # Label encode categoricals
+    label_encoders = {}
     for c in cat_feats:
         le = LabelEncoder()
-        X_train[c] = le.fit_transform(X_train[c])
-        # If live has unseen values, assign them a special code
-        live_vals = pd.Series(X_live[c].unique())
-        new_vals = live_vals[~live_vals.isin(le.classes_)]
-        if not new_vals.empty:
-            le_classes = np.concatenate([le.classes_, new_vals])
-            le.classes_ = le_classes
-        X_live[c] = le.transform(X_live[c])
-        encoders[c] = le
+        # Fit on train, map live. Unseen in live -> -1
+        X_train[c] = le.fit_transform(X_train[c].astype(str))
+        label_encoders[c] = le
+        live_vals = X_live[c].astype(str)
+        X_live[c] = live_vals.map(lambda x: le.transform([x])[0] if x in le.classes_ else -1)
 
-    # Fit model
-    try:
-        y_train = df_train["hr_outcome"].astype(int)
-        model = LogisticRegression(max_iter=500)
-        model.fit(X_train, y_train)
-        y_pred_proba = model.predict_proba(X_live)[:, 1]
-        df_live_out = df_live.copy()
-        df_live_out["hr_prob"] = y_pred_proba
-        st.success(f"Model fit OK with {len(features_to_use)} features.")
-    except Exception as e:
-        st.error(f"Model fitting or prediction failed: {e}")
-        st.stop()
+    # Impute any NaN with median for numeric, -1 for categoricals
+    for c in features_to_use:
+        if c in cat_feats:
+            X_train[c] = X_train[c].fillna(-1)
+            X_live[c] = X_live[c].fillna(-1)
+        else:
+            X_train[c] = X_train[c].fillna(X_train[c].median())
+            X_live[c] = X_live[c].fillna(X_train[c].median())
 
-    # Show threshold controls and picks
-    st.markdown("### Threshold Controls")
-    st.write(f"Min HR Prob Threshold: {min_thr}")
-    st.write(f"Max HR Prob Threshold: {max_thr}")
-    st.write(f"Threshold Step: {step}")
+    model = LogisticRegression(max_iter=500)
+    model.fit(X_train, y_train)
+    y_pred_live = model.predict_proba(X_live)[:, 1]
+    df_live["hr_prob"] = y_pred_live
 
-    st.header("🔎 Bot Picks by Threshold")
-    if 'player_name' in df_live_out.columns:
-        player_col = 'player_name'
-    elif 'batter' in df_live_out.columns:
-        player_col = 'batter'
-    else:
-        player_col = features_to_use[0]  # fallback
+    st.success(f"Model fit OK with {len(features_to_use)} features.")
 
+    # ---- Threshold Table: Bot Picks by Threshold ----
+    st.markdown("## 🔎 Bot Picks by Threshold")
+    threshold_grid = np.arange(min_thresh, max_thresh + thresh_step/2, thresh_step)
+    picks_by_thresh = []
+    for t in threshold_grid:
+        picks = df_live[df_live["hr_prob"] >= t]
+        picks_by_thresh.append({"Threshold": t, "Num Picks": len(picks)})
+        st.write(f"**Threshold {t:.2f}**: {len(picks)} picks")
+        if not picks.empty:
+            st.dataframe(picks[["player_name", "game_date", "hr_prob"]].sort_values("hr_prob", ascending=False).reset_index(drop=True))
+    
+    # ---- Feature Audit and Distribution (detailed, bug-proof) ----
     st.markdown("### 🧾 Bot Audit Report & Performance Readiness")
-
-    # Feature presence audit
     with st.expander("🔍 Feature Presence and Type Audit"):
         st.write("**Train features missing in live:**")
-        st.write(missing_in_live if missing_in_live else "None (perfect feature overlap)")
+        st.write(missing_in_live if missing_in_live else "None")
         st.write("**Live features missing in train:**")
-        st.write(missing_in_train if missing_in_train else "None (perfect feature overlap)")
-        if dtype_problems:
-            st.write("**Features with dtype mismatches:**")
-            st.write(dtype_problems)
-        else:
-            st.write("No dtype mismatches detected.")
-        st.write("**Null fraction in train (key features):**")
+        st.write(missing_in_train if missing_in_train else "None")
+        st.write("**Features with dtype mismatches:**")
+        st.write(dtype_problems if dtype_problems else "None")
+        st.write("**Null fraction in train (top 20):**")
         st.write(df_train[features_to_use].isnull().mean().sort_values(ascending=False).head(20))
-        st.write("**Null fraction in live (key features):**")
+        st.write("**Null fraction in live (top 20):**")
         st.write(df_live[features_to_use].isnull().mean().sort_values(ascending=False).head(20))
-
-    # Distribution comparison for top features (backtest vs. live)
     with st.expander("📊 Feature Distribution Snapshot (Train vs Live)"):
-    # Pick a few most important numeric features
-        top_feats = [c for c in features_to_use if "hr" in c or "rate" in c or "launch" in c]
-        for feat in top_feats[:8]:
+        audit_rows = []
+        for feat in features_to_use[:25]:
             if feat in df_train.columns and feat in df_live.columns:
-                st.write(f"#### {feat}")
-                st.write(f"Train: mean={df_train[feat].mean():.3f}, std={df_train[feat].std():.3f} | Live: mean={df_live[feat].mean():.3f}, std={df_live[feat].std():.3f}")
-
-    # Categorical coverage
+                train_vals = pd.to_numeric(df_train[feat], errors="coerce")
+                live_vals = pd.to_numeric(df_live[feat], errors="coerce")
+                train_mean, train_std = train_vals.mean(), train_vals.std()
+                live_mean, live_std = live_vals.mean(), live_vals.std()
+                st.write(f"**{feat}** | Train: mean={train_mean:.3f}, std={train_std:.3f} | Live: mean={live_mean:.3f}, std={live_std:.3f}")
+                audit_rows.append({
+                    "feature": feat,
+                    "train_mean": train_mean, "train_std": train_std,
+                    "live_mean": live_mean, "live_std": live_std,
+                })
     with st.expander("🧬 Categorical Variable Coverage"):
         for c in cat_feats:
-            train_cats = set(df_train[c].astype(str).unique())
-            live_cats = set(df_live[c].astype(str).unique())
+            train_cats = set(X_train[c].astype(str).unique())
+            live_cats = set(X_live[c].astype(str).unique())
             unseen = live_cats - train_cats
             st.write(f"Feature: {c} | Unseen categories in live: {unseen if unseen else 'None'}")
- 
-    st.info(
-        """
-        **What does this mean?**  
-        - If your features are matching, not all-null, and not full of unseen categories, your bot is running in a “backtest-like” environment and you can compare picks, hit rates, and precision just like your historical tests.
-        - If you see mismatches or nulls, performance may differ and you can use this report to fine-tune your pipeline or model.
-        - For *true production*, track the bot’s picks daily and compare realized HRs with predicted probabilities at each threshold—**that is your ultimate real-world validation**.
-        """
-    )
 
-    # Show bot picks for each threshold
-    for thr in np.arange(min_thr, max_thr + step, step):
-        picks = df_live_out[df_live_out["hr_prob"] >= thr].copy()
-        if not picks.empty:
-            st.subheader(f"Players with HR Prob ≥ {thr:.2f} ({len(picks)} picks)")
-            st.dataframe(
-                picks[[player_col, "batter_id"] + [c for c in picks.columns if c not in [player_col, "batter_id", "hr_prob"]] + ["hr_prob"]]
-                .sort_values("hr_prob", ascending=False).reset_index(drop=True)
-            )
-        else:
-            st.write(f"No players at threshold ≥ {thr:.2f}")
+    # ---- Download Audit CSV Button ----
+    if 'audit_rows' in locals() and audit_rows:
+        audit_df = pd.DataFrame(audit_rows)
+        csv_buffer = io.StringIO()
+        audit_df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="⬇️ Download Audit CSV",
+            data=csv_buffer.getvalue(),
+            file_name="bot_feature_audit_report.csv",
+            mime="text/csv"
+        )
 
 else:
-    st.info("Please upload both training and today's event-level CSVs to continue.")
+    st.info("Upload both a training and a live event-level CSV to run the bot and see diagnostics.")
