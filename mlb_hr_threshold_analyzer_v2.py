@@ -11,67 +11,53 @@ train_file = st.file_uploader("Upload Training Event-Level CSV", type="csv", key
 st.markdown("#### Upload Today's Event-Level CSV (with merged features, NO hr_outcome)")
 live_file = st.file_uploader("Upload Today's Event-Level CSV", type="csv", key="livefile")
 
-min_thr = st.number_input("Min HR Prob Threshold", 0.00, 0.5, 0.05, step=0.01)
-max_thr = st.number_input("Max HR Prob Threshold", 0.01, 0.5, 0.20, step=0.01)
+min_thr = st.number_input("Min HR Prob Threshold", 0.00, 0.5, 0.01, step=0.01)
+max_thr = st.number_input("Max HR Prob Threshold", 0.01, 0.5, 0.15, step=0.01)
 step_thr = st.number_input("Threshold Step", 0.01, 0.1, 0.01, step=0.01)
 
 if train_file and live_file:
     train_df = pd.read_csv(train_file)
     live_df = pd.read_csv(live_file)
-    
-    # ===========
-    # DEEP FEATURE DIAGNOSTICS
-    # ===========
-    st.markdown("### 🩺 Deep Feature Diagnostics")
-    st.write("Live file columns:", list(live_df.columns))
-    st.write("Train file columns:", list(train_df.columns))
 
-    st.write("Live columns with non-null values:", [col for col in live_df.columns if live_df[col].notnull().sum() > 0])
-    st.write("Train columns with non-null values:", [col for col in train_df.columns if train_df[col].notnull().sum() > 0])
-    st.write("Live columns ALL null:", [col for col in live_df.columns if live_df[col].isnull().all()])
-    st.write("Train columns ALL null:", [col for col in train_df.columns if train_df[col].isnull().all()])
+    # --- Deep Feature Diagnostics ---
+    st.subheader("🩺 Deep Feature Diagnostics")
 
-    st.write("Live sample (non-null cols only):")
-    not_null_live = live_df[[col for col in live_df.columns if live_df[col].notnull().sum() > 0]]
-    st.dataframe(not_null_live.head(2))
+    st.markdown("**Live file columns:**")
+    for i in range(0, len(live_df.columns), 100):
+        st.write(f"[{i} - {min(i+100, len(live_df.columns))}]")
+        st.write(list(live_df.columns[i:i+100]))
 
-    # Print dtypes for common join keys
-    for key in ['batter_id', 'mlb_id', 'player_name']:
-        if key in train_df.columns and key in live_df.columns:
-            st.write(f"{key} dtype in train:", train_df[key].dtype)
-            st.write(f"{key} dtype in live:", live_df[key].dtype)
+    st.markdown("**Train file columns:**")
+    for i in range(0, len(train_df.columns), 100):
+        st.write(f"[{i} - {min(i+100, len(train_df.columns))}]")
+        st.write(list(train_df.columns[i:i+100]))
 
-    # Display top null columns with counts/fractions
-    audit_df = pd.DataFrame({
-        'feature': live_df.columns,
-        'live_notnull': [live_df[c].notnull().sum() for c in live_df.columns],
-        'live_null_frac': [live_df[c].isnull().mean() for c in live_df.columns],
-        'live_dtype': [str(live_df[c].dtype) for c in live_df.columns]
-    })
-    st.write("Feature audit of live data:")
-    st.dataframe(audit_df.sort_values("live_notnull", ascending=False).head(40))
+    # Non-null cols
+    st.markdown("**Live columns with non-null values:**")
+    st.write(list(live_df.columns[live_df.notnull().any()]))
+    st.markdown("**Train columns with non-null values:**")
+    st.write(list(train_df.columns[train_df.notnull().any()]))
 
-    # ===========
-    # COERCE DTYPE PATCH FOR COMMON KEYS
-    # ===========
-    if 'batter_id' in train_df.columns and 'batter_id' in live_df.columns:
-        train_df['batter_id'] = train_df['batter_id'].astype(str)
-        live_df['batter_id'] = live_df['batter_id'].astype(str)
-    if 'mlb_id' in train_df.columns and 'mlb_id' in live_df.columns:
-        train_df['mlb_id'] = train_df['mlb_id'].astype(str)
-        live_df['mlb_id'] = live_df['mlb_id'].astype(str)
+    # All-null cols
+    st.markdown("**Live columns ALL null:**")
+    st.write(list(live_df.columns[live_df.isnull().all()]))
+    st.markdown("**Train columns ALL null:**")
+    st.write(list(train_df.columns[train_df.isnull().all()]))
 
-    # ===========
-    # Feature filter debug (PRESERVE!)
-    # ===========
-    st.markdown("### 🔍 Audit Report:")
+    # Sample dtype check
+    if 'batter_id' in train_df and 'batter_id' in live_df:
+        st.write(f"batter_id dtype in train: {train_df['batter_id'].dtype}")
+        st.write(f"batter_id dtype in live: {live_df['batter_id'].dtype}")
+
+    if 'player_name' in train_df and 'player_name' in live_df:
+        st.write(f"player_name dtype in train: {train_df['player_name'].dtype}")
+        st.write(f"player_name dtype in live: {live_df['player_name'].dtype}")
+
+    # --- Feature-by-feature diagnostics ---
+    st.markdown("### 🔍 Feature Audit Table (train/live overlap)")
     train_cols = set(train_df.columns)
     live_cols = set(live_df.columns)
     intersect = [c for c in train_cols if c in live_cols]
-    st.write("Intersect columns:")
-    st.write(intersect)
-
-    # For each intersected column, show dtype, unique, and nulls
     feat_diag = []
     for c in intersect:
         diag = {
@@ -81,24 +67,38 @@ if train_file and live_file:
             'train_unique': train_df[c].nunique(dropna=False),
             'live_unique': live_df[c].nunique(dropna=False),
             'train_null_frac': np.round(train_df[c].isnull().mean(), 4),
-            'live_null_frac': np.round(live_df[c].isnull().mean(), 4)
+            'live_null_frac': np.round(live_df[c].isnull().mean(), 4),
+            'train_all_null': train_df[c].isnull().all(),
+            'live_all_null': live_df[c].isnull().all(),
+            'train_constant': train_df[c].nunique(dropna=False) <= 1,
+            'live_constant': live_df[c].nunique(dropna=False) <= 1,
         }
         feat_diag.append(diag)
-    st.dataframe(pd.DataFrame(feat_diag))
+    feat_diag_df = pd.DataFrame(feat_diag)
+    st.dataframe(feat_diag_df, use_container_width=True)
 
-    # Robust model feature filtering (ALLOW all numeric and float columns with >1 unique and not all null)
+    # RELAXED filter: all numeric/categorical features that are not all null in both files
+    candidate_features = [
+        c for c in intersect
+        if (pd.api.types.is_numeric_dtype(train_df[c]) or pd.api.types.is_numeric_dtype(live_df[c]))
+        and (not train_df[c].isnull().all())
+        and (not live_df[c].isnull().all())
+        and c != 'hr_outcome'
+    ]
+    st.markdown("#### 🟡 Candidate Numeric Features (relaxed):")
+    st.write(candidate_features)
+
+    # STRICT: Model features must be numeric, at least 2 unique, not all-null in either file
     def is_feature_valid(col):
-        # Allow numeric and float features with at least 2 unique non-null, and NOT all-null in either file
         if col == "hr_outcome":
             return False
         tdt = train_df[col].dtype
         ldt = live_df[col].dtype
-        # Allow both int, float, or bool, or if both are object but <20 unique (likely category)
         if pd.api.types.is_numeric_dtype(tdt) or pd.api.types.is_numeric_dtype(ldt):
             tu = train_df[col].nunique(dropna=True)
             lu = live_df[col].nunique(dropna=True)
             return (tu > 1) and (lu > 1) and (not train_df[col].isnull().all()) and (not live_df[col].isnull().all())
-        # For object (category-like), must match and be low-cardinality
+        # If object/categorical, allow only if both files have low-cardinality, at least 2 unique non-null, and not all-null
         if (tdt == 'object' and ldt == 'object'):
             tu = train_df[col].nunique(dropna=True)
             lu = live_df[col].nunique(dropna=True)
@@ -106,24 +106,20 @@ if train_file and live_file:
         return False
 
     model_features = [c for c in intersect if is_feature_valid(c)]
-    st.write(f"Model features used ({len(model_features)}): {model_features}")
+    st.markdown("#### 🟢 Model Features Used (strict):")
+    st.write(model_features)
 
-    # ---- DIAG DROP LISTS ----
-    dropped_all_null = [c for c in intersect if train_df[c].isnull().all() and live_df[c].isnull().all()]
-    dropped_constant = [c for c in intersect if train_df[c].nunique(dropna=True) <= 1 and live_df[c].nunique(dropna=True) <= 1]
-    st.write("Dropped (all null both):")
-    st.write(dropped_all_null)
-    st.write("Dropped (constant in both):")
-    st.write(dropped_constant)
-
-    # ========== MODEL FIT ========== #
-    from sklearn.linear_model import LogisticRegression
-
-    if len(model_features) > 0:
+    # --- Model Fit & Predict ---
+    if len(model_features) < 2:
+        st.error("❗ Less than 2 usable features detected for modeling! Check feature audit above or relax filter.")
+    else:
+        from sklearn.linear_model import LogisticRegression
         model = LogisticRegression(max_iter=200, solver="liblinear")
         X = train_df[model_features].fillna(0)
         y = train_df['hr_outcome'].astype(int)
         model.fit(X, y)
+
+        # Score live
         X_live = live_df[model_features].fillna(0)
         hr_probs = model.predict_proba(X_live)[:, 1]
         live_df["hr_pred_prob"] = hr_probs
@@ -138,19 +134,6 @@ if train_file and live_file:
             st.write(f"Threshold {thr:.2f}: {picks}")
 
         st.markdown("Done! These are the official HR bot picks for today at each threshold.")
-    else:
-        st.error("No usable model features found. Check diagnostics above.")
 
-    # ========== AUDIT DOWNLOADS ========== #
-    audit_text = StringIO()
-    print("Model features used:", model_features, file=audit_text)
-    print("Dropped (all null both):", dropped_all_null, file=audit_text)
-    print("Dropped (constant in both):", dropped_constant, file=audit_text)
-    audit_text = audit_text.getvalue()
-    st.markdown("### 📋 Model Feature Audit Summary")
-    st.code(audit_text)
-    st.download_button("⬇️ Download Audit Text (.txt)", audit_text, file_name="mlb_hr_model_feature_audit.txt")
-
-    # Table for detailed feature audit
-    st.markdown("#### Features/Stats Diagnostic Table")
-    st.dataframe(pd.DataFrame(feat_diag))
+    st.markdown("---")
+    st.markdown("**Full feature diagnostics and audit shown above. If features are missing, check null/constant counts in train/live or relax the filter.**")
