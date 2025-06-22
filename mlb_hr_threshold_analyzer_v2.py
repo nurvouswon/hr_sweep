@@ -127,6 +127,50 @@ if train_file and live_file:
     else:
         player_col = features_to_use[0]  # fallback
 
+    st.markdown("### 🧾 Bot Audit Report & Performance Readiness")
+
+    # Feature presence audit
+    with st.expander("🔍 Feature Presence and Type Audit"):
+        st.write("**Train features missing in live:**")
+        st.write(missing_in_live if missing_in_live else "None (perfect feature overlap)")
+        st.write("**Live features missing in train:**")
+        st.write(missing_in_train if missing_in_train else "None (perfect feature overlap)")
+        if dtype_problems:
+            st.write("**Features with dtype mismatches:**")
+            st.write(dtype_problems)
+        else:
+            st.write("No dtype mismatches detected.")
+        st.write("**Null fraction in train (key features):**")
+        st.write(df_train[features_to_use].isnull().mean().sort_values(ascending=False).head(20))
+        st.write("**Null fraction in live (key features):**")
+        st.write(df_live[features_to_use].isnull().mean().sort_values(ascending=False).head(20))
+
+    # Distribution comparison for top features (backtest vs. live)
+    with st.expander("📊 Feature Distribution Snapshot (Train vs Live)"):
+    # Pick a few most important numeric features
+        top_feats = [c for c in features_to_use if "hr" in c or "rate" in c or "launch" in c]
+        for feat in top_feats[:8]:
+            if feat in df_train.columns and feat in df_live.columns:
+                st.write(f"#### {feat}")
+                st.write(f"Train: mean={df_train[feat].mean():.3f}, std={df_train[feat].std():.3f} | Live: mean={df_live[feat].mean():.3f}, std={df_live[feat].std():.3f}")
+
+    # Categorical coverage
+    with st.expander("🧬 Categorical Variable Coverage"):
+        for c in cat_feats:
+            train_cats = set(df_train[c].astype(str).unique())
+            live_cats = set(df_live[c].astype(str).unique())
+            unseen = live_cats - train_cats
+            st.write(f"Feature: {c} | Unseen categories in live: {unseen if unseen else 'None'}")
+ 
+    st.info(
+        """
+        **What does this mean?**  
+        - If your features are matching, not all-null, and not full of unseen categories, your bot is running in a “backtest-like” environment and you can compare picks, hit rates, and precision just like your historical tests.
+        - If you see mismatches or nulls, performance may differ and you can use this report to fine-tune your pipeline or model.
+        - For *true production*, track the bot’s picks daily and compare realized HRs with predicted probabilities at each threshold—**that is your ultimate real-world validation**.
+        """
+    )
+
     # Show bot picks for each threshold
     for thr in np.arange(min_thr, max_thr + step, step):
         picks = df_live_out[df_live_out["hr_prob"] >= thr].copy()
