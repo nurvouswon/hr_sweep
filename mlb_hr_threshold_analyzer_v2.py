@@ -30,13 +30,15 @@ if train_file and live_file:
     st.success(f"Training file loaded! {df_train.shape[0]:,} rows, {df_train.shape[1]} columns.")
     st.success(f"Today's file loaded! {df_live.shape[0]:,} rows, {df_live.shape[1]} columns.")
 
-    # Clean column names
-    df_train.columns = [c.lower() for c in df_train.columns]
-    df_live.columns = [c.lower() for c in df_live.columns]
+    # Clean column names (robust for whitespace and encoding issues)
+    df_train.columns = [str(c).strip().lower() for c in df_train.columns]
+    df_live.columns = [str(c).strip().lower() for c in df_live.columns]
 
-    # Remove hr_outcome from live if present
+    # Remove hr_outcome and hr_prob from live if present
     if "hr_outcome" in df_live.columns:
         df_live = df_live.drop(columns=["hr_outcome"])
+    if "hr_prob" in df_live.columns:
+        df_live = df_live.drop(columns=["hr_prob"])
 
     # Feature diagnostics: show mismatches
     train_cols = set(df_train.columns)
