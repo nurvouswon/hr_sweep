@@ -93,16 +93,15 @@ if train_file and live_file:
     # Remove all-constant columns from modeling
     usable_feature_cols = [c for c in feature_cols if c not in low_var_cols]
 
-    # === Feature Selection Slider ===
-    st.subheader("🔬 Step 1: Select Features for Modeling")
+    # === Feature Importances for Reference (no slider, just diagnostics) ===
+    st.subheader("🔬 Feature Importances (for all usable features)")
     lgb_for_select = LGBMClassifier(n_estimators=100, random_state=42)
     lgb_for_select.fit(X_train[usable_feature_cols], y_train)
     importances = lgb_for_select.feature_importances_
 
-    # Slider for number of features
-    N = st.slider("Number of features to use (by importance)", 2, len(usable_feature_cols), min(30, len(usable_feature_cols)))
-    indices = np.argsort(importances)[::-1][:N]
-    kept_features = [usable_feature_cols[i] for i in indices if importances[i] > 0]
+    # Sort and display
+    imp_order = np.argsort(importances)[::-1]
+    kept_features = [usable_feature_cols[i] for i in imp_order if importances[i] > 0]
     if not kept_features:
         st.warning("No features had >0 importance! Using ALL usable features instead.")
         kept_features = usable_feature_cols
@@ -110,7 +109,7 @@ if train_file and live_file:
     X_train_sel = X_train[kept_features].values
     X_live_sel = X_live[kept_features].values
 
-    st.write(f"Top {len(kept_features)} features by importance:")
+    st.write(f"Using all {len(kept_features)} features with >0 importance:")
     st.code(kept_features)
 
     # === Stacking Ensemble ===
@@ -129,10 +128,10 @@ if train_file and live_file:
 
     df_live_out = df_live.copy()
     df_live_out["hr_prob"] = y_pred_proba
-    st.success(f"Stacking model fit OK with {len(kept_features)} selected features.")
+    st.success(f"Stacking model fit OK with {len(kept_features)} features.")
 
     # Show feature importances for audit
-    feature_imp_df = pd.DataFrame({"feature": kept_features, "importance": importances[indices][:len(kept_features)]})
+    feature_imp_df = pd.DataFrame({"feature": kept_features, "importance": importances[imp_order][:len(kept_features)]})
     feature_imp_df = feature_imp_df.sort_values("importance", ascending=False)
     with st.expander("🔎 View Feature Importances (from selection LGBM)", expanded=False):
         st.dataframe(feature_imp_df)
