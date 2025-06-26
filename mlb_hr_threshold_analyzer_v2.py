@@ -107,7 +107,7 @@ if train_file and live_file:
     X_train_sel = X_train[kept_features].values
     X_live_sel = X_live[kept_features].values
 
-    st.write(f"Using all {len(kept_features)} features with >0 importance:")
+    st.write(f"Using all {len(kept_features)} overlapping features (non-constant):")
     st.code(kept_features)
 
     # === Stacking Ensemble ===
