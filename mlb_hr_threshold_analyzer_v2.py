@@ -101,10 +101,8 @@ if train_file and live_file:
 
     # Sort and display
     imp_order = np.argsort(importances)[::-1]
-    kept_features = [usable_feature_cols[i] for i in imp_order if importances[i] > 0]
-    if not kept_features:
-        st.warning("No features had >0 importance! Using ALL usable features instead.")
-        kept_features = usable_feature_cols
+    # Force to use ALL usable features, always
+    kept_features = usable_feature_cols
 
     X_train_sel = X_train[kept_features].values
     X_live_sel = X_live[kept_features].values
