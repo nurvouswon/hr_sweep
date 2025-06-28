@@ -1,181 +1,182 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
+from sklearn.ensemble import VotingClassifier, RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, log_loss
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-from catboost import CatBoostClassifier
-import warnings
+from sklearn.preprocessing import StandardScaler
+import xgboost as xgb
+import lightgbm as lgb
+import catboost as cb
 
-st.set_page_config("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score", layout="wide")
+st.set_page_config("MLB HR Predictor", layout="wide")
+st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score")
 
+@st.cache_data(show_spinner=False)
 def dedup_columns(df):
+    # Remove duplicate columns (keep first)
     return df.loc[:, ~df.columns.duplicated()]
 
-def clean_X(df, train_cols=None):
-    df = dedup_columns(df)
-    drop_cols = []
-    for c in df.columns:
-        # Remove columns with dict/list or non-numeric types
-        if df[c].dtype == 'O' or df[c].dtype.name == 'category':
+def fix_types(df):
+    # Robust float/int/str merge (one-liner for all)
+    for col in df.columns:
+        # If all nan, skip
+        if df[col].isnull().all(): continue
+        # If any string that looks numeric, convert
+        if df[col].dtype == 'O':
             try:
-                df[c] = pd.to_numeric(df[c], errors='coerce')
-            except Exception:
-                drop_cols.append(c)
-        if df[c].apply(lambda x: isinstance(x, (dict, list))).any():
-            drop_cols.append(c)
-    df = df.drop(columns=drop_cols)
-    if train_cols is not None:
-        df = df.reindex(columns=train_cols, fill_value=0)
+                df[col] = pd.to_numeric(df[col], errors='ignore')
+            except: pass
+        # If float but all whole numbers, convert to int
+        if pd.api.types.is_float_dtype(df[col]) and (df[col].dropna() % 1 == 0).all():
+            df[col] = df[col].astype(pd.Int64Dtype())
     return df
 
-def basic_weather_score(row):
-    """Sample weather scoring:  
-    Favorable HR: warm (75+), moderate wind out (10+ mph), low humidity.  
-    This can be replaced with data-driven or ML-imputed scoring."""
+def score_weather(row):
+    # Weather scoring: more HRs at high temp, lower humidity, wind out, outdoor
+    temp = row.get('temp', np.nan)
+    humidity = row.get('humidity', np.nan)
+    wind_mph = row.get('wind_mph', np.nan)
+    wind_dir = str(row.get('wind_dir_string', '')).lower()
+    condition = str(row.get('condition', '')).lower()
+
     score = 0
-    # Temp
-    if not pd.isna(row.get("temp", np.nan)):
-        if row["temp"] >= 90:
-            score += 1.2
-        elif row["temp"] >= 80:
-            score += 1
-        elif row["temp"] >= 70:
-            score += 0.7
-        elif row["temp"] >= 60:
-            score += 0.3
-        else:
-            score -= 0.2
-    # Wind
-    if not pd.isna(row.get("wind_mph", np.nan)):
-        if row["wind_mph"] >= 15:
-            score += 0.8
-        elif row["wind_mph"] >= 10:
-            score += 0.5
-        elif row["wind_mph"] >= 5:
-            score += 0.2
-        else:
-            score += 0
-    # Humidity
-    if not pd.isna(row.get("humidity", np.nan)):
-        if row["humidity"] <= 30:
-            score += 0.6
-        elif row["humidity"] <= 50:
-            score += 0.4
-        elif row["humidity"] <= 70:
-            score += 0.2
-        else:
-            score -= 0.1
-    # Condition (favor 'outdoor', sunny, etc)
-    cond = str(row.get("condition", "")).lower()
-    if "outdoor" in cond or "sunny" in cond:
-        score += 0.25
-    if "indoor" in cond or "rain" in cond:
-        score -= 0.25
-    # Wind dir (favor Out, CF, RF for lefties, etc. -- here: if outfield wind, boost)
-    wind_dir = str(row.get("wind_dir_string", "")).lower()
-    if any(x in wind_dir for x in ["o cf", "out", "cf"]):
-        score += 0.2
-    return np.round(score, 3)
+    # temp: +0.2 per 10F over 70, -0.2 per 10F below 70
+    if not pd.isna(temp):
+        score += (temp - 70) * 0.02
+    # humidity: -0.15 per 10% above 50, +0.15 per 10% below 50
+    if not pd.isna(humidity):
+        score -= (humidity - 50) * 0.015
+    # wind: +0.15 per 5 mph if "O" in wind_dir ("out"), -0.10 per 5 if "I"/"in"
+    if not pd.isna(wind_mph):
+        if "o" in wind_dir or "out" in wind_dir:
+            score += wind_mph * 0.03
+        elif "i" in wind_dir or "in" in wind_dir:
+            score -= wind_mph * 0.02
+    # Outdoor: +0.1, Indoor: -0.05
+    if "outdoor" in condition:
+        score += 0.1
+    elif "indoor" in condition:
+        score -= 0.05
+    # Clamp to [-1, 1]
+    return max(-1, min(1, score))
 
-# UI
-st.title("2️⃣ MLB HR Predictor — Deep Ensemble + Weather Score")
-st.write("Upload your **event-level CSV for training** and **TODAY CSV for prediction**. This app will automatically clean, train a powerful ensemble (XGBoost, LightGBM, CatBoost, RF, GB, LR), and predict today's home run probabilities. A weather adjustment is applied to each row for extra accuracy.")
+def clean_X(df, train_cols=None):
+    # Dedup columns, fix types, fill nans, align cols with train if provided
+    df = dedup_columns(df)
+    df = fix_types(df)
+    # Drop all string/object columns except explicitly allowed
+    allowed_obj = {'wind_dir_string', 'condition', 'player_name', 'city', 'park', 'roof_status'}
+    drop_cols = [c for c in df.select_dtypes('O').columns if c not in allowed_obj]
+    df = df.drop(columns=drop_cols, errors='ignore')
+    # Fill nans with -1 (safe default for tree models)
+    df = df.fillna(-1)
+    if train_cols is not None:
+        # Add any missing cols as -1, and ensure order
+        for c in train_cols:
+            if c not in df.columns:
+                df[c] = -1
+        df = df[list(train_cols)]
+    return df
 
-event_file = st.file_uploader("Upload Event-Level CSV for Training (required)", type="csv", key="eventcsvup")
-today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type="csv", key="todaycsvup")
+def get_valid_feature_cols(df, drop=None):
+    # Use all numerics except obvious IDs/context
+    base_drop = set(['game_date','batter_id','player_name','pitcher_id','city','park','roof_status'])
+    if drop: base_drop = base_drop.union(drop)
+    numerics = df.select_dtypes(include=[np.number]).columns
+    return [c for c in numerics if c not in base_drop]
 
-if event_file and today_file:
-    progress = st.progress(0, "Loading & cleaning data...")
-    # Load
-    event_df = pd.read_csv(event_file, low_memory=False)
-    today_df = pd.read_csv(today_file, low_memory=False)
+# ==== Streamlit UI ====
+event_file = st.file_uploader("Upload Event-Level CSV for Training (required)", type='csv', key='eventcsv')
+today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type='csv', key='todaycsv')
 
-    progress.progress(5, "Scoring weather for training and today rows...")
-    # Score weather
-    for df in [event_df, today_df]:
-        df['weather_score'] = df.apply(basic_weather_score, axis=1)
-    # Dedup, clean ids/names
-    for df in [event_df, today_df]:
-        df = dedup_columns(df)
-        for c in ['batter_id', 'pitcher_id']:
-            if c in df.columns:
-                df[c] = df[c].astype(str).str.replace('.0','',regex=False).str.strip()
-        for c in ['game_date']:
-            if c in df.columns:
-                df[c] = pd.to_datetime(df[c], errors='coerce').dt.strftime("%Y-%m-%d")
-    progress.progress(15, "Engineering features...")
-    # Set up features
-    target_col = "hr_outcome"
-    drop_feats = [
-        "hr_outcome", "events", "events_clean", "game_date",
-        "batter_id", "player_name", "pitcher_id", "team_code", "city", "park"
-    ]
-    # Only use numeric columns, plus weather_score
-    feature_cols = [c for c in event_df.columns if c not in drop_feats and
-                    (event_df[c].dtype in [np.float64, np.int64, np.float32, np.int32, float, int, bool] or c == "weather_score")]
+if event_file is not None and today_file is not None:
+    with st.spinner("Loading & cleaning data..."):
+        event_df = pd.read_csv(event_file, low_memory=False)
+        today_df = pd.read_csv(today_file, low_memory=False)
+        event_df = dedup_columns(event_df)
+        today_df = dedup_columns(today_df)
+        event_df = fix_types(event_df)
+        today_df = fix_types(today_df)
+
+    progress = st.progress(2, "Scoring weather for training and today rows...")
+    # ---- Weather score feature ----
+    if 'weather_score' not in event_df.columns:
+        event_df['weather_score'] = event_df.apply(score_weather, axis=1)
+    if 'weather_score' not in today_df.columns:
+        today_df['weather_score'] = today_df.apply(score_weather, axis=1)
+    progress.progress(5, "Engineering features...")
+
+    # ==== ML Features ====
+    # Find all features in both
+    target_col = 'hr_outcome'
+    # Use intersection of columns between event_df and today_df, numerics only
+    feat_cols_train = set(get_valid_feature_cols(event_df))
+    feat_cols_today = set(get_valid_feature_cols(today_df))
+    feature_cols = sorted(list(feat_cols_train & feat_cols_today))
+    # Add weather_score if not present
+    if 'weather_score' not in feature_cols:
+        feature_cols.append('weather_score')
 
     # X/y and today features
     X = clean_X(event_df[feature_cols])
     y = event_df[target_col]
     X_today = clean_X(today_df[feature_cols], train_cols=X.columns)
 
-    progress.progress(25, "Splitting for validation...")
-    # Validation
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.16, random_state=42, stratify=y)
-    progress.progress(35, "Training ensemble models (XGBoost, LightGBM, CatBoost, RF, GB, LR)...")
+    progress.progress(15, "Splitting for validation...")
 
-    # Silence model warnings for demo UX
-    warnings.filterwarnings("ignore")
+    # ==== Split/Scale ====
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+    X_today_scaled = scaler.transform(X_today)
+
+    progress.progress(22, "Training ensemble models (XGBoost, LightGBM, CatBoost, RF, GB, LR)...")
+
+    # ==== Ensemble Models ====
+    # XGBoost
+    xgb_clf = xgb.XGBClassifier(
+        n_estimators=125, max_depth=5, learning_rate=0.08, use_label_encoder=False, eval_metric='logloss', n_jobs=-1
+    )
+    # LightGBM
+    lgb_clf = lgb.LGBMClassifier(n_estimators=125, max_depth=5, learning_rate=0.08, n_jobs=-1)
+    # CatBoost
+    cat_clf = cb.CatBoostClassifier(
+        iterations=120, depth=5, learning_rate=0.09, verbose=0
+    )
+    # Random Forest
+    rf_clf = RandomForestClassifier(n_estimators=120, max_depth=7, n_jobs=-1)
+    # Gradient Boosting
+    gb_clf = GradientBoostingClassifier(n_estimators=100, max_depth=5, learning_rate=0.09)
+    # Logistic Regression
+    lr_clf = LogisticRegression(max_iter=1000)
+
     models = [
-        ("xgb", XGBClassifier(use_label_encoder=False, eval_metric="logloss", verbosity=0, n_jobs=-1, random_state=42)),
-        ("lgbm", LGBMClassifier(verbose=-1, n_jobs=-1, random_state=42)),
-        ("cat", CatBoostClassifier(verbose=0, thread_count=-1, random_state=42)),
-        ("rf", RandomForestClassifier(n_estimators=200, n_jobs=-1, random_state=42)),
-        ("gb", GradientBoostingClassifier(random_state=42)),
-        ("lr", LogisticRegression(max_iter=500, solver="lbfgs", n_jobs=-1, random_state=42))
+        ('xgb', xgb_clf), ('lgb', lgb_clf), ('cat', cat_clf),
+        ('rf', rf_clf), ('gb', gb_clf), ('lr', lr_clf)
     ]
-    # Voting ensemble (soft = proba average)
-    ensemble = VotingClassifier(estimators=models, voting="soft", n_jobs=-1)
-    ensemble.fit(X_train, y_train)
-    y_val_pred = ensemble.predict_proba(X_val)[:,1]
+    ensemble = VotingClassifier(estimators=models, voting='soft', n_jobs=-1, weights=[2,2,2,1,1,1])
+    ensemble.fit(X_train_scaled, y_train)
+    progress.progress(45, "Validating...")
+
+    # Validation
+    y_val_pred = ensemble.predict_proba(X_val_scaled)[:,1]
     auc = roc_auc_score(y_val, y_val_pred)
     ll = log_loss(y_val, y_val_pred)
-    progress.progress(75, f"Validation AUC: {auc:.4f} — LogLoss: {ll:.4f}")
+    st.info(f"Validation AUC: **{auc:.4f}** — LogLoss: **{ll:.4f}**")
 
-    st.success(f"Validation AUC: {auc:.4f} — LogLoss: {ll:.4f}")
+    progress.progress(60, "Predicting HR probability for today...")
 
-    # Predict today's
-    progress.progress(90, "Predicting HR probability for today...")
-    today_df['hr_pred_proba'] = ensemble.predict_proba(X_today)[:,1]
-    # Optionally apply weather adjustment to prob (e.g., simple linear scale — tune as desired)
-    today_df['hr_pred_proba_wx'] = np.clip(today_df['hr_pred_proba'] * (1 + today_df['weather_score'] * 0.25), 0, 1)
-
-    progress.progress(100, "All Done! Download predictions below.")
-
-    # Output table
-    show_cols = [
-        "game_date", "batter_id", "player_name", "pitcher_id", "hr_pred_proba", "weather_score", "hr_pred_proba_wx"
-    ] + [c for c in today_df.columns if c.startswith("b_")][:10]  # limit batted ball stats for view
-    st.markdown("### Today's Home Run Probability Predictions")
-    st.dataframe(today_df[show_cols].sort_values("hr_pred_proba_wx", ascending=False).head(30))
-    st.download_button(
-        "⬇️ Download Full Predictions CSV",
-        data=today_df.to_csv(index=False),
-        file_name="today_hr_predictions.csv",
-        key="download_preds"
-    )
+    # ==== Predict Today ====
+    today_df['hr_pred_proba'] = ensemble.predict_proba(X_today_scaled)[:,1]
+    today_df['hr_pred_label'] = (today_df['hr_pred_proba'] >= 0.5).astype(int)
+    st.markdown("#### Prediction Results (top 30):")
+    st.dataframe(today_df.sort_values('hr_pred_proba', ascending=False).head(30))
+    st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
+    progress.progress(100, "Done!")
 else:
-    st.info("Upload both the event-level CSV (for training) and TODAY CSV (for prediction).")
-
-st.markdown("""
----
-**Notes**  
-- Weather scoring is an *additional* adjustment. You can tune `basic_weather_score` as you gather outcome data.
-- The ensemble uses XGBoost, LightGBM, CatBoost, RandomForest, GradientBoosting, and Logistic Regression.
-- If you want feature importances, validation charts, or SHAP explainability, let me know!
-""")
+    st.warning("Upload both event-level and today CSVs to begin.")
