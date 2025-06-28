@@ -38,13 +38,10 @@ def score_weather(row):
     condition = str(row.get('condition', '')).lower()
 
     score = 0
-    # temp: +0.2 per 10F over 70, -0.2 per 10F below 70
     if not pd.isna(temp):
         score += (temp - 70) * 0.02
-    # humidity: -0.15 per 10% above 50, +0.15 per 10% below 50
     if not pd.isna(humidity):
         score -= (humidity - 50) * 0.015
-    # wind: +0.15 per 5 mph if "O" in wind_dir ("out"), -0.10 per 5 if "I"/"in"
     if not pd.isna(wind_mph):
         if "o" in wind_dir or "out" in wind_dir:
             score += wind_mph * 0.03
@@ -54,7 +51,6 @@ def score_weather(row):
         score += 0.1
     elif "indoor" in condition:
         score -= 0.05
-    # Clamp to [1, 10] (normalized from original -1 to 1)
     return int(np.round(1 + 4.5 * (score + 1)))  # -1->1 range to 1->10
 
 def clean_X(df, train_cols=None):
@@ -78,17 +74,26 @@ def get_valid_feature_cols(df, drop=None):
     return [c for c in numerics if c not in base_drop]
 
 # ==== Streamlit UI ====
-event_file = st.file_uploader("Upload Event-Level CSV for Training (required)", type='csv', key='eventcsv')
+event_file_1 = st.file_uploader("Upload Event-Level CSV #1 for Training (required)", type='csv', key='eventcsv1')
+event_file_2 = st.file_uploader("Upload Event-Level CSV #2 for Training (required)", type='csv', key='eventcsv2')
 today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type='csv', key='todaycsv')
 
-if event_file is not None and today_file is not None:
+if event_file_1 is not None and event_file_2 is not None and today_file is not None:
     with st.spinner("Loading & cleaning data..."):
-        event_df = pd.read_csv(event_file, low_memory=False)
+        event_df_1 = pd.read_csv(event_file_1, low_memory=False)
+        event_df_2 = pd.read_csv(event_file_2, low_memory=False)
         today_df = pd.read_csv(today_file, low_memory=False)
-        event_df = dedup_columns(event_df)
+        event_df_1 = dedup_columns(event_df_1)
+        event_df_2 = dedup_columns(event_df_2)
         today_df = dedup_columns(today_df)
-        event_df = fix_types(event_df)
+        event_df_1 = fix_types(event_df_1)
+        event_df_2 = fix_types(event_df_2)
         today_df = fix_types(today_df)
+        # Combine event-level files
+        event_df = pd.concat([event_df_1, event_df_2], ignore_index=True)
+        event_df = dedup_columns(event_df)
+        event_df = fix_types(event_df)
+        st.success(f"Combined Event-Level Data Shape: {event_df.shape}")
 
     progress = st.progress(2, "Scoring weather for training and today rows...")
     if 'weather_score' not in event_df.columns:
@@ -162,7 +167,6 @@ if event_file is not None and today_file is not None:
     st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
     # ==== Feature Importances: Top 30 ====
-    # Aggregate from all tree models
     importance_dict = {}
     for name, clf in [
         ('XGBoost', xgb_clf), ('LightGBM', lgb_clf), ('CatBoost', cat_clf),
@@ -188,4 +192,4 @@ if event_file is not None and today_file is not None:
 
     progress.progress(100, "Done!")
 else:
-    st.warning("Upload both event-level and today CSVs to begin.")
+    st.warning("Upload both event-level CSVs and today CSV to begin.")
