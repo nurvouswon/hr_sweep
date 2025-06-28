@@ -1,160 +1,167 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-
+from sklearn.ensemble import VotingClassifier, RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, log_loss
+from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
-from sklearn.ensemble import StackingClassifier
-from sklearn.preprocessing import LabelEncoder
+import shap
+import warnings
 
-st.set_page_config("HR Prediction: Auto Feature Select + Triple Stacking", layout="wide")
-st.header("2️⃣ Upload Event-Level CSVs & Run Model (Auto-FeatureSelect + Stacking)")
+warnings.filterwarnings("ignore")
 
-# Uploaders
-train_file = st.file_uploader(
-    "Upload Training Event-Level CSV (with hr_outcome)", type=["csv"], key="train_csv"
-)
-live_file = st.file_uploader(
-    "Upload Today's Event-Level CSV (with merged features, NO hr_outcome)", type=["csv"], key="live_csv"
-)
+# ========== WEATHER SCORING FUNCTION ==========
+def score_weather(row):
+    """Turn weather columns into a weather HR boost/reduce score"""
+    # Example rules (tune as you collect more outcome data!)
+    temp_score = (row.get('temp', 70) - 70) * 0.01  # every 10F above 70 = +0.1
+    wind_score = 0
+    if 'wind_dir_string' in row and isinstance(row['wind_dir_string'], str):
+        if 'O CF' in row['wind_dir_string']:  # Out to center
+            wind_score += row.get('wind_mph', 0) * 0.03
+        elif 'O RF' in row['wind_dir_string'] or 'O LF' in row['wind_dir_string']:
+            wind_score += row.get('wind_mph', 0) * 0.02
+        elif 'I' in row['wind_dir_string']:
+            wind_score -= row.get('wind_mph', 0) * 0.03
+    humidity_score = -0.02 * (row.get('humidity', 50) - 50) / 10
+    # You can further calibrate by studying outcome data.
+    return temp_score + wind_score + humidity_score
 
-# Threshold controls
-min_thr = st.number_input("Min HR Prob Threshold", min_value=0.0, max_value=1.0, value=0.05, step=0.01)
-max_thr = st.number_input("Max HR Prob Threshold", min_value=0.0, max_value=1.0, value=0.20, step=0.01)
-step = st.number_input("Threshold Step", min_value=0.001, max_value=0.2, value=0.01, step=0.01)
+# ========== DATA CLEANING ==========
+def dedup_columns(df):
+    return df.loc[:, ~df.columns.duplicated()]
 
-if train_file and live_file:
-    df_train = pd.read_csv(train_file)
-    df_live = pd.read_csv(live_file)
-    st.success(f"Training file loaded! {df_train.shape[0]:,} rows, {df_train.shape[1]} columns.")
-    st.success(f"Today's file loaded! {df_live.shape[0]:,} rows, {df_live.shape[1]} columns.")
+def cast_string_numbers(df):
+    for col in df.columns:
+        if df[col].dtype == object:
+            try:
+                df[col] = pd.to_numeric(df[col], errors="ignore")
+            except:
+                pass
+    return df
 
-    # Clean column names (robust for whitespace and encoding issues)
-    df_train.columns = [str(c).strip().lower() for c in df_train.columns]
-    df_live.columns = [str(c).strip().lower() for c in df_live.columns]
+def clean_ids(df):
+    # Remove .0, convert to string for ID columns
+    for id_col in ['batter_id', 'pitcher_id']:
+        if id_col in df.columns:
+            df[id_col] = df[id_col].astype(str).str.replace('.0','',regex=False).str.strip()
+    return df
 
-    # Remove hr_outcome and hr_prob from live if present
-    if "hr_outcome" in df_live.columns:
-        df_live = df_live.drop(columns=["hr_outcome"])
-    if "hr_prob" in df_live.columns:
-        df_live = df_live.drop(columns=["hr_prob"])
+# ========== APP LAYOUT ==========
+st.set_page_config("MLB HR Predictor (Tab 2)", layout="wide")
+st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score")
 
-    # Feature diagnostics: show mismatches
-    train_cols = set(df_train.columns)
-    live_cols = set(df_live.columns)
-    missing_in_live = sorted([c for c in train_cols if c not in live_cols])
-    missing_in_train = sorted([c for c in live_cols if c not in train_cols])
-    st.markdown("### 🩺 Feature Diagnostics Table (train/live overlap)")
-    st.write("**Features in train missing from live:**")
-    st.write(missing_in_live if missing_in_live else "None")
-    st.write("**Features in live missing from train:**")
-    st.write(missing_in_train if missing_in_train else "None")
+uploaded_event = st.file_uploader("Upload Event-Level CSV for Training (required)", type="csv", key="eventcsv")
+uploaded_today = st.file_uploader("Upload TODAY CSV for Prediction (required)", type="csv", key="todaycsv")
+run_btn = st.button("Train + Predict", type="primary")
 
-    # Keep only intersection (except for outcome col)
-    feature_cols = [c for c in df_train.columns if c in df_live.columns and c != "hr_outcome"]
+if run_btn and uploaded_event and uploaded_today:
+    # === LOAD AND CLEAN DATA ===
+    st.markdown("#### Loading & cleaning data...")
+    event_df = pd.read_csv(uploaded_event, low_memory=False)
+    today_df = pd.read_csv(uploaded_today, low_memory=False)
+    event_df = dedup_columns(event_df)
+    today_df = dedup_columns(today_df)
+    event_df = cast_string_numbers(event_df)
+    today_df = cast_string_numbers(today_df)
+    event_df = clean_ids(event_df)
+    today_df = clean_ids(today_df)
 
-    # Impute, encode, convert
-    X_train = df_train[feature_cols].copy()
-    X_live = df_live[feature_cols].copy()
-    y_train = df_train["hr_outcome"].astype(int)
+    # ========== WEATHER SCORE ==========
+    st.markdown("#### Scoring weather for training and today rows...")
+    event_df['weather_score'] = event_df.apply(score_weather, axis=1)
+    today_df['weather_score'] = today_df.apply(score_weather, axis=1)
 
-    # Handle categoricals
-    cat_feats = [c for c in feature_cols if X_train[c].dtype == object or str(X_train[c].dtype) == "category"]
-    encoders = {}
-    for c in cat_feats:
-        le = LabelEncoder()
-        X_train[c] = X_train[c].astype(str).fillna("NA")
-        X_live[c] = X_live[c].astype(str).fillna("NA")
-        le.fit(list(X_train[c].values) + list(X_live[c].values))
-        X_train[c] = le.transform(X_train[c])
-        X_live[c] = le.transform(X_live[c])
-        encoders[c] = le
-    for c in feature_cols:
-        if c not in cat_feats:
-            X_train[c] = pd.to_numeric(X_train[c], errors="coerce")
-            X_live[c] = pd.to_numeric(X_live[c], errors="coerce")
-            X_train[c] = X_train[c].fillna(X_train[c].mean())
-            X_live[c] = X_live[c].fillna(X_train[c].mean())
+    # ========== SELECT FEATURES ==========
+    st.markdown("#### Engineering features...")
+    # Drop IDs, names, direct HR target (except y)
+    non_feature_cols = [
+        'game_date', 'batter_id', 'player_name', 'pitcher_id',
+        'hr_outcome', 'events_clean'
+    ]
+    # Find all rolling features and park/context features
+    rolling_features = [c for c in event_df.columns if (
+        c.startswith('b_') or c.startswith('p_')
+    )]
+    park_context = ['park_hr_rate','park_altitude','roof_status','city','park_hand_hr_rate',
+                    'pitchtype_hr_rate','pitchtype_hr_rate_hand','platoon_hr_rate']
+    weather_feats = ['temp','humidity','wind_mph','wind_dir_string','condition','weather_score']
 
-    # === Feature Variance Diagnostics ===
-    st.subheader("🧪 Feature Variance Diagnostics")
-    low_var_cols = []
-    for c in feature_cols:
-        vals = pd.Series(X_train[c]).dropna().unique()
-        if len(vals) <= 1:
-            low_var_cols.append(c)
-    st.write(f"Columns with 1 unique value (all-constant or all-NaN): {len(low_var_cols)}")
-    if low_var_cols:
-        st.code(low_var_cols)
-    else:
-        st.write("No all-constant columns! 👍")
+    # Make sure we only use numerical features for ML
+    ml_features = []
+    for col in rolling_features + park_context + weather_feats:
+        if col in event_df.columns and pd.api.types.is_numeric_dtype(event_df[col]):
+            ml_features.append(col)
+        elif col in event_df.columns and event_df[col].dtype == object:
+            # Try to label encode for ML
+            try:
+                event_df[col], uniques = pd.factorize(event_df[col])
+                today_df[col] = today_df[col].map({v: k for k, v in enumerate(uniques)})
+                ml_features.append(col)
+            except:
+                pass
 
-    # Remove all-constant columns from modeling
-    usable_feature_cols = [c for c in feature_cols if c not in low_var_cols]
+    # Ensure we have the HR outcome
+    if "hr_outcome" not in event_df.columns:
+        st.error("Event-level CSV must have `hr_outcome` column for training.")
+        st.stop()
+    X = event_df[ml_features].fillna(0)
+    y = event_df["hr_outcome"].fillna(0).astype(int)
 
-    # === Feature Importances for Reference (no slider, just diagnostics) ===
-    st.subheader("🔬 Feature Importances (for all usable features)")
-    lgb_for_select = LGBMClassifier(n_estimators=100, random_state=42)
-    lgb_for_select.fit(X_train[usable_feature_cols], y_train)
-    importances = lgb_for_select.feature_importances_
+    # ========== SPLIT DATA ==========
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.20, random_state=42, stratify=y)
 
-    # Sort and display
-    imp_order = np.argsort(importances)[::-1]
-    # Force to use ALL usable features, always
-    kept_features = usable_feature_cols
+    # ========== DEFINE MODELS ==========
+    st.markdown("#### Training ensemble models (XGBoost, LightGBM, CatBoost, RF, GB, LR)...")
+    models = [
+        ('xgb', XGBClassifier(use_label_encoder=False, eval_metric='logloss', n_jobs=-1, random_state=42)),
+        ('lgbm', LGBMClassifier(n_jobs=-1, random_state=42)),
+        ('cat', CatBoostClassifier(verbose=0, random_state=42)),
+        ('rf', RandomForestClassifier(n_estimators=200, n_jobs=-1, random_state=42)),
+        ('gb', GradientBoostingClassifier(n_estimators=100, random_state=42)),
+        ('lr', LogisticRegression(max_iter=1000, n_jobs=-1, random_state=42)),
+    ]
+    ensemble = VotingClassifier(estimators=models, voting='soft', n_jobs=-1, weights=[5,5,5,2,2,1])
 
-    X_train_sel = X_train[kept_features].values
-    X_live_sel = X_live[kept_features].values
+    # ========== FIT & VALIDATE ==========
+    ensemble.fit(X_train, y_train)
+    val_preds = ensemble.predict_proba(X_val)[:,1]
+    auc = roc_auc_score(y_val, val_preds)
+    ll = log_loss(y_val, val_preds)
+    st.markdown(f"**Validation AUC:** {auc:.4f} — **LogLoss:** {ll:.4f}")
 
-    st.write(f"Using all {len(kept_features)} overlapping features (non-constant):")
-    st.code(kept_features)
+    # ========== PREDICT TODAY ==========
+    st.markdown("#### Predicting HR probability for today...")
+    X_today = today_df[ml_features].fillna(0)
+    today_df['hr_pred_proba'] = ensemble.predict_proba(X_today)[:,1]
 
-    # === Stacking Ensemble ===
-    st.subheader("🤖 Step 2: Triple Model Stacking (XGB, LGBM, CatBoost)")
-    xgb = ("xgb", XGBClassifier(n_estimators=100, max_depth=5, learning_rate=0.1, subsample=0.8, colsample_bytree=0.8, use_label_encoder=False, eval_metric="logloss", verbosity=0, random_state=42))
-    lgb = ("lgb", LGBMClassifier(n_estimators=100, random_state=42))
-    cat = ("cat", CatBoostClassifier(iterations=100, verbose=0, random_seed=42))
-    stack = StackingClassifier(
-        estimators=[xgb, lgb, cat],
-        final_estimator=LGBMClassifier(n_estimators=100, random_state=42),
-        passthrough=True,
-        n_jobs=-1
-    )
-    stack.fit(X_train_sel, y_train)
-    y_pred_proba = stack.predict_proba(X_live_sel)[:, 1]
+    # ========== SHOW + DOWNLOAD ==========
+    out_cols = [
+        'game_date', 'batter_id', 'player_name', 'pitcher_id', 'park', 'temp',
+        'humidity', 'wind_mph', 'condition', 'wind_dir_string', 'weather_score',
+        'hr_pred_proba'
+    ]
+    extra_out_cols = [c for c in today_df.columns if c not in out_cols]
+    today_out = today_df[out_cols + extra_out_cols]
+    st.dataframe(today_out.sort_values("hr_pred_proba", ascending=False).head(20))
 
-    df_live_out = df_live.copy()
-    df_live_out["hr_prob"] = y_pred_proba
-    st.success(f"Stacking model fit OK with {len(kept_features)} features.")
-
-    # Show feature importances for audit
-    feature_imp_df = pd.DataFrame({"feature": kept_features, "importance": importances[imp_order][:len(kept_features)]})
-    feature_imp_df = feature_imp_df.sort_values("importance", ascending=False)
-    with st.expander("🔎 View Feature Importances (from selection LGBM)", expanded=False):
-        st.dataframe(feature_imp_df)
-
-    # --- Threshold controls and picks ---
-    st.header("🔎 Bot Picks by Threshold")
-    player_col = "player_name" if "player_name" in df_live_out.columns else ("batter" if "batter" in df_live_out.columns else kept_features[0])
-
-    for thr in np.arange(min_thr, max_thr + step, step):
-        picks = df_live_out[df_live_out["hr_prob"] >= thr].copy()
-        if not picks.empty:
-            pick_cols = [c for c in [player_col, "batter_id"] if c in picks.columns] + [c for c in picks.columns if c not in [player_col, "batter_id", "hr_prob"]] + ["hr_prob"]
-            st.subheader(f"Players with HR Prob ≥ {thr:.2f} ({len(picks)})")
-            st.dataframe(
-                picks[pick_cols].sort_values("hr_prob", ascending=False).reset_index(drop=True)
-            )
-        else:
-            st.write(f"No players at threshold ≥ {thr:.2f}")
-
-    # --- Download full prediction CSV ---
     st.download_button(
-        "⬇️ Download Full HR Prob Predictions (All Batters)",
-        data=df_live_out.to_csv(index=False),
-        file_name="hr_prob_predictions.csv"
+        "⬇️ Download Full HR Predictions (TODAY)",
+        data=today_out.to_csv(index=False),
+        file_name="today_hr_predictions.csv",
+        key="download_today_preds"
     )
+
+    # ========== EXPLAINABILITY (SHAP) ==========
+    st.markdown("#### Model explainability (feature importance):")
+    explainer = shap.Explainer(models[0][1], X_train)  # SHAP for XGBoost
+    shap_vals = explainer(X_val[:200])
+    st.pyplot(shap.summary_plot(shap_vals, X_val[:200], show=False, plot_size=(12,6)))
+
+    st.success("Done! You can now download predictions and review feature impacts.")
 
 else:
-    st.info("Please upload both training and today's event-level CSVs to continue.")
+    st.info("Upload event-level and TODAY CSVs, then click Train + Predict to generate predictions.")
