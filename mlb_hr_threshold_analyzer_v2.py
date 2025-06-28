@@ -1,5 +1,3 @@
-# 2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -63,9 +61,9 @@ def compute_weather_score(row):
     return score
 
 def clean_X(df, train_cols=None):
-    # Make numeric, fill missing, align columns
+    # Make all columns numeric where possible, fill missing, align columns
     for c in df.columns:
-        if df[c].dtype == object:
+        if hasattr(df[c], 'dtype') and df[c].dtype == object:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.fillna(0)
     if train_cols is not None:
@@ -110,6 +108,13 @@ if event_file and today_file:
         c for c in event_df.columns
         if c not in drop_cols and event_df[c].dtype in [np.float64, np.float32, np.int64, np.int32] and not c.endswith("_id")
     ] + ['weather_score']
+
+    # Check for missing feature columns before proceeding
+    missing_cols = [c for c in feature_cols if c not in event_df.columns]
+    if missing_cols:
+        st.warning(f"Missing columns in event_df: {missing_cols}")
+        st.stop()
+
     target_col = 'hr_outcome' if 'hr_outcome' in event_df.columns else None
     if target_col is None:
         st.error("No 'hr_outcome' column in event-level CSV!")
@@ -118,6 +123,12 @@ if event_file and today_file:
     # X/y and today features
     X = clean_X(event_df[feature_cols])
     y = event_df[target_col]
+
+    # For today, check missing feature columns too:
+    missing_cols_today = [c for c in feature_cols if c not in today_df.columns]
+    if missing_cols_today:
+        st.warning(f"Missing columns in TODAY CSV: {missing_cols_today}")
+        st.stop()
     X_today = clean_X(today_df[feature_cols], train_cols=X.columns)
 
     progress.progress(25, "Splitting for validation...")
