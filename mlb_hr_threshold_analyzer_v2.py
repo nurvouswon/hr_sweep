@@ -9,32 +9,28 @@ from sklearn.preprocessing import StandardScaler
 import xgboost as xgb
 import lightgbm as lgb
 import catboost as cb
+import matplotlib.pyplot as plt
 
 st.set_page_config("MLB HR Predictor", layout="wide")
 st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score")
 
 @st.cache_data(show_spinner=False)
 def dedup_columns(df):
-    # Remove duplicate columns (keep first)
     return df.loc[:, ~df.columns.duplicated()]
 
 def fix_types(df):
-    # Robust float/int/str merge (one-liner for all)
     for col in df.columns:
-        # If all nan, skip
-        if df[col].isnull().all(): continue
-        # If any string that looks numeric, convert
+        if df[col].isnull().all():
+            continue
         if df[col].dtype == 'O':
             try:
                 df[col] = pd.to_numeric(df[col], errors='ignore')
             except: pass
-        # If float but all whole numbers, convert to int
         if pd.api.types.is_float_dtype(df[col]) and (df[col].dropna() % 1 == 0).all():
             df[col] = df[col].astype(pd.Int64Dtype())
     return df
 
 def score_weather(row):
-    # Weather scoring: more HRs at high temp, lower humidity, wind out, outdoor
     temp = row.get('temp', np.nan)
     humidity = row.get('humidity', np.nan)
     wind_mph = row.get('wind_mph', np.nan)
@@ -54,26 +50,21 @@ def score_weather(row):
             score += wind_mph * 0.03
         elif "i" in wind_dir or "in" in wind_dir:
             score -= wind_mph * 0.02
-    # Outdoor: +0.1, Indoor: -0.05
     if "outdoor" in condition:
         score += 0.1
     elif "indoor" in condition:
         score -= 0.05
-    # Clamp to [-1, 1]
-    return max(-1, min(1, score))
+    # Clamp to [1, 10] (normalized from original -1 to 1)
+    return int(np.round(1 + 4.5 * (score + 1)))  # -1->1 range to 1->10
 
 def clean_X(df, train_cols=None):
-    # Dedup columns, fix types, fill nans, align cols with train if provided
     df = dedup_columns(df)
     df = fix_types(df)
-    # Drop all string/object columns except explicitly allowed
     allowed_obj = {'wind_dir_string', 'condition', 'player_name', 'city', 'park', 'roof_status'}
     drop_cols = [c for c in df.select_dtypes('O').columns if c not in allowed_obj]
     df = df.drop(columns=drop_cols, errors='ignore')
-    # Fill nans with -1 (safe default for tree models)
     df = df.fillna(-1)
     if train_cols is not None:
-        # Add any missing cols as -1, and ensure order
         for c in train_cols:
             if c not in df.columns:
                 df[c] = -1
@@ -81,7 +72,6 @@ def clean_X(df, train_cols=None):
     return df
 
 def get_valid_feature_cols(df, drop=None):
-    # Use all numerics except obvious IDs/context
     base_drop = set(['game_date','batter_id','player_name','pitcher_id','city','park','roof_status'])
     if drop: base_drop = base_drop.union(drop)
     numerics = df.select_dtypes(include=[np.number]).columns
@@ -101,32 +91,24 @@ if event_file is not None and today_file is not None:
         today_df = fix_types(today_df)
 
     progress = st.progress(2, "Scoring weather for training and today rows...")
-    # ---- Weather score feature ----
     if 'weather_score' not in event_df.columns:
         event_df['weather_score'] = event_df.apply(score_weather, axis=1)
     if 'weather_score' not in today_df.columns:
         today_df['weather_score'] = today_df.apply(score_weather, axis=1)
     progress.progress(5, "Engineering features...")
 
-    # ==== ML Features ====
-    # Find all features in both
     target_col = 'hr_outcome'
-    # Use intersection of columns between event_df and today_df, numerics only
     feat_cols_train = set(get_valid_feature_cols(event_df))
     feat_cols_today = set(get_valid_feature_cols(today_df))
     feature_cols = sorted(list(feat_cols_train & feat_cols_today))
-    # Add weather_score if not present
     if 'weather_score' not in feature_cols:
         feature_cols.append('weather_score')
 
-    # X/y and today features
     X = clean_X(event_df[feature_cols])
     y = event_df[target_col]
     X_today = clean_X(today_df[feature_cols], train_cols=X.columns)
 
     progress.progress(15, "Splitting for validation...")
-
-    # ==== Split/Scale ====
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
@@ -137,22 +119,15 @@ if event_file is not None and today_file is not None:
 
     progress.progress(22, "Training ensemble models (XGBoost, LightGBM, CatBoost, RF, GB, LR)...")
 
-    # ==== Ensemble Models ====
-    # XGBoost
     xgb_clf = xgb.XGBClassifier(
         n_estimators=125, max_depth=5, learning_rate=0.08, use_label_encoder=False, eval_metric='logloss', n_jobs=-1
     )
-    # LightGBM
     lgb_clf = lgb.LGBMClassifier(n_estimators=125, max_depth=5, learning_rate=0.08, n_jobs=-1)
-    # CatBoost
     cat_clf = cb.CatBoostClassifier(
         iterations=120, depth=5, learning_rate=0.09, verbose=0
     )
-    # Random Forest
     rf_clf = RandomForestClassifier(n_estimators=120, max_depth=7, n_jobs=-1)
-    # Gradient Boosting
     gb_clf = GradientBoostingClassifier(n_estimators=100, max_depth=5, learning_rate=0.09)
-    # Logistic Regression
     lr_clf = LogisticRegression(max_iter=1000)
 
     models = [
@@ -163,7 +138,6 @@ if event_file is not None and today_file is not None:
     ensemble.fit(X_train_scaled, y_train)
     progress.progress(45, "Validating...")
 
-    # Validation
     y_val_pred = ensemble.predict_proba(X_val_scaled)[:,1]
     auc = roc_auc_score(y_val, y_val_pred)
     ll = log_loss(y_val, y_val_pred)
@@ -171,12 +145,47 @@ if event_file is not None and today_file is not None:
 
     progress.progress(60, "Predicting HR probability for today...")
 
-    # ==== Predict Today ====
-    today_df['hr_pred_proba'] = ensemble.predict_proba(X_today_scaled)[:,1]
-    today_df['hr_pred_label'] = (today_df['hr_pred_proba'] >= 0.5).astype(int)
-    st.markdown("#### Prediction Results (top 30):")
-    st.dataframe(today_df.sort_values('hr_pred_proba', ascending=False).head(30))
+    today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
+    today_df['weather_score_1_10'] = today_df['weather_score']  # already 1-10
+
+    # ==== Leaderboard: Top 30 Only ====
+    out_cols = []
+    if "player_name" in today_df.columns:
+        out_cols.append("player_name")
+    out_cols += ["hr_probability", "weather_score_1_10"]
+    leaderboard = today_df[out_cols].sort_values("hr_probability", ascending=False).reset_index(drop=True).head(30)
+    leaderboard["hr_probability"] = leaderboard["hr_probability"].round(4)
+    leaderboard["weather_score_1_10"] = leaderboard["weather_score_1_10"].round(0).astype(int)
+    
+    st.markdown("### 🏆 **Today's HR Probability — Top 30**")
+    st.dataframe(leaderboard, use_container_width=True)
     st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
+
+    # ==== Feature Importances: Top 30 ====
+    # Aggregate from all tree models
+    importance_dict = {}
+    for name, clf in [
+        ('XGBoost', xgb_clf), ('LightGBM', lgb_clf), ('CatBoost', cat_clf),
+        ('RandomForest', rf_clf), ('GradientBoosting', gb_clf)
+    ]:
+        imp = getattr(clf, "feature_importances_", None)
+        if imp is not None:
+            importance_dict[name] = pd.Series(imp, index=X.columns)
+    if importance_dict:
+        imp_df = pd.DataFrame(importance_dict)
+        imp_df['mean_importance'] = imp_df.mean(axis=1)
+        imp_df = imp_df.sort_values("mean_importance", ascending=False).head(30)
+        st.markdown("### 🔑 **Top 30 Feature Importances (Averaged, All Trees)**")
+        st.dataframe(imp_df[["mean_importance"]])
+        fig, ax = plt.subplots(figsize=(6, 12))
+        imp_df["mean_importance"].iloc[::-1].plot(kind='barh', ax=ax)
+        ax.set_xlabel("Mean Importance")
+        ax.set_ylabel("Feature")
+        ax.set_title("Top 30 Features (Ensemble Trees)")
+        st.pyplot(fig)
+    else:
+        st.info("No feature importances available.")
+
     progress.progress(100, "Done!")
 else:
     st.warning("Upload both event-level and today CSVs to begin.")
