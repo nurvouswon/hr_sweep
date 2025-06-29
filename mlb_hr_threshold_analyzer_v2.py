@@ -1,10 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
-import psutil
-import matplotlib.pyplot as plt
-
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import VotingClassifier, RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
@@ -13,21 +9,9 @@ from sklearn.preprocessing import StandardScaler
 import xgboost as xgb
 import lightgbm as lgb
 import catboost as cb
-import gc
 
 st.set_page_config("MLB HR Predictor", layout="wide")
 st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score")
-
-# ========== PARAMS ==========
-MAX_ROWS = st.number_input("Max rows to load for training (RAM safe)", min_value=10000, max_value=300000, value=100000, step=10000)
-
-# --------- DEBUG RAM USAGE ---------
-def show_ram_usage(label=""):
-    process = psutil.Process(os.getpid())
-    mem = process.memory_info().rss / 1024 / 1024
-    st.write(f"**[DEBUG] RAM used {label}: {mem:.2f} MB**")
-
-# ========== HELPERS ==========
 
 @st.cache_data(show_spinner=True)
 def dedup_columns(df):
@@ -39,7 +23,7 @@ def fix_types(df):
             continue
         if df[col].dtype == 'O':
             try:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = pd.to_numeric(df[col])
             except Exception:
                 pass
         if pd.api.types.is_float_dtype(df[col]) and (df[col].dropna() % 1 == 0).all():
@@ -52,6 +36,7 @@ def score_weather(row):
     wind_mph = row.get('wind_mph', np.nan)
     wind_dir = str(row.get('wind_dir_string', '')).lower()
     condition = str(row.get('condition', '')).lower()
+
     score = 0
     if not pd.isna(temp):
         score += (temp - 70) * 0.02
@@ -88,59 +73,33 @@ def get_valid_feature_cols(df, drop=None):
     numerics = df.select_dtypes(include=[np.number]).columns
     return [c for c in numerics if c not in base_drop]
 
-# ========== CACHED FILE READER ==========
-@st.cache_data(show_spinner=True)
-def load_event_file(event_file, max_rows=100_000):
-    show_ram_usage("before file read")
-    if event_file.name.lower().endswith(".parquet"):
-        df_full = pd.read_parquet(event_file)
+def read_event_file(uploaded_file):
+    if uploaded_file.name.lower().endswith('.parquet'):
+        df = pd.read_parquet(uploaded_file)
     else:
-        df_full = pd.read_csv(event_file, low_memory=True)
-    st.write(f"**[DEBUG] Full Event Data shape:** {df_full.shape}")
-    # RAM safety: sample or take first N rows
-    if len(df_full) > max_rows:
-        df = df_full.sample(n=max_rows, random_state=42)
-    else:
-        df = df_full.copy()
-    del df_full; gc.collect()
-    show_ram_usage("after file read/sample")
+        df = pd.read_csv(uploaded_file, low_memory=False)
     return df
 
-@st.cache_data(show_spinner=True)
-def load_today_file(today_file):
-    return pd.read_csv(today_file, low_memory=True)
+try:
+    event_file = st.file_uploader("Upload Event-Level CSV or Parquet for Training (required)", type=['csv', 'parquet'], key='eventcsv')
+    today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type='csv', key='todaycsv')
 
-# ========== MAIN APP LOGIC ==========
+    if event_file is not None and today_file is not None:
+        with st.spinner("Loading & cleaning data..."):
+            event_df = read_event_file(event_file)
+            today_df = pd.read_csv(today_file, low_memory=False)
+            event_df = dedup_columns(event_df)
+            today_df = dedup_columns(today_df)
+            event_df = fix_types(event_df)
+            today_df = fix_types(today_df)
+            st.success(f"Event-Level Data Loaded: {event_df.shape[0]:,} rows")
 
-event_file = st.file_uploader("Upload Event-Level CSV or Parquet for Training (required)", type=['csv', 'parquet'], key='eventcsv')
-today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type='csv', key='todaycsv')
-
-run = st.button("Run Prediction", type="primary", disabled=not(event_file and today_file))
-
-if event_file and today_file and run:
-    try:
-        st.subheader("🛠️ Debug: Data Loading")
-        event_df = load_event_file(event_file, max_rows=MAX_ROWS)
-        today_df = load_today_file(today_file)
-        show_ram_usage("after loading both files")
-
-        st.write(f"**[DEBUG] Event-Level shape:** {event_df.shape}")
-        st.write(f"**[DEBUG] TODAY shape:** {today_df.shape}")
-
-        event_df = dedup_columns(event_df)
-        today_df = dedup_columns(today_df)
-        event_df = fix_types(event_df)
-        today_df = fix_types(today_df)
-        gc.collect()
-        show_ram_usage("after dedup/fix_types")
-
-        # Weather score
-        progress = st.progress(5, "Scoring weather for training and today rows...")
+        progress = st.progress(2, "Scoring weather for training and today rows...")
         if 'weather_score' not in event_df.columns:
             event_df['weather_score'] = event_df.apply(score_weather, axis=1)
         if 'weather_score' not in today_df.columns:
             today_df['weather_score'] = today_df.apply(score_weather, axis=1)
-        progress.progress(10, "Engineering features...")
+        progress.progress(5, "Engineering features...")
 
         target_col = 'hr_outcome'
         feat_cols_train = set(get_valid_feature_cols(event_df))
@@ -153,9 +112,6 @@ if event_file and today_file and run:
         y = event_df[target_col]
         X_today = clean_X(today_df[feature_cols], train_cols=X.columns)
 
-        st.write(f"**[DEBUG] X shape:** {X.shape}")
-        st.write(f"**[DEBUG] X_today shape:** {X_today.shape}")
-
         progress.progress(15, "Splitting for validation...")
         X_train, X_val, y_train, y_val = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=y
@@ -164,9 +120,6 @@ if event_file and today_file and run:
         X_train_scaled = scaler.fit_transform(X_train)
         X_val_scaled = scaler.transform(X_val)
         X_today_scaled = scaler.transform(X_today)
-
-        gc.collect()
-        show_ram_usage("after train/val split and scaling")
 
         progress.progress(22, "Training ensemble models (XGBoost, LightGBM, CatBoost, RF, GB, LR)...")
 
@@ -187,9 +140,6 @@ if event_file and today_file and run:
         ]
         ensemble = VotingClassifier(estimators=models, voting='soft', n_jobs=-1, weights=[2,2,2,1,1,1])
         ensemble.fit(X_train_scaled, y_train)
-        gc.collect()
-        show_ram_usage("after model training")
-
         progress.progress(45, "Validating...")
 
         y_val_pred = ensemble.predict_proba(X_val_scaled)[:,1]
@@ -210,43 +160,16 @@ if event_file and today_file and run:
         leaderboard = today_df[out_cols].sort_values("hr_probability", ascending=False).reset_index(drop=True).head(30)
         leaderboard["hr_probability"] = leaderboard["hr_probability"].round(4)
         leaderboard["weather_score_1_10"] = leaderboard["weather_score_1_10"].round(0).astype(int)
-        
+
         st.markdown("### 🏆 **Today's HR Probability — Top 30**")
         st.dataframe(leaderboard, use_container_width=True)
         st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
-        # ==== Feature Importances: Top 30 ====
-        importance_dict = {}
-        for name, clf in [
-            ('XGBoost', xgb_clf), ('LightGBM', lgb_clf), ('CatBoost', cat_clf),
-            ('RandomForest', rf_clf), ('GradientBoosting', gb_clf)
-        ]:
-            imp = getattr(clf, "feature_importances_", None)
-            if imp is not None:
-                importance_dict[name] = pd.Series(imp, index=X.columns)
-        if importance_dict:
-            imp_df = pd.DataFrame(importance_dict)
-            imp_df['mean_importance'] = imp_df.mean(axis=1)
-            imp_df = imp_df.sort_values("mean_importance", ascending=False).head(30)
-            st.markdown("### 🔑 **Top 30 Feature Importances (Averaged, All Trees)**")
-            st.dataframe(imp_df[["mean_importance"]])
-            fig, ax = plt.subplots(figsize=(6, 12))
-            imp_df["mean_importance"].iloc[::-1].plot(kind='barh', ax=ax)
-            ax.set_xlabel("Mean Importance")
-            ax.set_ylabel("Feature")
-            ax.set_title("Top 30 Features (Ensemble Trees)")
-            st.pyplot(fig)
-        else:
-            st.info("No feature importances available.")
-
         progress.progress(100, "Done!")
+    else:
+        st.warning("Upload both event-level file (CSV or Parquet) and today CSV to begin.")
 
-    except Exception as e:
-        st.error("**[CRITICAL ERROR] App crashed!**")
-        st.error(str(e))
-        import traceback
-        st.code(traceback.format_exc())
-        show_ram_usage("at error")
-
-else:
-    st.warning("Upload both event-level and today CSVs (or Parquet) and click Run Prediction to begin.")
+except Exception as e:
+    import traceback
+    st.error("🚨 App Crashed! See details below:")
+    st.code(traceback.format_exc())
