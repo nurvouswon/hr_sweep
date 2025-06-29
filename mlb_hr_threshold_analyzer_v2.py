@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 st.set_page_config("MLB HR Predictor", layout="wide")
 st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score")
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=True)
 def dedup_columns(df):
     return df.loc[:, ~df.columns.duplicated()]
 
@@ -73,6 +73,17 @@ def get_valid_feature_cols(df, drop=None):
     numerics = df.select_dtypes(include=[np.number]).columns
     return [c for c in numerics if c not in base_drop]
 
+# ----------- CHUNKED CSV READER -----------
+@st.cache_data(show_spinner=True)
+def read_large_csv(uploaded_file, usecols=None, date_col=None, min_date=None):
+    """Read a large CSV in chunks, filter columns and optionally by date"""
+    chunks = []
+    for chunk in pd.read_csv(uploaded_file, chunksize=100_000, low_memory=False, usecols=usecols):
+        if date_col and min_date:
+            chunk = chunk[chunk[date_col] >= min_date]
+        chunks.append(chunk)
+    return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
+
 # ==== Streamlit UI ====
 event_file_1 = st.file_uploader("Upload Event-Level CSV #1 for Training (required)", type='csv', key='eventcsv1')
 event_file_2 = st.file_uploader("Upload Event-Level CSV #2 for Training (required)", type='csv', key='eventcsv2')
@@ -80,8 +91,19 @@ today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type
 
 if event_file_1 is not None and event_file_2 is not None and today_file is not None:
     with st.spinner("Loading & cleaning data..."):
-        event_df_1 = pd.read_csv(event_file_1, low_memory=False)
-        event_df_2 = pd.read_csv(event_file_2, low_memory=False)
+        # Optionally, specify columns you want to use:
+        # cols_needed = [ ... your columns ... ]
+        # Or set to None to load all columns
+        cols_needed = None
+        # If you want to filter by date (saves memory), set e.g.:
+        # date_col = 'game_date'
+        # min_date = '2022-01-01'
+        date_col = None
+        min_date = None
+
+        # Read both event files with chunking
+        event_df_1 = read_large_csv(event_file_1, usecols=cols_needed, date_col=date_col, min_date=min_date)
+        event_df_2 = read_large_csv(event_file_2, usecols=cols_needed, date_col=date_col, min_date=min_date)
         today_df = pd.read_csv(today_file, low_memory=False)
         event_df_1 = dedup_columns(event_df_1)
         event_df_2 = dedup_columns(event_df_2)
@@ -89,7 +111,6 @@ if event_file_1 is not None and event_file_2 is not None and today_file is not N
         event_df_1 = fix_types(event_df_1)
         event_df_2 = fix_types(event_df_2)
         today_df = fix_types(today_df)
-        # Combine event-level files
         event_df = pd.concat([event_df_1, event_df_2], ignore_index=True)
         event_df = dedup_columns(event_df)
         event_df = fix_types(event_df)
@@ -151,7 +172,7 @@ if event_file_1 is not None and event_file_2 is not None and today_file is not N
     progress.progress(60, "Predicting HR probability for today...")
 
     today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
-    today_df['weather_score_1_10'] = today_df['weather_score']  # already 1-10
+    today_df['weather_score_1_10'] = today_df['weather_score']
 
     # ==== Leaderboard: Top 30 Only ====
     out_cols = []
