@@ -5,5 +5,3 @@ scikit-learn
 xgboost
 lightgbm
 catboost
-shap
-psutil
