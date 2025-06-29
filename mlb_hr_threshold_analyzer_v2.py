@@ -24,8 +24,9 @@ def fix_types(df):
             continue
         if df[col].dtype == 'O':
             try:
-                df[col] = pd.to_numeric(df[col], errors='ignore')
-            except: pass
+                df[col] = pd.to_numeric(df[col])
+            except:
+                pass
         if pd.api.types.is_float_dtype(df[col]) and (df[col].dropna() % 1 == 0).all():
             df[col] = df[col].astype(pd.Int64Dtype())
     return df
