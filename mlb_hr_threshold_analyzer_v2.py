@@ -1,179 +1,152 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import VotingClassifier, RandomForestClassifier, GradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, log_loss
-from sklearn.preprocessing import StandardScaler
-import xgboost as xgb
-import lightgbm as lgb
-import catboost as cb
-import matplotlib.pyplot as plt
-import io
+from sklearn.preprocessing import LabelEncoder
+from xgboost import XGBClassifier  # ← NEW import
 
-st.set_page_config("MLB HR Predictor", layout="wide")
-st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score")
+st.header("2️⃣ Upload Event-Level CSVs & Run Model")
 
-# ------------- DEDUP AND TYPE FIX -------------
-@st.cache_data(show_spinner=True)
-def dedup_columns(df):
-    return df.loc[:, ~df.columns.duplicated()]
+# Uploaders
+train_file = st.file_uploader(
+    "Upload Training Event-Level CSV (with hr_outcome)", type=["csv"], key="train_csv"
+)
+live_file = st.file_uploader(
+    "Upload Today's Event-Level CSV (with merged features, NO hr_outcome)", type=["csv"], key="live_csv"
+)
 
-@st.cache_data(show_spinner=True)
-def fix_types(df):
-    # Downcast floats and ints for memory, robust to all col types
-    for col in df.columns:
-        try:
-            if df[col].isnull().all():
-                continue
-            # Downcast numerics
-            if pd.api.types.is_float_dtype(df[col]):
-                df[col] = pd.to_numeric(df[col], downcast='float')
-            elif pd.api.types.is_integer_dtype(df[col]):
-                df[col] = pd.to_numeric(df[col], downcast='integer')
-            elif df[col].dtype == 'O':
-                try:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                except:
-                    pass
-        except Exception as e:
-            pass
-    return df
+# Threshold controls
+min_thr = st.number_input("Min HR Prob Threshold", min_value=0.0, max_value=1.0, value=0.05, step=0.01)
+max_thr = st.number_input("Max HR Prob Threshold", min_value=0.0, max_value=1.0, value=0.20, step=0.01)
+step = st.number_input("Threshold Step", min_value=0.001, max_value=0.2, value=0.01, step=0.01)
 
-# --------- VECTORIZED WEATHER SCORE -----------
-def score_weather_vectorized(df):
-    temp = df.get('temp', pd.Series(np.nan, index=df.index)).astype(float)
-    humidity = df.get('humidity', pd.Series(np.nan, index=df.index)).astype(float)
-    wind_mph = df.get('wind_mph', pd.Series(np.nan, index=df.index)).astype(float)
-    wind_dir = df.get('wind_dir_string', pd.Series("", index=df.index)).astype(str).str.lower()
-    condition = df.get('condition', pd.Series("", index=df.index)).astype(str).str.lower()
-    score = pd.Series(0, index=df.index, dtype=float)
-    score += np.where(~temp.isna(), (temp - 70) * 0.02, 0)
-    score -= np.where(~humidity.isna(), (humidity - 50) * 0.015, 0)
-    score += np.where((~wind_mph.isna()) & (wind_dir.str.contains("o|out")), wind_mph * 0.03, 0)
-    score -= np.where((~wind_mph.isna()) & (wind_dir.str.contains("i|in")), wind_mph * 0.02, 0)
-    score += np.where(condition.str.contains("outdoor"), 0.1, 0)
-    score -= np.where(condition.str.contains("indoor"), 0.05, 0)
-    score = 1 + 4.5 * (score + 1)
-    score = score.clip(1, 10).round().astype(int)
-    return score
+if train_file and live_file:
+    df_train = pd.read_csv(train_file)
+    df_live = pd.read_csv(live_file)
+    st.success(f"Training file loaded! {df_train.shape[0]:,} rows, {df_train.shape[1]} columns.")
+    st.success(f"Today's file loaded! {df_live.shape[0]:,} rows, {df_live.shape[1]} columns.")
 
-def clean_X(df, train_cols=None):
-    df = dedup_columns(df)
-    df = fix_types(df)
-    allowed_obj = {'wind_dir_string', 'condition', 'player_name', 'city', 'park', 'roof_status'}
-    drop_cols = [c for c in df.select_dtypes('O').columns if c not in allowed_obj]
-    df = df.drop(columns=drop_cols, errors='ignore')
-    df = df.fillna(-1)
-    if train_cols is not None:
-        for c in train_cols:
-            if c not in df.columns:
-                df[c] = -1
-        df = df[list(train_cols)]
-    return df
+    # Display feature diagnostics
+    st.markdown("### 🩺 Feature Diagnostics Table (train/live overlap)")
+    train_cols = set(df_train.columns.str.lower())
+    live_cols = set(df_live.columns.str.lower())
+    missing_in_live = sorted([c for c in train_cols if c not in live_cols])
+    missing_in_train = sorted([c for c in live_cols if c not in train_cols])
+    st.write("**Features in train missing from live:**")
+    st.write(missing_in_live if missing_in_live else "None")
+    st.write("**Features in live missing from train:**")
+    st.write(missing_in_train if missing_in_train else "None")
 
-def get_valid_feature_cols(df, drop=None):
-    base_drop = set(['game_date','batter_id','player_name','pitcher_id','city','park','roof_status'])
-    if drop: base_drop = base_drop.union(drop)
-    numerics = df.select_dtypes(include=[np.number]).columns
-    return [c for c in numerics if c not in base_drop]
+    # Standardize column names to lower case for easier matching
+    df_train.columns = [c.lower() for c in df_train.columns]
+    df_live.columns = [c.lower() for c in df_live.columns]
 
-# ----------- FILE UPLOADERS -----------
-event_file = st.file_uploader("Upload Event-Level Training File (CSV or Parquet)", type=['csv','parquet'], key='eventfile')
-today_file = st.file_uploader("Upload TODAY CSV for Prediction", type='csv', key='todaycsv')
+    # Get intersection for modeling
+    candidate_feats = [c for c in df_train.columns if c in df_live.columns and c not in ("hr_outcome",)]
+    # Drop columns that are all null or all constant in either
+    features_to_use = []
+    for c in candidate_feats:
+        if (df_train[c].notnull().sum() > 0) and (df_live[c].notnull().sum() > 0):
+            # Remove columns that are constant in both (e.g., always 0 or always same string)
+            if df_train[c].nunique(dropna=True) > 1 or df_live[c].nunique(dropna=True) > 1:
+                features_to_use.append(c)
 
-if event_file is not None and today_file is not None:
-    with st.spinner("Loading and cleaning data..."):
-        # Parquet or CSV support for event-level
-        try:
-            if event_file.name.endswith(".parquet"):
-                event_df = pd.read_parquet(event_file)
-            else:
-                event_df = pd.read_csv(event_file, low_memory=False)
-        except Exception as e:
-            st.error(f"Could not load event-level file: {e}")
-            st.stop()
+    # Show dtype mismatches
+    dtype_problems = []
+    for c in features_to_use:
+        if c in df_train.columns and c in df_live.columns:
+            if str(df_train[c].dtype) != str(df_live[c].dtype):
+                dtype_problems.append(f"{c}: train={df_train[c].dtype}, live={df_live[c].dtype}")
+    if dtype_problems:
+        st.warning("⚠️ Dtype mismatches detected! " + "; ".join(dtype_problems))
 
-        try:
-            today_df = pd.read_csv(today_file, low_memory=False)
-        except Exception as e:
-            st.error(f"Could not load TODAY CSV: {e}")
-            st.stop()
+    st.write(f"**Final features used ({len(features_to_use)}):**")
+    st.write(features_to_use)
 
-        event_df = dedup_columns(event_df)
-        today_df = dedup_columns(today_df)
-        event_df = fix_types(event_df)
-        today_df = fix_types(today_df)
+    # Show null fraction
+    st.write("Null Fraction (train):")
+    st.write(df_train[features_to_use].isnull().mean())
+    st.write("Null Fraction (live):")
+    st.write(df_live[features_to_use].isnull().mean())
 
-        st.write(f"Loaded event-level: {event_df.shape}")
-        st.write(f"Loaded today: {today_df.shape}")
+    # Preprocess for model
+    X_train = df_train[features_to_use].copy()
+    X_live = df_live[features_to_use].copy()
 
-    # --------- WEATHER SCORING -----------
-    if 'weather_score' not in event_df.columns:
-        event_df['weather_score'] = score_weather_vectorized(event_df)
-    if 'weather_score' not in today_df.columns:
-        today_df['weather_score'] = score_weather_vectorized(today_df)
+    # Find categorical features (object or string)
+    cat_feats = [c for c in features_to_use if str(X_train[c].dtype) in ("object", "category", "string")]
 
-    # ==== ML Features ====
-    target_col = 'hr_outcome'
-    feat_cols_train = set(get_valid_feature_cols(event_df))
-    feat_cols_today = set(get_valid_feature_cols(today_df))
-    feature_cols = sorted(list(feat_cols_train & feat_cols_today))
-    if 'weather_score' not in feature_cols:
-        feature_cols.append('weather_score')
+    # Impute missing numerics with mean; categorical with "NA"
+    for c in features_to_use:
+        if c in cat_feats:
+            X_train[c] = X_train[c].astype(str).fillna("NA")
+            X_live[c] = X_live[c].astype(str).fillna("NA")
+        else:
+            X_train[c] = pd.to_numeric(X_train[c], errors="coerce")
+            X_train[c] = X_train[c].fillna(X_train[c].mean())
+            X_live[c] = pd.to_numeric(X_live[c], errors="coerce")
+            X_live[c] = X_live[c].fillna(X_train[c].mean())  # use train mean
 
-    # Prepare X/y
-    X = clean_X(event_df[feature_cols])
-    y = event_df[target_col]
-    X_today = clean_X(today_df[feature_cols], train_cols=X.columns)
+    # Encode categorical
+    encoders = {}
+    for c in cat_feats:
+        le = LabelEncoder()
+        X_train[c] = le.fit_transform(X_train[c])
+        # If live has unseen values, assign them a special code
+        live_vals = pd.Series(X_live[c].unique())
+        new_vals = live_vals[~live_vals.isin(le.classes_)]
+        if not new_vals.empty:
+            le_classes = np.concatenate([le.classes_, new_vals])
+            le.classes_ = le_classes
+        X_live[c] = le.transform(X_live[c])
+        encoders[c] = le
 
-    # --------- MODELING ----------
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_val_scaled = scaler.transform(X_val)
-    X_today_scaled = scaler.transform(X_today)
+    # Fit XGBoost model
+    try:
+        y_train = df_train["hr_outcome"].astype(int)
+        model = XGBClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            use_label_encoder=False,
+            eval_metric="logloss",
+            verbosity=0
+        )
+        model.fit(X_train, y_train)
+        y_pred_proba = model.predict_proba(X_live)[:, 1]
+        df_live_out = df_live.copy()
+        df_live_out["hr_prob"] = y_pred_proba
+        st.success(f"Model fit OK with {len(features_to_use)} features (XGBoost).")
+    except Exception as e:
+        st.error(f"Model fitting or prediction failed: {e}")
+        st.stop()
 
-    xgb_clf = xgb.XGBClassifier(n_estimators=125, max_depth=5, learning_rate=0.08, use_label_encoder=False, eval_metric='logloss', n_jobs=-1)
-    lgb_clf = lgb.LGBMClassifier(n_estimators=125, max_depth=5, learning_rate=0.08, n_jobs=-1)
-    cat_clf = cb.CatBoostClassifier(iterations=120, depth=5, learning_rate=0.09, verbose=0)
-    rf_clf = RandomForestClassifier(n_estimators=120, max_depth=7, n_jobs=-1)
-    gb_clf = GradientBoostingClassifier(n_estimators=100, max_depth=5, learning_rate=0.09)
-    lr_clf = LogisticRegression(max_iter=1000)
+    # Show threshold controls and picks
+    st.markdown("### Threshold Controls")
+    st.write(f"Min HR Prob Threshold: {min_thr}")
+    st.write(f"Max HR Prob Threshold: {max_thr}")
+    st.write(f"Threshold Step: {step}")
 
-    models = [
-        ('xgb', xgb_clf), ('lgb', lgb_clf), ('cat', cat_clf),
-        ('rf', rf_clf), ('gb', gb_clf), ('lr', lr_clf)
-    ]
-    ensemble = VotingClassifier(estimators=models, voting='soft', n_jobs=-1, weights=[2,2,2,1,1,1])
-    ensemble.fit(X_train_scaled, y_train)
+    st.header("🔎 Bot Picks by Threshold")
+    if 'player_name' in df_live_out.columns:
+        player_col = 'player_name'
+    elif 'batter' in df_live_out.columns:
+        player_col = 'batter'
+    else:
+        player_col = features_to_use[0]  # fallback
 
-    y_val_pred = ensemble.predict_proba(X_val_scaled)[:,1]
-    auc = roc_auc_score(y_val, y_val_pred)
-    ll = log_loss(y_val, y_val_pred)
-    st.info(f"Validation AUC: **{auc:.4f}** — LogLoss: **{ll:.4f}**")
+    # Show bot picks for each threshold
+    for thr in np.arange(min_thr, max_thr + step, step):
+        picks = df_live_out[df_live_out["hr_prob"] >= thr].copy()
+        if not picks.empty:
+            st.subheader(f"Players with HR Prob ≥ {thr:.2f} ({len(picks)} picks)")
+            st.dataframe(
+                picks[[player_col, "batter_id"] + [c for c in picks.columns if c not in [player_col, "batter_id", "hr_prob"]] + ["hr_prob"]]
+                .sort_values("hr_prob", ascending=False).reset_index(drop=True)
+            )
+        else:
+            st.write(f"No players at threshold ≥ {thr:.2f}")
 
-    # --------- PREDICT -----------
-    today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
-    today_df['weather_score_1_10'] = today_df['weather_score']
-
-    # --------- OUTPUT -----------
-    out_cols = []
-    if "player_name" in today_df.columns:
-        out_cols.append("player_name")
-    out_cols += ["hr_probability", "weather_score_1_10"]
-
-    leaderboard = today_df[out_cols].sort_values("hr_probability", ascending=False).reset_index(drop=True)
-    leaderboard["hr_probability"] = leaderboard["hr_probability"].round(4)
-    leaderboard["weather_score_1_10"] = leaderboard["weather_score_1_10"].round(0).astype(int)
-
-    st.markdown("### 🏆 **Today's HR Probability Leaderboard**")
-    st.dataframe(leaderboard, use_container_width=True)
-    st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
-
-    st.success("Prediction complete. App optimized for your data size.")
 else:
-    st.warning("Upload both event-level (CSV/Parquet) and today CSV to begin.")
+    st.info("Please upload both training and today's event-level CSVs to continue.")
