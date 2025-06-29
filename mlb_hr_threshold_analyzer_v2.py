@@ -83,38 +83,27 @@ def read_large_csv(uploaded_file, usecols=None, date_col=None, min_date=None):
     return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
 
 # ==== Streamlit UI ====
-event_file_1 = st.file_uploader("Upload Event-Level CSV or Parquet #1 for Training (required)", type=['csv', 'parquet'], key='eventcsv1')
-event_file_2 = st.file_uploader("Upload Event-Level CSV or Parquet #2 for Training (required)", type=['csv', 'parquet'], key='eventcsv2')
+event_file = st.file_uploader("Upload Event-Level CSV or Parquet for Training (required)", type=['csv', 'parquet'], key='eventcsv1')
 today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type='csv', key='todaycsv')
 
-if event_file_1 is not None and event_file_2 is not None and today_file is not None:
+if event_file is not None and today_file is not None:
     with st.spinner("Loading & cleaning data..."):
         cols_needed = None
         date_col = None
         min_date = None
 
-        if event_file_1.name.endswith('.parquet'):
-            event_df_1 = pd.read_parquet(event_file_1)
+        if event_file.name.endswith('.parquet'):
+            event_df = pd.read_parquet(event_file)
         else:
-            event_df_1 = read_large_csv(event_file_1, usecols=cols_needed, date_col=date_col, min_date=min_date)
-
-        if event_file_2.name.endswith('.parquet'):
-            event_df_2 = pd.read_parquet(event_file_2)
-        else:
-            event_df_2 = read_large_csv(event_file_2, usecols=cols_needed, date_col=date_col, min_date=min_date)
+            event_df = read_large_csv(event_file, usecols=cols_needed, date_col=date_col, min_date=min_date)
 
         today_df = pd.read_csv(today_file, low_memory=False)
 
-        event_df_1 = dedup_columns(event_df_1)
-        event_df_2 = dedup_columns(event_df_2)
-        today_df = dedup_columns(today_df)
-        event_df_1 = fix_types(event_df_1)
-        event_df_2 = fix_types(event_df_2)
-        today_df = fix_types(today_df)
-        event_df = pd.concat([event_df_1, event_df_2], ignore_index=True)
         event_df = dedup_columns(event_df)
+        today_df = dedup_columns(today_df)
         event_df = fix_types(event_df)
-        st.success(f"Combined Event-Level Data Shape: {event_df.shape}")
+        today_df = fix_types(today_df)
+        st.success(f"Event-Level Data Shape: {event_df.shape}")
 
     progress = st.progress(2, "Scoring weather for training and today rows...")
     if 'weather_score' not in event_df.columns:
@@ -211,4 +200,4 @@ if event_file_1 is not None and event_file_2 is not None and today_file is not N
 
     progress.progress(100, "Done!")
 else:
-    st.warning("Upload both event-level files and today CSV to begin.")
+    st.warning("Upload an event-level file and today CSV to begin.")
