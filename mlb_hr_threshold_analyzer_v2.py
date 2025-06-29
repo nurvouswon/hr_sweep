@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import io
 
 st.set_page_config("MLB HR Predictor", layout="wide")
-st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score")
+st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble")
 
 @st.cache_data(show_spinner=False)
 def dedup_columns(df):
@@ -30,28 +30,6 @@ def fix_types(df):
         if pd.api.types.is_float_dtype(df[col]) and (df[col].dropna() % 1 == 0).all():
             df[col] = df[col].astype(pd.Int64Dtype())
     return df
-
-def score_weather(row):
-    temp = row.get('temp', np.nan)
-    humidity = row.get('humidity', np.nan)
-    wind_mph = row.get('wind_mph', np.nan)
-    wind_dir = str(row.get('wind_dir_string', '')).lower()
-    condition = str(row.get('condition', '')).lower()
-    score = 0
-    if not pd.isna(temp):
-        score += (temp - 70) * 0.02
-    if not pd.isna(humidity):
-        score -= (humidity - 50) * 0.015
-    if not pd.isna(wind_mph):
-        if "o" in wind_dir or "out" in wind_dir:
-            score += wind_mph * 0.03
-        elif "i" in wind_dir or "in" in wind_dir:
-            score -= wind_mph * 0.02
-    if "outdoor" in condition:
-        score += 0.1
-    elif "indoor" in condition:
-        score -= 0.05
-    return int(np.round(1 + 4.5 * (score + 1)))  # -1->1 range to 1->10
 
 def clean_X(df, train_cols=None):
     df = dedup_columns(df)
@@ -73,7 +51,6 @@ def get_valid_feature_cols(df, drop=None):
     numerics = df.select_dtypes(include=[np.number]).columns
     return [c for c in numerics if c not in base_drop]
 
-# ==== Streamlit UI ====
 event_file = st.file_uploader("Upload Event-Level CSV or Parquet for Training", type=['csv', 'parquet'], key='eventcsv')
 today_file = st.file_uploader("Upload TODAY CSV or Parquet for Prediction", type=['csv', 'parquet'], key='todaycsv')
 
@@ -92,19 +69,12 @@ if event_file is not None and today_file is not None:
         event_df = fix_types(event_df)
         today_df = fix_types(today_df)
 
-    progress = st.progress(2, "Scoring weather for training and today rows...")
-    if 'weather_score' not in event_df.columns:
-        event_df['weather_score'] = event_df.apply(score_weather, axis=1)
-    if 'weather_score' not in today_df.columns:
-        today_df['weather_score'] = today_df.apply(score_weather, axis=1)
-    progress.progress(5, "Engineering features...")
+    progress = st.progress(2, "Engineering features...")
 
     target_col = 'hr_outcome'
     feat_cols_train = set(get_valid_feature_cols(event_df))
     feat_cols_today = set(get_valid_feature_cols(today_df))
     feature_cols = sorted(list(feat_cols_train & feat_cols_today))
-    if 'weather_score' not in feature_cols:
-        feature_cols.append('weather_score')
 
     X = clean_X(event_df[feature_cols])
     y = event_df[target_col]
@@ -148,16 +118,14 @@ if event_file is not None and today_file is not None:
     progress.progress(60, "Predicting HR probability for today...")
 
     today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
-    today_df['weather_score_1_10'] = today_df['weather_score']  # already 1-10
 
     # ==== Leaderboard: Top 30 Only ====
     out_cols = []
     if "player_name" in today_df.columns:
         out_cols.append("player_name")
-    out_cols += ["hr_probability", "weather_score_1_10"]
+    out_cols += ["hr_probability"]
     leaderboard = today_df[out_cols].sort_values("hr_probability", ascending=False).reset_index(drop=True).head(30)
     leaderboard["hr_probability"] = leaderboard["hr_probability"].round(4)
-    leaderboard["weather_score_1_10"] = leaderboard["weather_score_1_10"].round(0).astype(int)
     
     st.markdown("### 🏆 **Today's HR Probability — Top 30**")
     st.dataframe(leaderboard, use_container_width=True)
