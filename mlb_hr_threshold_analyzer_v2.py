@@ -73,10 +73,8 @@ def get_valid_feature_cols(df, drop=None):
     numerics = df.select_dtypes(include=[np.number]).columns
     return [c for c in numerics if c not in base_drop]
 
-# ----------- CHUNKED CSV READER -----------
 @st.cache_data(show_spinner=True)
 def read_large_csv(uploaded_file, usecols=None, date_col=None, min_date=None):
-    """Read a large CSV in chunks, filter columns and optionally by date"""
     chunks = []
     for chunk in pd.read_csv(uploaded_file, chunksize=100_000, low_memory=False, usecols=usecols):
         if date_col and min_date:
@@ -85,26 +83,28 @@ def read_large_csv(uploaded_file, usecols=None, date_col=None, min_date=None):
     return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
 
 # ==== Streamlit UI ====
-event_file_1 = st.file_uploader("Upload Event-Level CSV #1 for Training (required)", type='csv', key='eventcsv1')
-event_file_2 = st.file_uploader("Upload Event-Level CSV #2 for Training (required)", type='csv', key='eventcsv2')
+event_file_1 = st.file_uploader("Upload Event-Level CSV or Parquet #1 for Training (required)", type=['csv', 'parquet'], key='eventcsv1')
+event_file_2 = st.file_uploader("Upload Event-Level CSV or Parquet #2 for Training (required)", type=['csv', 'parquet'], key='eventcsv2')
 today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type='csv', key='todaycsv')
 
 if event_file_1 is not None and event_file_2 is not None and today_file is not None:
     with st.spinner("Loading & cleaning data..."):
-        # Optionally, specify columns you want to use:
-        # cols_needed = [ ... your columns ... ]
-        # Or set to None to load all columns
         cols_needed = None
-        # If you want to filter by date (saves memory), set e.g.:
-        # date_col = 'game_date'
-        # min_date = '2022-01-01'
         date_col = None
         min_date = None
 
-        # Read both event files with chunking
-        event_df_1 = read_large_csv(event_file_1, usecols=cols_needed, date_col=date_col, min_date=min_date)
-        event_df_2 = read_large_csv(event_file_2, usecols=cols_needed, date_col=date_col, min_date=min_date)
+        if event_file_1.name.endswith('.parquet'):
+            event_df_1 = pd.read_parquet(event_file_1)
+        else:
+            event_df_1 = read_large_csv(event_file_1, usecols=cols_needed, date_col=date_col, min_date=min_date)
+
+        if event_file_2.name.endswith('.parquet'):
+            event_df_2 = pd.read_parquet(event_file_2)
+        else:
+            event_df_2 = read_large_csv(event_file_2, usecols=cols_needed, date_col=date_col, min_date=min_date)
+
         today_df = pd.read_csv(today_file, low_memory=False)
+
         event_df_1 = dedup_columns(event_df_1)
         event_df_2 = dedup_columns(event_df_2)
         today_df = dedup_columns(today_df)
@@ -174,7 +174,6 @@ if event_file_1 is not None and event_file_2 is not None and today_file is not N
     today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
     today_df['weather_score_1_10'] = today_df['weather_score']
 
-    # ==== Leaderboard: Top 30 Only ====
     out_cols = []
     if "player_name" in today_df.columns:
         out_cols.append("player_name")
@@ -187,7 +186,6 @@ if event_file_1 is not None and event_file_2 is not None and today_file is not N
     st.dataframe(leaderboard, use_container_width=True)
     st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
-    # ==== Feature Importances: Top 30 ====
     importance_dict = {}
     for name, clf in [
         ('XGBoost', xgb_clf), ('LightGBM', lgb_clf), ('CatBoost', cat_clf),
@@ -213,4 +211,4 @@ if event_file_1 is not None and event_file_2 is not None and today_file is not N
 
     progress.progress(100, "Done!")
 else:
-    st.warning("Upload both event-level CSVs and today CSV to begin.")
+    st.warning("Upload both event-level files and today CSV to begin.")
