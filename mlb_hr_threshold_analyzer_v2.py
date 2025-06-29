@@ -79,7 +79,15 @@ if event_file is not None and today_file is not None:
     X = clean_X(event_df[feature_cols])
     y = event_df[target_col]
     X_today = clean_X(today_df[feature_cols], train_cols=X.columns)
-
+    # === Debugging for crashing at splitting ===
+    st.write("DEBUG: event_df shape", event_df.shape)
+    st.write("DEBUG: today_df shape", today_df.shape)
+    st.write("DEBUG: event_df hr_outcome unique values:", event_df['hr_outcome'].unique())
+    st.write("DEBUG: event_df hr_outcome value counts:", event_df['hr_outcome'].value_counts(dropna=False))
+    st.write("DEBUG: Feature columns:", feature_cols)
+    st.write("DEBUG: X shape:", X.shape)
+    st.write("DEBUG: y shape:", y.shape)
+    st.write("DEBUG: X_today shape:", X_today.shape)
     progress.progress(15, "Splitting for validation...")
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
