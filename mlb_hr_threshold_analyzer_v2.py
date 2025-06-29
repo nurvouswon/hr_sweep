@@ -25,7 +25,7 @@ def fix_types(df):
         if df[col].dtype == 'O':
             try:
                 df[col] = pd.to_numeric(df[col])
-            except:
+            except Exception:
                 pass
         if pd.api.types.is_float_dtype(df[col]) and (df[col].dropna() % 1 == 0).all():
             df[col] = df[col].astype(pd.Int64Dtype())
@@ -52,7 +52,7 @@ def score_weather(row):
         score += 0.1
     elif "indoor" in condition:
         score -= 0.05
-    return int(np.round(1 + 4.5 * (score + 1)))  # -1->1 range to 1->10
+    return int(np.round(1 + 4.5 * (score + 1)))  # -1->1 to 1->10
 
 def clean_X(df, train_cols=None):
     df = dedup_columns(df)
@@ -74,32 +74,28 @@ def get_valid_feature_cols(df, drop=None):
     numerics = df.select_dtypes(include=[np.number]).columns
     return [c for c in numerics if c not in base_drop]
 
-@st.cache_data(show_spinner=True)
-def read_large_csv(uploaded_file, usecols=None, date_col=None, min_date=None):
-    chunks = []
-    for chunk in pd.read_csv(uploaded_file, chunksize=100_000, low_memory=False, usecols=usecols):
-        if date_col and min_date:
-            chunk = chunk[chunk[date_col] >= min_date]
-        chunks.append(chunk)
-    return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
+# ----------- FILE UPLOADERS -----------
+event_file = st.file_uploader(
+    "Upload Event-Level Training Data (CSV or Parquet, required)", 
+    type=['csv', 'parquet'], 
+    key='eventcsv'
+)
+today_file = st.file_uploader(
+    "Upload TODAY CSV for Prediction (required)", 
+    type='csv', 
+    key='todaycsv'
+)
 
-# ==== Streamlit UI ====
-event_file = st.file_uploader("Upload Event-Level CSV or Parquet for Training (required)", type=['csv', 'parquet'], key='eventcsv1')
-today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type='csv', key='todaycsv')
+run = st.button("Run Prediction", type="primary", disabled=not(event_file and today_file))
 
-if event_file is not None and today_file is not None:
+if event_file and today_file and run:
     with st.spinner("Loading & cleaning data..."):
-        cols_needed = None
-        date_col = None
-        min_date = None
-
-        if event_file.name.endswith('.parquet'):
+        # --- Event-level flexible loader (supports parquet and csv) ---
+        if event_file.name.lower().endswith(".parquet"):
             event_df = pd.read_parquet(event_file)
         else:
-            event_df = read_large_csv(event_file, usecols=cols_needed, date_col=date_col, min_date=min_date)
-
-        today_df = pd.read_csv(today_file, low_memory=False)
-
+            event_df = pd.read_csv(event_file, low_memory=True)
+        today_df = pd.read_csv(today_file, low_memory=True)
         event_df = dedup_columns(event_df)
         today_df = dedup_columns(today_df)
         event_df = fix_types(event_df)
@@ -164,6 +160,7 @@ if event_file is not None and today_file is not None:
     today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
     today_df['weather_score_1_10'] = today_df['weather_score']
 
+    # ==== Leaderboard: Top 30 Only ====
     out_cols = []
     if "player_name" in today_df.columns:
         out_cols.append("player_name")
@@ -176,6 +173,7 @@ if event_file is not None and today_file is not None:
     st.dataframe(leaderboard, use_container_width=True)
     st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
+    # ==== Feature Importances: Top 30 ====
     importance_dict = {}
     for name, clf in [
         ('XGBoost', xgb_clf), ('LightGBM', lgb_clf), ('CatBoost', cat_clf),
@@ -201,4 +199,4 @@ if event_file is not None and today_file is not None:
 
     progress.progress(100, "Done!")
 else:
-    st.warning("Upload an event-level file and today CSV to begin.")
+    st.warning("Upload both event-level and today CSV to begin and click 'Run Prediction'.")
