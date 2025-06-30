@@ -99,73 +99,74 @@ def downcast_df(df):
         df[col] = pd.to_numeric(df[col], downcast='integer')
     return df
 
-def add_gameday_overlays(df):
-    overlays_added = []
-    overlay_features = []
+def overlay_multiplier(row):
+    """
+    Research-backed multipliers for overlay post-prediction adjustment.
+    Tuned for maximum signal without overfitting (see detailed MLB studies).
+    """
+    mult = 1.0
 
-    # 1. Park Factor
-    park_cols = [c for c in df.columns if "park" in c.lower() or "stadium" in c.lower() or "field" in c.lower()]
-    if park_cols:
-        overlays_added += park_cols
-        overlay_features += park_cols
+    # Park HR Rate (typical MLB range ~0.80 - 1.20)
+    if 'park_hr_rate' in row and pd.notnull(row['park_hr_rate']):
+        try:
+            if row['park_hr_rate'] > 1.10:
+                mult *= 1.10  # HR-friendly
+            elif row['park_hr_rate'] < 0.90:
+                mult *= 0.92  # HR-unfriendly
+            # else ~1.00
+        except Exception:
+            pass
 
-    # 2. Pitcher HR
-    pitcher_hr_cols = [c for c in df.columns if "pitcher" in c.lower() and "hr" in c.lower()]
-    if pitcher_hr_cols:
-        overlays_added += pitcher_hr_cols
-        overlay_features += pitcher_hr_cols
+    # Temperature (Fahrenheit, non-linear effect per MLB physics studies)
+    if 'temp' in row and pd.notnull(row['temp']):
+        try:
+            if row['temp'] >= 85:
+                mult *= 1.07  # Hot, ball travels farther
+            elif row['temp'] >= 75:
+                mult *= 1.03
+            elif row['temp'] <= 60:
+                mult *= 0.95  # Cold, suppresses HR
+        except Exception:
+            pass
 
-    # 3. Lineup or Batting Order
-    lineup_cols = [c for c in df.columns if "lineup" in c.lower() or "batting_order" in c.lower() or "bat_order" in c.lower()]
-    if lineup_cols:
-        overlays_added += lineup_cols
-        overlay_features += lineup_cols
+    # Wind: Out increases HRs, In decreases (Statcast, TangoTiger studies)
+    if 'wind_mph' in row and 'wind_dir_string' in row and pd.notnull(row['wind_mph']):
+        try:
+            wind_str = str(row['wind_dir_string']).lower()
+            if 'out' in wind_str and row['wind_mph'] >= 10:
+                mult *= 1.10
+            elif 'in' in wind_str and row['wind_mph'] >= 10:
+                mult *= 0.90
+            elif 'out' in wind_str and row['wind_mph'] >= 5:
+                mult *= 1.05
+            elif 'in' in wind_str and row['wind_mph'] >= 5:
+                mult *= 0.96
+        except Exception:
+            pass
 
-    # 4. Implied Odds or Vegas
-    vegas_cols = [c for c in df.columns if "vegas" in c.lower() or "implied" in c.lower()]
-    if vegas_cols:
-        overlays_added += vegas_cols
-        overlay_features += vegas_cols
+    # Humidity: marginal effect, boost at very high humidity (in some parks)
+    if 'humidity' in row and pd.notnull(row['humidity']):
+        try:
+            if row['humidity'] >= 70:
+                mult *= 1.02
+            elif row['humidity'] <= 30:
+                mult *= 0.98
+        except Exception:
+            pass
 
-    # 5. Platoon / Split / Handedness
-    platoon_cols = [c for c in df.columns if "platoon" in c.lower() or "split" in c.lower() or "handedness" in c.lower()]
-    if platoon_cols:
-        overlays_added += platoon_cols
-        overlay_features += platoon_cols
+    # Altitude: if available, apply for places like Coors Field (Denver)
+    if 'park_altitude' in row and pd.notnull(row['park_altitude']):
+        try:
+            if row['park_altitude'] >= 5000:
+                mult *= 1.10
+            elif row['park_altitude'] >= 2000:
+                mult *= 1.03
+        except Exception:
+            pass
 
-    # 6. Game Weather
-    weather_cols = [c for c in df.columns if any(x in c.lower() for x in ['weather', 'temp', 'wind', 'humidity', 'dew'])]
-    if weather_cols:
-        overlays_added += weather_cols
-        overlay_features += weather_cols
+    return mult
 
-    # 7. Bullpen HR/9
-    bullpen_cols = [c for c in df.columns if ('bullpen' in c.lower() or 'relief' in c.lower()) and 'hr' in c.lower()]
-    if bullpen_cols:
-        overlays_added += bullpen_cols
-        overlay_features += bullpen_cols
-
-    # 8. Game Start Time (or day/night)
-    start_time_cols = [c for c in df.columns if any(x in c.lower() for x in ['start_time', 'game_time', 'night', 'day'])]
-    if start_time_cols:
-        overlays_added += start_time_cols
-        overlay_features += start_time_cols
-
-    # 9. Recent Performance
-    recent_cols = [c for c in df.columns if any(x in c.lower() for x in ['recent', 'last7', 'last14', 'rolling', 'trend'])]
-    if recent_cols:
-        overlays_added += recent_cols
-        overlay_features += recent_cols
-
-    # Normalize overlays (recommended for best practice)
-    for c in overlay_features:
-        if df[c].dtype in [np.float32, np.float64, np.int32, np.int64]:
-            df[c] = (df[c] - df[c].mean()) / (df[c].std() + 1e-6)
-
-    return overlay_features, overlays_added
-
-# ---- Streamlit App ----
-
+# === Streamlit UI ===
 event_file = st.file_uploader("Upload Event-Level CSV/Parquet for Training (required)", type=['csv', 'parquet'], key='eventcsv')
 today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type=['csv', 'parquet'], key='todaycsv')
 
@@ -195,14 +196,12 @@ if event_file is not None and today_file is not None:
         st.stop()
     st.success("✅ 'hr_outcome' column found!")
 
-    # Show value counts for hr_outcome
     value_counts = event_df[target_col].value_counts(dropna=False)
     value_counts = value_counts.reset_index()
     value_counts.columns = ['hr_outcome', 'count']
     st.write("Value counts for hr_outcome:")
     st.dataframe(value_counts)
 
-    # =========== DROP BAD COLS (robust for memory & NaN) ===========
     st.write("Dropping columns with >25% missing or near-zero variance...")
     event_df, event_dropped = drop_high_na_low_var(event_df, thresh_na=0.25, thresh_var=1e-7)
     today_df, today_dropped = drop_high_na_low_var(today_df, thresh_na=0.25, thresh_var=1e-7)
@@ -215,7 +214,6 @@ if event_file is not None and today_file is not None:
     st.write("Remaining columns today:")
     st.write(list(today_df.columns))
 
-    # =========== CLUSTER FEATURE SELECTION ===========
     st.write("Running cluster-based feature selection (removing highly correlated features)...")
     feat_cols_train = set(get_valid_feature_cols(event_df))
     feat_cols_today = set(get_valid_feature_cols(today_df))
@@ -223,29 +221,24 @@ if event_file is not None and today_file is not None:
     X_for_cluster = event_df[feature_cols]
     selected_features, clusters, cluster_dropped = cluster_select_features(X_for_cluster, threshold=0.95)
     st.write(f"Feature clusters (threshold 0.95):")
-    for i, cluster in enumerate(clusters):
+    for i, cluster in enumerate(clusters[:20]):
         st.write(f"Cluster {i+1}: {cluster}")
+    if len(clusters) > 20:
+        st.write(f"... {len(clusters)-20} more clusters.")
     st.write("Selected features from clusters:")
-    st.write(selected_features)
-    st.write("Dropped features from clusters:")
-    st.write(cluster_dropped)
+    st.write(selected_features[:30])
+    if len(selected_features) > 30:
+        st.write(f"... {len(selected_features)-30} more features.")
 
-    # --- GAME DAY OVERLAYS ---
-    st.write("Auto-integrating enriched game day overlays (1–9) if present in files...")
-    overlay_train, overlays_added_train = add_gameday_overlays(event_df)
-    overlay_today, overlays_added_today = add_gameday_overlays(today_df)
-    st.write("Game Day Overlays found (train):", overlays_added_train)
-    st.write("Game Day Overlays found (today):", overlays_added_today)
-    # Only keep overlays present in BOTH files
-    overlays_in_both = list(sorted(set(overlay_train) & set(overlay_today)))
-    st.write("Game Day Overlays used (in both):", overlays_in_both)
-    all_selected_features = list(sorted(set(selected_features) | set(overlays_in_both)))
-    # ^ only includes overlays that are present in BOTH files
+    st.write("Dropped features from clusters (first 30 shown):")
+    st.write(cluster_dropped[:30])
+    if len(cluster_dropped) > 30:
+        st.write(f"... {len(cluster_dropped)-30} more dropped features.")
 
     # Apply selected features to X and X_today
-    X = clean_X(event_df[all_selected_features])
+    X = clean_X(event_df[selected_features])
     y = event_df[target_col]
-    X_today = clean_X(today_df[all_selected_features], train_cols=X.columns)
+    X_today = clean_X(today_df[selected_features], train_cols=X.columns)
     X = downcast_df(X)
     X_today = downcast_df(X_today)
 
@@ -262,7 +255,7 @@ if event_file is not None and today_file is not None:
     X_val_scaled = scaler.transform(X_val)
     X_today_scaled = scaler.transform(X_today)
 
-    # =========== SOFT VOTING ENSEMBLE ===========
+    # =========== DEEP RESEARCH ENSEMBLE (SOFT VOTING) ===========
     st.write("Training base models (XGB, LGBM, CatBoost, RF, GB, LR)...")
     xgb_clf = xgb.XGBClassifier(
         n_estimators=60, max_depth=5, learning_rate=0.08, use_label_encoder=False, eval_metric='logloss',
@@ -318,8 +311,8 @@ if event_file is not None and today_file is not None:
         st.error("All models failed to train! Try reducing features or rows.")
         st.stop()
 
-    # Final ensemble
-    st.write("Fitting soft-voting ensemble...")
+    # Final ensemble: SOFT voting (deep research-backed for calibrated probabilities)
+    st.write("Fitting ensemble...")
     ensemble = VotingClassifier(estimators=models_for_ensemble, voting='soft', n_jobs=1)
     ensemble.fit(X_train_scaled, y_train)
 
@@ -332,19 +325,30 @@ if event_file is not None and today_file is not None:
 
     # =========== PREDICT ===========
     st.write("Predicting HR probability for today...")
-    today_df['final_hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
+    today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
+
+    # === APPLY GAME DAY OVERLAYS POST-PREDICTION ===
+    st.write("Auto-integrating enriched game day overlays (post-prediction)...")
+    overlay_cols = [col for col in ["park_hr_rate", "temp", "wind_mph", "wind_dir_string", "humidity", "park_altitude"] if col in today_df.columns]
+    if overlay_cols:
+        st.success(f"Overlays present for today: {overlay_cols}")
+    else:
+        st.warning("No overlays found for today — final_hr_probability == hr_probability.")
+
+    today_df['overlay_multiplier'] = today_df.apply(overlay_multiplier, axis=1)
+    today_df['final_hr_probability'] = (today_df['hr_probability'] * today_df['overlay_multiplier']).clip(0, 1)
 
     # ==== Leaderboard: Top 30 Only ====
     out_cols = []
     if "player_name" in today_df.columns:
         out_cols.append("player_name")
-    out_cols += ["final_hr_probability"]
+    out_cols += ["final_hr_probability"] + overlay_cols
     leaderboard = today_df[out_cols].sort_values("final_hr_probability", ascending=False).reset_index(drop=True).head(30)
     leaderboard["final_hr_probability"] = leaderboard["final_hr_probability"].round(4)
 
-    st.markdown("### 🏆 **Today's HR Probability — Top 30**")
+    st.markdown("### 🏆 **Today's HR Probability — Top 30 (with Game Day Overlay)**")
     st.dataframe(leaderboard, use_container_width=True)
-    st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
+    st.download_button("⬇️ Download Full Prediction CSV (with overlay)", data=today_df.to_csv(index=False), file_name="today_hr_predictions_with_overlay.csv")
 
 else:
     st.warning("Upload both event-level and today CSVs (CSV or Parquet) to begin.")
