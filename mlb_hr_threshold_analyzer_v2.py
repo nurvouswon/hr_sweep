@@ -10,7 +10,6 @@ import xgboost as xgb
 import lightgbm as lgb
 import catboost as cb
 import matplotlib.pyplot as plt
-import gc
 
 st.set_page_config("MLB HR Predictor", layout="wide")
 st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score [DEBUG BOOTSTRAP]")
@@ -37,15 +36,11 @@ def score_weather(row):
     wind_mph = row.get('wind_mph', np.nan)
     wind_dir = str(row.get('wind_dir_string', '')).lower()
     condition = str(row.get('condition', '')).lower()
-
     score = 0
-    # temp: +0.2 per 10F over 70, -0.2 per 10F below 70
     if not pd.isna(temp):
         score += (temp - 70) * 0.02
-    # humidity: -0.15 per 10% above 50, +0.15 per 10% below 50
     if not pd.isna(humidity):
         score -= (humidity - 50) * 0.015
-    # wind: +0.15 per 5 mph if "O" in wind_dir ("out"), -0.10 per 5 if "I"/"in"
     if not pd.isna(wind_mph):
         if "o" in wind_dir or "out" in wind_dir:
             score += wind_mph * 0.03
@@ -55,14 +50,7 @@ def score_weather(row):
         score += 0.1
     elif "indoor" in condition:
         score -= 0.05
-    # Clamp to [1, 10] (normalized from original -1 to 1)
-    return int(np.round(1 + 4.5 * (score + 1)))  # -1->1 range to 1->10
-
-def get_valid_feature_cols(df, drop=None):
-    base_drop = set(['game_date','batter_id','player_name','pitcher_id','city','park','roof_status'])
-    if drop: base_drop = base_drop.union(drop)
-    numerics = df.select_dtypes(include=[np.number]).columns
-    return [c for c in numerics if c not in base_drop]
+    return int(np.round(1 + 4.5 * (score + 1)))  # Scale -1..1 to 1..10
 
 def clean_X(df, train_cols=None):
     df = dedup_columns(df)
@@ -78,111 +66,84 @@ def clean_X(df, train_cols=None):
         df = df[list(train_cols)]
     return df
 
-def drop_sparse_and_low_variance(df, thresh_na=0.98, min_var=1e-5):
-    """Drop columns with too many NAs or very low variance (not useful for ML)."""
-    drop_na = df.columns[df.isnull().mean() > thresh_na].tolist()
-    drop_var = []
-    for col in df.select_dtypes(include=[np.number]).columns:
-        if df[col].nunique(dropna=True) <= 1:
-            drop_var.append(col)
-        elif df[col].var() < min_var:
-            drop_var.append(col)
-    drop_cols = list(set(drop_na + drop_var))
-    df2 = df.drop(columns=drop_cols, errors='ignore')
-    return df2, drop_cols
+def get_valid_feature_cols(df, drop=None):
+    base_drop = set(['game_date','batter_id','player_name','pitcher_id','city','park','roof_status'])
+    if drop: base_drop = base_drop.union(drop)
+    numerics = df.select_dtypes(include=[np.number]).columns
+    return [c for c in numerics if c not in base_drop]
 
-# ========== Streamlit UI ==========
+def drop_low_variance_and_high_na(df, threshold_na=0.98, threshold_var=1e-6):
+    na_frac = df.isnull().mean()
+    low_var = df.var(numeric_only=True) < threshold_var
+    drop_cols = list(na_frac[na_frac > threshold_na].index) + list(low_var[low_var].index)
+    drop_cols = list(set(drop_cols))
+    df = df.drop(columns=drop_cols, errors='ignore')
+    return df, drop_cols
 
+def safe_read(path):
+    if str(path).endswith('.parquet'):
+        return pd.read_parquet(path)
+    return pd.read_csv(path, low_memory=False)
+
+# ==== Streamlit UI ====
 event_file = st.file_uploader("Upload Event-Level CSV/Parquet for Training (required)", type=['csv','parquet'], key='eventcsv')
 today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type='csv', key='todaycsv')
 
 if event_file is not None and today_file is not None:
-    # --- Step 1: LOAD ---
-    ext = str(event_file.name).lower().split('.')[-1]
-    if ext == 'parquet':
-        try:
-            event_df = pd.read_parquet(event_file)
-            st.success(f"Successfully loaded file: {event_file.name} with shape {event_df.shape}")
-        except Exception as e:
-            st.error(f"Failed to load parquet: {e}")
-            st.stop()
-    else:
-        event_df = pd.read_csv(event_file, low_memory=False)
-        st.success(f"Successfully loaded file: {event_file.name} with shape {event_df.shape}")
-    today_df = pd.read_csv(today_file, low_memory=False)
-    st.success(f"Successfully loaded file: {today_file.name} with shape {today_df.shape}")
+    with st.spinner("Loading & cleaning data..."):
+        event_df = safe_read(event_file)
+        today_df = pd.read_csv(today_file, low_memory=False)
+        event_df = dedup_columns(event_df)
+        today_df = dedup_columns(today_df)
+        event_df = fix_types(event_df)
+        today_df = fix_types(today_df)
+    st.write("DEBUG: Successfully loaded event_df:", event_df.shape)
+    st.write("DEBUG: Successfully loaded today_df:", today_df.shape)
 
-    st.write("DEBUG: Columns in event_df:")
-    st.write(list(event_df.columns))
-    st.write("DEBUG: Columns in today_df:")
-    st.write(list(today_df.columns))
-    st.write("DEBUG: event_df head:")
-    st.write(event_df.head(2))
-    st.write("DEBUG: today_df head:")
-    st.write(today_df.head(2))
+    # Drop features with >98% NA or (almost) no variance
+    event_df, dropped_event = drop_low_variance_and_high_na(event_df)
+    today_df, dropped_today = drop_low_variance_and_high_na(today_df)
+    st.write(f"Dropped columns from event-level data: {dropped_event}")
+    st.write(f"Dropped columns from today data: {dropped_today}")
+    st.write(f"Remaining columns event-level: {event_df.columns.tolist()[:100]}")
+    st.write(f"Remaining columns today: {today_df.columns.tolist()[:100]}")
 
-    # --- Step 2: CHECK TARGET COLUMN ---
-    target_col = "hr_outcome"
+    # Check/diagnose hr_outcome
+    target_col = 'hr_outcome'
     if target_col not in event_df.columns:
         st.error("ERROR: No valid hr_outcome column found in event-level file.")
         st.stop()
     st.success("✅ 'hr_outcome' column found!")
     st.write("Value counts for hr_outcome:")
-    vc_df = event_df[target_col].value_counts().reset_index()
-    vc_df.columns = ['hr_outcome', 'count']
-    st.write(vc_df)
+    st.write(event_df[target_col].value_counts().reset_index().rename(columns={'index':'hr_outcome','hr_outcome':'count'}))
 
-    # --- Step 3: Feature Engineering and Filtering ---
-    # Weather scoring
-    if 'weather_score' not in event_df.columns:
-        event_df['weather_score'] = event_df.apply(score_weather, axis=1)
+    # Weather scoring: ONLY for today_df!
     if 'weather_score' not in today_df.columns:
         today_df['weather_score'] = today_df.apply(score_weather, axis=1)
 
-    # Drop sparse & low variance columns
-    event_df, dropped_event = drop_sparse_and_low_variance(event_df, thresh_na=0.98, min_var=1e-5)
-    today_df, dropped_today = drop_sparse_and_low_variance(today_df, thresh_na=0.98, min_var=1e-5)
-
-    st.write("Dropped columns from event-level data:")
-    st.write(dropped_event)
-    st.write("Dropped columns from today data:")
-    st.write(dropped_today)
-    st.write("Remaining columns event-level:")
-    st.write(list(event_df.columns))
-    st.write("Remaining columns today:")
-    st.write(list(today_df.columns))
-
-    # --- Step 4: Modeling Features ---
-    progress = st.progress(5, "Engineering features...")
-
-    # Intersection of valid features
+    # Features for ML: intersection, not including weather_score
     feat_cols_train = set(get_valid_feature_cols(event_df))
     feat_cols_today = set(get_valid_feature_cols(today_df))
     feature_cols = sorted(list(feat_cols_train & feat_cols_today))
-    if 'weather_score' not in feature_cols:
-        feature_cols.append('weather_score')
 
+    # ML Modeling
     X = clean_X(event_df[feature_cols])
     y = event_df[target_col]
     X_today = clean_X(today_df[feature_cols], train_cols=X.columns)
 
-    st.write("DEBUG: event_df shape", event_df.shape)
-    st.write("DEBUG: today_df shape", today_df.shape)
-    st.write("DEBUG: Feature columns:")
-    st.write(feature_cols)
-    st.write("DEBUG: X shape:", X.shape)
-    st.write("DEBUG: y shape:", y.shape)
-
-    progress.progress(20, "Splitting for validation...")
+    scaler = StandardScaler()
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
-    scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
     X_today_scaled = scaler.transform(X_today)
 
-    progress.progress(30, "Training ensemble models (XGBoost, LightGBM, CatBoost, RF, GB, LR)...")
+    st.write("DEBUG: X shape:", X.shape)
+    st.write("DEBUG: y shape:", y.shape)
+    st.write("DEBUG: feature_cols:", feature_cols[:50])
+
+    st.info("Training ensemble models (XGBoost, LightGBM, CatBoost, RF, GB, LR)...")
 
     xgb_clf = xgb.XGBClassifier(
         n_estimators=125, max_depth=5, learning_rate=0.08, use_label_encoder=False, eval_metric='logloss', n_jobs=-1
@@ -201,15 +162,13 @@ if event_file is not None and today_file is not None:
     ]
     ensemble = VotingClassifier(estimators=models, voting='soft', n_jobs=-1, weights=[2,2,2,1,1,1])
     ensemble.fit(X_train_scaled, y_train)
-    progress.progress(60, "Validating...")
 
     y_val_pred = ensemble.predict_proba(X_val_scaled)[:,1]
     auc = roc_auc_score(y_val, y_val_pred)
     ll = log_loss(y_val, y_val_pred)
     st.info(f"Validation AUC: **{auc:.4f}** — LogLoss: **{ll:.4f}**")
 
-    progress.progress(80, "Predicting HR probability for today...")
-
+    # Predict today
     today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
     today_df['weather_score_1_10'] = today_df['weather_score']
 
@@ -227,6 +186,7 @@ if event_file is not None and today_file is not None:
     st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
     # ==== Feature Importances: Top 30 ====
+    # Aggregate from all tree models
     importance_dict = {}
     for name, clf in [
         ('XGBoost', xgb_clf), ('LightGBM', lgb_clf), ('CatBoost', cat_clf),
@@ -250,8 +210,6 @@ if event_file is not None and today_file is not None:
     else:
         st.info("No feature importances available.")
 
-    progress.progress(100, "Done!")
-    del event_df, today_df, X, y, X_today, X_train, X_val, y_train, y_val, ensemble, xgb_clf, lgb_clf, cat_clf, rf_clf, gb_clf, lr_clf
-    gc.collect()
+    st.success("All done!")
 else:
     st.warning("Upload both event-level and today CSVs to begin.")
