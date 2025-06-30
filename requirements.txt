@@ -7,3 +7,6 @@ lightgbm
 catboost
 matplotlib
 pyarrow
+scipy
+joblib
+tqdm
