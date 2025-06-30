@@ -13,8 +13,6 @@ import catboost as cb
 st.set_page_config("2️⃣ MLB HR Predictor — Deep Ensemble + Weather Score [DEEP RESEARCH + GAME DAY OVERLAYS]", layout="wide")
 st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score [DEEP RESEARCH + GAME DAY OVERLAYS]")
 
-# ---- Utility functions ----
-
 def safe_read(path):
     fn = str(getattr(path, 'name', path)).lower()
     if fn.endswith('.parquet'):
@@ -73,7 +71,6 @@ def drop_high_na_low_var(df, thresh_na=0.25, thresh_var=1e-7):
     return df2, cols_to_drop
 
 def cluster_select_features(df, threshold=0.95):
-    """Cluster features based on correlation and select one from each cluster."""
     corr = df.corr().abs()
     clusters = []
     selected = []
@@ -237,9 +234,13 @@ if event_file is not None and today_file is not None:
     st.write("Auto-integrating enriched game day overlays (1–9) if present in files...")
     overlay_train, overlays_added_train = add_gameday_overlays(event_df)
     overlay_today, overlays_added_today = add_gameday_overlays(today_df)
-    st.write("Game Day Overlays added (train):", overlays_added_train)
-    st.write("Game Day Overlays added (today):", overlays_added_today)
-    all_selected_features = list(sorted(set(selected_features) | set(overlay_train) | set(overlay_today)))
+    st.write("Game Day Overlays found (train):", overlays_added_train)
+    st.write("Game Day Overlays found (today):", overlays_added_today)
+    # Only keep overlays present in BOTH files
+    overlays_in_both = list(sorted(set(overlay_train) & set(overlay_today)))
+    st.write("Game Day Overlays used (in both):", overlays_in_both)
+    all_selected_features = list(sorted(set(selected_features) | set(overlays_in_both)))
+    # ^ only includes overlays that are present in BOTH files
 
     # Apply selected features to X and X_today
     X = clean_X(event_df[all_selected_features])
