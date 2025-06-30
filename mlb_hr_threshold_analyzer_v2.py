@@ -1,33 +1,34 @@
 import streamlit as st
 import pandas as pd
 
-st.title("🔍 Parquet File Explorer (Column Names, Dtypes, Sample Rows)")
+st.title("🧹 Parquet Duplicate Column Fixer")
 
-parquet_file = st.file_uploader("Upload Parquet File (.parquet)", type=["parquet"])
-if parquet_file is not None:
+uploaded_file = st.file_uploader("Upload Parquet File to Fix", type=["parquet"])
+if uploaded_file is not None:
     try:
-        df = pd.read_parquet(parquet_file)
-        st.success(f"Loaded file! Shape: {df.shape}")
-        st.write("### Columns:")
-        st.write(list(df.columns))
-
-        st.write("### Dtypes:")
-        st.write(df.dtypes.astype(str))
-
-        st.write("### Sample (first 10 rows):")
-        st.dataframe(df.head(10))
-
-        if st.checkbox("Show Unique Value Counts for All Columns (slow!)"):
-            st.write(df.nunique())
-
-        col = st.selectbox("Pick a column to explore:", list(df.columns))
-        if col:
-            st.write(f"#### Unique values in `{col}`:")
-            st.write(df[col].unique())
-            st.write(f"#### Value counts for `{col}`:")
-            st.write(df[col].value_counts(dropna=False).reset_index().rename(columns={'index': col, col:'count'}))
-
-        if st.checkbox("Show entire DataFrame (⚠️ SLOW for big files)"):
-            st.dataframe(df)
+        # Trick: read columns using pyarrow to inspect duplicates, then reload via pandas.
+        import pyarrow.parquet as pq
+        table = pq.read_table(uploaded_file)
+        cols = list(table.schema.names)
+        st.write("All column names:", cols)
+        from collections import Counter
+        counts = Counter(cols)
+        dupes = [c for c, n in counts.items() if n > 1]
+        if not dupes:
+            st.success("No duplicate columns found!")
+        else:
+            st.warning(f"Duplicate columns: {dupes}")
+            # Now reload with pandas, dropping later duplicates
+            df = pd.read_parquet(uploaded_file)
+            df = df.loc[:, ~df.columns.duplicated()]
+            st.write("Fixed columns:", list(df.columns))
+            st.write("Sample head:", df.head(5))
+            # Option to download
+            outbuf = st.download_button(
+                "⬇️ Download Cleaned Parquet",
+                data=df.to_parquet(index=False),
+                file_name="fixed_"+uploaded_file.name,
+                mime="application/octet-stream"
+            )
     except Exception as e:
-        st.error(f"Failed to load parquet: {e}")
+        st.error(f"Error: {e}")
