@@ -2,16 +2,17 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import VotingClassifier, RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, log_loss
 from sklearn.preprocessing import StandardScaler
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 import xgboost as xgb
 import lightgbm as lgb
 import catboost as cb
 
-st.set_page_config("2️⃣ MLB HR Predictor — Deep Ensemble + Weather Score [DEEP RESEARCH STACKED]", layout="wide")
-st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score [DEEP RESEARCH STACKED]")
+st.set_page_config("2️⃣ MLB HR Predictor — Deep Research Stacking Ensemble", layout="wide")
+st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble Stacking + Weather Score [PARLAY SHARP STACK]")
 
 def safe_read(path):
     fn = str(getattr(path, 'name', path)).lower()
@@ -70,111 +71,72 @@ def drop_high_na_low_var(df, thresh_na=0.25, thresh_var=1e-7):
     df2 = df.drop(columns=cols_to_drop, errors="ignore")
     return df2, cols_to_drop
 
-def cluster_select_features(df, threshold=0.95):
-    """Cluster features based on correlation and select one from each cluster."""
-    corr = df.corr().abs()
-    clusters = []
-    selected = []
-    dropped = []
-    visited = set()
-    for col in corr.columns:
-        if col in visited:
-            continue
-        cluster = [col]
-        visited.add(col)
-        for other in corr.columns:
-            if other != col and other not in visited and corr.loc[col, other] >= threshold:
-                cluster.append(other)
-                visited.add(other)
-        clusters.append(cluster)
-        selected.append(cluster[0])
-        dropped.extend(cluster[1:])
-    return selected, clusters, dropped
+class StackingEnsemble(BaseEstimator, ClassifierMixin):
+    """Meta-stacking: Fit base models, then meta-model on their outputs."""
+    def __init__(self, base_models, meta_model, n_jobs=1):
+        self.base_models = base_models
+        self.meta_model = meta_model
+        self.n_jobs = n_jobs
 
-def downcast_df(df):
-    float_cols = df.select_dtypes(include=['float'])
-    int_cols = df.select_dtypes(include=['int', 'int64', 'int32'])
-    for col in float_cols:
-        df[col] = pd.to_numeric(df[col], downcast='float')
-    for col in int_cols:
-        df[col] = pd.to_numeric(df[col], downcast='integer')
-    return df
+    def fit(self, X, y):
+        self.base_models_ = [clone(m) for m in self.base_models]
+        self.meta_model_ = clone(self.meta_model)
+        self.base_out = np.zeros((X.shape[0], len(self.base_models_)))
+        # Fit base models
+        for i, model in enumerate(self.base_models_):
+            model.fit(X, y)
+            self.base_out[:,i] = model.predict_proba(X)[:,1]
+        # Fit meta-model
+        self.meta_model_.fit(self.base_out, y)
+        return self
+
+    def predict_proba(self, X):
+        meta_features = np.column_stack([m.predict_proba(X)[:,1] for m in self.base_models_])
+        return self.meta_model_.predict_proba(meta_features)
+
+    def predict(self, X):
+        meta_features = np.column_stack([m.predict_proba(X)[:,1] for m in self.base_models_])
+        return self.meta_model_.predict(meta_features)
 
 event_file = st.file_uploader("Upload Event-Level CSV/Parquet for Training (required)", type=['csv', 'parquet'], key='eventcsv')
 today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type=['csv', 'parquet'], key='todaycsv')
 
 if event_file is not None and today_file is not None:
-    with st.spinner("Loading and prepping files (may take 1-2 min)..."):
+    with st.spinner("Loading and prepping files..."):
         event_df = safe_read(event_file)
         today_df = safe_read(today_file)
-        st.write(f"DEBUG: Successfully loaded file: {getattr(event_file, 'name', 'event_file')} with shape {event_df.shape}")
-        st.write(f"DEBUG: Successfully loaded file: {getattr(today_file, 'name', 'today_file')} with shape {today_df.shape}")
-        st.write("DEBUG: Columns in event_df:")
-        st.write(list(event_df.columns))
-        st.write("DEBUG: Columns in today_df:")
-        st.write(list(today_df.columns))
-        st.write("DEBUG: event_df head:")
+        st.write(f"DEBUG: Loaded event_df {event_df.shape}, today_df {today_df.shape}")
         st.dataframe(event_df.head(3))
-        st.write("DEBUG: today_df head:")
         st.dataframe(today_df.head(3))
         event_df = dedup_columns(event_df)
         today_df = dedup_columns(today_df)
         event_df = fix_types(event_df)
         today_df = fix_types(today_df)
 
-    # --- Check for hr_outcome ---
     target_col = 'hr_outcome'
     if target_col not in event_df.columns:
-        st.error("ERROR: No valid hr_outcome column found in event-level file.")
+        st.error("No hr_outcome column found.")
         st.stop()
     st.success("✅ 'hr_outcome' column found!")
 
-    value_counts = event_df[target_col].value_counts(dropna=False)
-    value_counts = value_counts.reset_index()
-    value_counts.columns = ['hr_outcome', 'count']
-    st.write("Value counts for hr_outcome:")
-    st.dataframe(value_counts)
-
-    # =========== DROP BAD COLS ===========
-    st.write("Dropping columns with >25% missing or near-zero variance...")
+    # Drop NA / low variance only
     event_df, event_dropped = drop_high_na_low_var(event_df, thresh_na=0.25, thresh_var=1e-7)
     today_df, today_dropped = drop_high_na_low_var(today_df, thresh_na=0.25, thresh_var=1e-7)
-    st.write("Dropped columns from event-level data:")
-    st.write(event_dropped)
-    st.write("Dropped columns from today data:")
-    st.write(today_dropped)
-    st.write("Remaining columns event-level:")
-    st.write(list(event_df.columns))
-    st.write("Remaining columns today:")
-    st.write(list(today_df.columns))
+    st.write("Dropped columns event-level:", event_dropped)
+    st.write("Dropped columns today:", today_dropped)
 
-    # =========== CLUSTER FEATURE SELECTION ===========
-    st.write("Running cluster-based feature selection (removing highly correlated features)...")
     feat_cols_train = set(get_valid_feature_cols(event_df))
     feat_cols_today = set(get_valid_feature_cols(today_df))
     feature_cols = sorted(list(feat_cols_train & feat_cols_today))
-    X_for_cluster = event_df[feature_cols]
-    selected_features, clusters, cluster_dropped = cluster_select_features(X_for_cluster, threshold=0.95)
-    st.write(f"Feature clusters (threshold 0.95):")
-    for i, cluster in enumerate(clusters):
-        st.write(f"Cluster {i+1}: {cluster}")
-    st.write("Selected features from clusters:")
-    st.write(selected_features)
-    st.write("Dropped features from clusters:")
-    st.write(cluster_dropped)
-
-    # Apply selected features to X and X_today
-    X = clean_X(event_df[selected_features])
+    X = clean_X(event_df[feature_cols])
     y = event_df[target_col]
-    X_today = clean_X(today_df[selected_features], train_cols=X.columns)
-    X = downcast_df(X)
-    X_today = downcast_df(X_today)
+    X_today = clean_X(today_df[feature_cols], train_cols=X.columns)
 
+    st.write("DEBUG: Feature cols:", feature_cols)
     st.write("DEBUG: X shape:", X.shape)
     st.write("DEBUG: y shape:", y.shape)
 
-    # =========== SPLIT & SCALE ===========
-    st.write("Splitting for validation and scaling...")
+    # Split/scale
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
@@ -183,87 +145,62 @@ if event_file is not None and today_file is not None:
     X_val_scaled = scaler.transform(X_val)
     X_today_scaled = scaler.transform(X_today)
 
-    # =========== DEEP RESEARCH ENSEMBLE: SAFE, FAST, STACKED ===========
-    st.write("Training base models (XGB, LGBM, CatBoost, RF, GB, LR)...")
+    # Main base models
+    st.write("Training base models for meta-stacking...")
     xgb_clf = xgb.XGBClassifier(
-        n_estimators=80, max_depth=5, learning_rate=0.08, use_label_encoder=False, eval_metric='logloss',
-        n_jobs=1, verbosity=1, tree_method='hist'
+        n_estimators=150, max_depth=5, learning_rate=0.08, use_label_encoder=False,
+        eval_metric='logloss', n_jobs=1, tree_method='hist', verbosity=1
     )
-    lgb_clf = lgb.LGBMClassifier(n_estimators=80, max_depth=5, learning_rate=0.08, n_jobs=1)
-    cat_clf = cb.CatBoostClassifier(iterations=80, depth=5, learning_rate=0.09, verbose=0, thread_count=1)
-    rf_clf = RandomForestClassifier(n_estimators=50, max_depth=7, n_jobs=1, verbose=1)
-    gb_clf = GradientBoostingClassifier(n_estimators=50, max_depth=5, learning_rate=0.09, verbose=1)
-    lr_clf = LogisticRegression(max_iter=500, solver='lbfgs', n_jobs=1, verbose=1)
+    lgb_clf = lgb.LGBMClassifier(n_estimators=150, max_depth=5, learning_rate=0.08, n_jobs=1)
+    cat_clf = cb.CatBoostClassifier(iterations=120, depth=5, learning_rate=0.09, verbose=0, thread_count=1)
+    rf_clf = RandomForestClassifier(n_estimators=60, max_depth=7, n_jobs=1)
+    gb_clf = GradientBoostingClassifier(n_estimators=60, max_depth=5, learning_rate=0.09)
+    base_models = [xgb_clf, lgb_clf, cat_clf, rf_clf, gb_clf]
+    meta_model = LogisticRegression(max_iter=400, solver='lbfgs', n_jobs=1)
 
-    model_status = []
-    models_for_ensemble = []
+    # Fit meta-stacking
     try:
-        xgb_clf.fit(X_train_scaled, y_train)
-        models_for_ensemble.append(('xgb', xgb_clf))
-        model_status.append('XGB OK')
+        stacker = StackingEnsemble(base_models=base_models, meta_model=meta_model)
+        stacker.fit(X_train_scaled, y_train)
+        st.info("Meta-stacking ensemble trained!")
     except Exception as e:
-        st.warning(f"XGBoost failed: {e}")
-    try:
-        lgb_clf.fit(X_train_scaled, y_train)
-        models_for_ensemble.append(('lgb', lgb_clf))
-        model_status.append('LGB OK')
-    except Exception as e:
-        st.warning(f"LightGBM failed: {e}")
-    try:
-        cat_clf.fit(X_train_scaled, y_train)
-        models_for_ensemble.append(('cat', cat_clf))
-        model_status.append('CatBoost OK')
-    except Exception as e:
-        st.warning(f"CatBoost failed: {e}")
-    try:
-        rf_clf.fit(X_train_scaled, y_train)
-        models_for_ensemble.append(('rf', rf_clf))
-        model_status.append('RF OK')
-    except Exception as e:
-        st.warning(f"RandomForest failed: {e}")
-    try:
-        gb_clf.fit(X_train_scaled, y_train)
-        models_for_ensemble.append(('gb', gb_clf))
-        model_status.append('GB OK')
-    except Exception as e:
-        st.warning(f"GBM failed: {e}")
-    try:
-        lr_clf.fit(X_train_scaled, y_train)
-        models_for_ensemble.append(('lr', lr_clf))
-        model_status.append('LR OK')
-    except Exception as e:
-        st.warning(f"LogReg failed: {e}")
-
-    st.info("Model training status: " + ', '.join(model_status))
-    if not models_for_ensemble:
-        st.error("All models failed to train! Try reducing features or rows.")
-        st.stop()
-
-    # Final ensemble
-    st.write("Fitting ensemble...")
-    ensemble = VotingClassifier(estimators=models_for_ensemble, voting='soft', n_jobs=1)
-    ensemble.fit(X_train_scaled, y_train)
+        st.warning(f"Meta-stacking failed: {e}")
+        st.write("Falling back to weighted soft-voting.")
+        # Soft-voting fallback
+        from sklearn.ensemble import VotingClassifier
+        models = [
+            ('xgb', xgb_clf), ('lgb', lgb_clf), ('cat', cat_clf),
+            ('rf', rf_clf), ('gb', gb_clf), 
+        ]
+        weights = [3,3,2,1,1]
+        for name, clf in models:
+            try:
+                clf.fit(X_train_scaled, y_train)
+            except Exception as ex:
+                st.warning(f"{name} failed: {ex}")
+        stacker = VotingClassifier(estimators=models, voting='soft', n_jobs=1, weights=weights)
+        stacker.fit(X_train_scaled, y_train)
 
     # =========== VALIDATION ===========
-    st.write("Validating...")
-    y_val_pred = ensemble.predict_proba(X_val_scaled)[:,1]
+    st.write("Validating stacking ensemble...")
+    y_val_pred = stacker.predict_proba(X_val_scaled)[:,1]
     auc = roc_auc_score(y_val, y_val_pred)
     ll = log_loss(y_val, y_val_pred)
     st.info(f"Validation AUC: **{auc:.4f}** — LogLoss: **{ll:.4f}**")
 
     # =========== PREDICT ===========
     st.write("Predicting HR probability for today...")
-    today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
+    today_df['hr_probability'] = stacker.predict_proba(X_today_scaled)[:,1]
 
-    # ==== Leaderboard: Top 30 Only ====
+    # ==== Leaderboard: Top 10 Only (max sharpness for parlay) ====
     out_cols = []
     if "player_name" in today_df.columns:
         out_cols.append("player_name")
     out_cols += ["hr_probability"]
-    leaderboard = today_df[out_cols].sort_values("hr_probability", ascending=False).reset_index(drop=True).head(30)
+    leaderboard = today_df[out_cols].sort_values("hr_probability", ascending=False).reset_index(drop=True).head(10)
     leaderboard["hr_probability"] = leaderboard["hr_probability"].round(4)
 
-    st.markdown("### 🏆 **Today's HR Probability — Top 30**")
+    st.markdown("### 🏆 **Today's HR Probability — Top 10 Parlay Picks**")
     st.dataframe(leaderboard, use_container_width=True)
     st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
