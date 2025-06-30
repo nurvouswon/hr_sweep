@@ -10,7 +10,6 @@ import xgboost as xgb
 import lightgbm as lgb
 import catboost as cb
 import matplotlib.pyplot as plt
-import io
 
 st.set_page_config("MLB HR Predictor", layout="wide")
 st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score")
@@ -39,13 +38,10 @@ def score_weather(row):
     condition = str(row.get('condition', '')).lower()
 
     score = 0
-    # temp: +0.2 per 10F over 70, -0.2 per 10F below 70
     if not pd.isna(temp):
         score += (temp - 70) * 0.02
-    # humidity: -0.15 per 10% above 50, +0.15 per 10% below 50
     if not pd.isna(humidity):
         score -= (humidity - 50) * 0.015
-    # wind: +0.15 per 5 mph if "O" in wind_dir ("out"), -0.10 per 5 if "I"/"in"
     if not pd.isna(wind_mph):
         if "o" in wind_dir or "out" in wind_dir:
             score += wind_mph * 0.03
@@ -55,8 +51,7 @@ def score_weather(row):
         score += 0.1
     elif "indoor" in condition:
         score -= 0.05
-    # Clamp to [1, 10] (normalized from original -1 to 1)
-    return int(np.round(1 + 4.5 * (score + 1)))  # -1->1 range to 1->10
+    return int(np.round(1 + 4.5 * (score + 1)))
 
 def clean_X(df, train_cols=None):
     df = dedup_columns(df)
@@ -84,12 +79,20 @@ def load_any(file):
     else:
         return pd.read_csv(file, low_memory=False)
 
-def drop_high_na_low_var(df, na_thresh=0.85, var_thresh=1e-9):
-    # Drop columns with too many NA or near-zero variance (constant columns)
-    non_na = df.notna().mean()
-    low_var = df.loc[:, df.nunique(dropna=True) <= 1]
-    to_drop = list(non_na[non_na < (1-na_thresh)].index) + list(low_var.columns)
-    return df.drop(columns=to_drop, errors="ignore")
+def drop_high_na_and_low_var(df, na_thresh=0.8, var_thresh=1e-9):
+    # Drop columns with too many NA
+    high_na_cols = df.columns[df.isna().mean() > na_thresh].tolist()
+    # Drop columns with only 1 unique value (constant) or near-zero variance
+    low_var_cols = []
+    for col in df.columns:
+        if df[col].nunique(dropna=True) <= 1:
+            low_var_cols.append(col)
+        elif pd.api.types.is_numeric_dtype(df[col]):
+            if df[col].std(skipna=True) < var_thresh:
+                low_var_cols.append(col)
+    to_drop = list(set(high_na_cols + low_var_cols))
+    kept = [c for c in df.columns if c not in to_drop]
+    return df[kept], to_drop
 
 # ==== Streamlit UI ====
 event_file = st.file_uploader("Upload Event-Level CSV/Parquet for Training (required)", type=['csv','parquet'], key='eventcsv')
@@ -104,9 +107,13 @@ if event_file is not None and today_file is not None:
         event_df = fix_types(event_df)
         today_df = fix_types(today_df)
 
-        # Drop columns with >85% NA or low variance
-        event_df = drop_high_na_low_var(event_df, na_thresh=0.85, var_thresh=1e-9)
-        today_df = drop_high_na_low_var(today_df, na_thresh=0.85, var_thresh=1e-9)
+        # Drop columns with >80% NA or low variance, and debug what was dropped
+        event_df, dropped_event_cols = drop_high_na_and_low_var(event_df, na_thresh=0.8, var_thresh=1e-9)
+        today_df, dropped_today_cols = drop_high_na_and_low_var(today_df, na_thresh=0.8, var_thresh=1e-9)
+        st.write("Dropped columns from event-level data:", dropped_event_cols)
+        st.write("Dropped columns from today data:", dropped_today_cols)
+        st.write("Remaining columns event-level:", list(event_df.columns))
+        st.write("Remaining columns today:", list(today_df.columns))
 
     progress = st.progress(2, "Scoring weather for training and today rows...")
     if 'weather_score' not in event_df.columns:
@@ -176,7 +183,6 @@ if event_file is not None and today_file is not None:
     today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
     today_df['weather_score_1_10'] = today_df['weather_score']  # already 1-10
 
-    # ==== Leaderboard: Top 30 Only ====
     out_cols = []
     if "player_name" in today_df.columns:
         out_cols.append("player_name")
@@ -190,7 +196,6 @@ if event_file is not None and today_file is not None:
     st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
     # ==== Feature Importances: Top 30 ====
-    # Aggregate from all tree models
     importance_dict = {}
     for name, clf in [
         ('XGBoost', xgb_clf), ('LightGBM', lgb_clf), ('CatBoost', cat_clf),
