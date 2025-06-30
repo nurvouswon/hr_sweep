@@ -255,17 +255,28 @@ if event_file is not None and today_file is not None:
     X_val_scaled = scaler.transform(X_val)
     X_today_scaled = scaler.transform(X_today)
 
-    # =========== DEEP RESEARCH ENSEMBLE (SOFT VOTING) ===========
+    # =========== DEEP RESEARCH ENSEMBLE (SOFT VOTING, LOW LR, MODERATE TREES) ===========
     st.write("Training base models (XGB, LGBM, CatBoost, RF, GB, LR)...")
+
     xgb_clf = xgb.XGBClassifier(
-    n_estimators=200, max_depth=5, learning_rate=0.045, use_label_encoder=False, eval_metric='logloss',
-    n_jobs=1, verbosity=1, tree_method='hist'
+        n_estimators=100, max_depth=5, learning_rate=0.04, use_label_encoder=False,
+        eval_metric='logloss', n_jobs=1, verbosity=1, tree_method='hist'
     )
-    lgb_clf = lgb.LGBMClassifier(n_estimators=200, max_depth=5, learning_rate=0.045, n_jobs=1)
-    cat_clf = cb.CatBoostClassifier(iterations=200, depth=5, learning_rate=0.045, verbose=0, thread_count=1)
-    rf_clf = RandomForestClassifier(n_estimators=200, max_depth=7, n_jobs=1)
-    gb_clf = GradientBoostingClassifier(n_estimators=200, max_depth=5, learning_rate=0.045)
-    lr_clf = LogisticRegression(max_iter=500, solver='lbfgs', n_jobs=1)
+    lgb_clf = lgb.LGBMClassifier(
+        n_estimators=100, max_depth=5, learning_rate=0.04, n_jobs=1
+    )
+    cat_clf = cb.CatBoostClassifier(
+        iterations=100, depth=5, learning_rate=0.05, verbose=0, thread_count=1
+    )
+    rf_clf = RandomForestClassifier(
+        n_estimators=60, max_depth=7, n_jobs=1
+    )
+    gb_clf = GradientBoostingClassifier(
+        n_estimators=60, max_depth=5, learning_rate=0.04
+    )
+    lr_clf = LogisticRegression(
+        max_iter=400, solver='lbfgs', n_jobs=1
+    )
     model_status = []
     models_for_ensemble = []
     try:
