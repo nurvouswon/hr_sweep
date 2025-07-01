@@ -10,3 +10,4 @@ pyarrow
 scipy
 joblib
 tqdm
+pybaseball
