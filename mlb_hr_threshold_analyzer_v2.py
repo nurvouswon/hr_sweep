@@ -13,6 +13,7 @@ import catboost as cb
 st.set_page_config("2️⃣ MLB HR Predictor — Deep Ensemble + Weather Score [DEEP RESEARCH + GAME DAY OVERLAYS]", layout="wide")
 st.title("2️⃣ MLB Home Run Predictor — Deep Ensemble + Weather Score [DEEP RESEARCH + GAME DAY OVERLAYS]")
 
+# ==== SAFE FILE READER ====
 def safe_read(path):
     fn = str(getattr(path, 'name', path)).lower()
     if fn.endswith('.parquet'):
@@ -99,74 +100,46 @@ def downcast_df(df):
         df[col] = pd.to_numeric(df[col], downcast='integer')
     return df
 
+# ==== GAME DAY OVERLAY MULTIPLIERS ====
 def overlay_multiplier(row):
-    """
-    Research-backed multipliers for overlay post-prediction adjustment.
-    Tuned for maximum signal without overfitting (see detailed MLB studies).
-    """
-    mult = 1.0
+    # Start neutral
+    multiplier = 1.0
 
-    # Park HR Rate (typical MLB range ~0.80 - 1.20)
-    if 'park_hr_rate' in row and pd.notnull(row['park_hr_rate']):
-        try:
-            if row['park_hr_rate'] > 1.10:
-                mult *= 1.10  # HR-friendly
-            elif row['park_hr_rate'] < 0.90:
-                mult *= 0.92  # HR-unfriendly
-            # else ~1.00
-        except Exception:
-            pass
+    # --- WEATHER OVERLAYS ---
+    wind_col = 'wind_mph'
+    wind_dir_col = 'wind_dir_string'
+    if wind_col in row and wind_dir_col in row:
+        wind = row[wind_col]
+        wind_dir = str(row[wind_dir_col]).lower()
+        if pd.notnull(wind) and wind >= 10:
+            if 'out' in wind_dir:
+                multiplier *= 1.08   # 8% boost for strong wind out
+            elif 'in' in wind_dir:
+                multiplier *= 0.93   # 7% reduction for strong wind in
 
-    # Temperature (Fahrenheit, non-linear effect per MLB physics studies)
-    if 'temp' in row and pd.notnull(row['temp']):
-        try:
-            if row['temp'] >= 85:
-                mult *= 1.07  # Hot, ball travels farther
-            elif row['temp'] >= 75:
-                mult *= 1.03
-            elif row['temp'] <= 60:
-                mult *= 0.95  # Cold, suppresses HR
-        except Exception:
-            pass
+    temp_col = 'temp'
+    if temp_col in row and pd.notnull(row[temp_col]):
+        base_temp = 70
+        delta = row[temp_col] - base_temp
+        multiplier *= 1.03 ** (delta / 10)  # ~3% per 10F above/below 70
 
-    # Wind: Out increases HRs, In decreases (Statcast, TangoTiger studies)
-    if 'wind_mph' in row and 'wind_dir_string' in row and pd.notnull(row['wind_mph']):
-        try:
-            wind_str = str(row['wind_dir_string']).lower()
-            if 'out' in wind_str and row['wind_mph'] >= 10:
-                mult *= 1.10
-            elif 'in' in wind_str and row['wind_mph'] >= 10:
-                mult *= 0.90
-            elif 'out' in wind_str and row['wind_mph'] >= 5:
-                mult *= 1.05
-            elif 'in' in wind_str and row['wind_mph'] >= 5:
-                mult *= 0.96
-        except Exception:
-            pass
+    humidity_col = 'humidity'
+    if humidity_col in row and pd.notnull(row[humidity_col]):
+        hum = row[humidity_col]
+        if hum > 60:
+            multiplier *= 1.02
+        elif hum < 40:
+            multiplier *= 0.98
 
-    # Humidity: marginal effect, boost at very high humidity (in some parks)
-    if 'humidity' in row and pd.notnull(row['humidity']):
-        try:
-            if row['humidity'] >= 70:
-                mult *= 1.02
-            elif row['humidity'] <= 30:
-                mult *= 0.98
-        except Exception:
-            pass
+    # --- PARK FACTOR OVERLAY ---
+    park_hr_col = 'park_hr_rate'
+    if park_hr_col in row and pd.notnull(row[park_hr_col]):
+        pf = max(0.85, min(1.20, float(row[park_hr_col])))
+        multiplier *= pf
 
-    # Altitude: if available, apply for places like Coors Field (Denver)
-    if 'park_altitude' in row and pd.notnull(row['park_altitude']):
-        try:
-            if row['park_altitude'] >= 5000:
-                mult *= 1.10
-            elif row['park_altitude'] >= 2000:
-                mult *= 1.03
-        except Exception:
-            pass
+    return multiplier
 
-    return mult
-
-# === Streamlit UI ===
+# ==== UI ====
 event_file = st.file_uploader("Upload Event-Level CSV/Parquet for Training (required)", type=['csv', 'parquet'], key='eventcsv')
 today_file = st.file_uploader("Upload TODAY CSV for Prediction (required)", type=['csv', 'parquet'], key='todaycsv')
 
@@ -189,7 +162,6 @@ if event_file is not None and today_file is not None:
         event_df = fix_types(event_df)
         today_df = fix_types(today_df)
 
-    # --- Check for hr_outcome ---
     target_col = 'hr_outcome'
     if target_col not in event_df.columns:
         st.error("ERROR: No valid hr_outcome column found in event-level file.")
@@ -214,6 +186,7 @@ if event_file is not None and today_file is not None:
     st.write("Remaining columns today:")
     st.write(list(today_df.columns))
 
+    # === CLUSTER-BASED FEATURE SELECTION ===
     st.write("Running cluster-based feature selection (removing highly correlated features)...")
     feat_cols_train = set(get_valid_feature_cols(event_df))
     feat_cols_today = set(get_valid_feature_cols(today_df))
@@ -221,21 +194,14 @@ if event_file is not None and today_file is not None:
     X_for_cluster = event_df[feature_cols]
     selected_features, clusters, cluster_dropped = cluster_select_features(X_for_cluster, threshold=0.95)
     st.write(f"Feature clusters (threshold 0.95):")
-    for i, cluster in enumerate(clusters[:20]):
+    for i, cluster in enumerate(clusters):
         st.write(f"Cluster {i+1}: {cluster}")
-    if len(clusters) > 20:
-        st.write(f"... {len(clusters)-20} more clusters.")
     st.write("Selected features from clusters:")
-    st.write(selected_features[:30])
-    if len(selected_features) > 30:
-        st.write(f"... {len(selected_features)-30} more features.")
+    st.write(selected_features)
+    st.write("Dropped features from clusters:")
+    st.write(cluster_dropped)
 
-    st.write("Dropped features from clusters (first 30 shown):")
-    st.write(cluster_dropped[:30])
-    if len(cluster_dropped) > 30:
-        st.write(f"... {len(cluster_dropped)-30} more dropped features.")
-
-    # Apply selected features to X and X_today
+    # === FINAL PREP ===
     X = clean_X(event_df[selected_features])
     y = event_df[target_col]
     X_today = clean_X(today_df[selected_features], train_cols=X.columns)
@@ -245,7 +211,6 @@ if event_file is not None and today_file is not None:
     st.write("DEBUG: X shape:", X.shape)
     st.write("DEBUG: y shape:", y.shape)
 
-    # =========== SPLIT & SCALE ===========
     st.write("Splitting for validation and scaling...")
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
@@ -255,28 +220,18 @@ if event_file is not None and today_file is not None:
     X_val_scaled = scaler.transform(X_val)
     X_today_scaled = scaler.transform(X_today)
 
-    # =========== DEEP RESEARCH ENSEMBLE (SOFT VOTING, LOW LR, MODERATE TREES) ===========
+    # =========== DEEP RESEARCH ENSEMBLE (SOFT VOTING) ===========
     st.write("Training base models (XGB, LGBM, CatBoost, RF, GB, LR)...")
-
     xgb_clf = xgb.XGBClassifier(
-        n_estimators=100, max_depth=5, learning_rate=0.04, use_label_encoder=False,
-        eval_metric='logloss', n_jobs=1, verbosity=1, tree_method='hist'
+        n_estimators=60, max_depth=5, learning_rate=0.08, use_label_encoder=False, eval_metric='logloss',
+        n_jobs=1, verbosity=1, tree_method='hist'
     )
-    lgb_clf = lgb.LGBMClassifier(
-        n_estimators=100, max_depth=5, learning_rate=0.04, n_jobs=1
-    )
-    cat_clf = cb.CatBoostClassifier(
-        iterations=100, depth=5, learning_rate=0.05, verbose=0, thread_count=1
-    )
-    rf_clf = RandomForestClassifier(
-        n_estimators=60, max_depth=7, n_jobs=1
-    )
-    gb_clf = GradientBoostingClassifier(
-        n_estimators=60, max_depth=5, learning_rate=0.04
-    )
-    lr_clf = LogisticRegression(
-        max_iter=400, solver='lbfgs', n_jobs=1
-    )
+    lgb_clf = lgb.LGBMClassifier(n_estimators=60, max_depth=5, learning_rate=0.08, n_jobs=1)
+    cat_clf = cb.CatBoostClassifier(iterations=60, depth=5, learning_rate=0.09, verbose=0, thread_count=1)
+    rf_clf = RandomForestClassifier(n_estimators=40, max_depth=7, n_jobs=1)
+    gb_clf = GradientBoostingClassifier(n_estimators=40, max_depth=5, learning_rate=0.09)
+    lr_clf = LogisticRegression(max_iter=400, solver='lbfgs', n_jobs=1)
+
     model_status = []
     models_for_ensemble = []
     try:
@@ -321,8 +276,7 @@ if event_file is not None and today_file is not None:
         st.error("All models failed to train! Try reducing features or rows.")
         st.stop()
 
-    # Final ensemble: SOFT voting (deep research-backed for calibrated probabilities)
-    st.write("Fitting ensemble...")
+    st.write("Fitting ensemble (soft voting)...")
     ensemble = VotingClassifier(estimators=models_for_ensemble, voting='soft', n_jobs=1)
     ensemble.fit(X_train_scaled, y_train)
 
@@ -337,28 +291,24 @@ if event_file is not None and today_file is not None:
     st.write("Predicting HR probability for today...")
     today_df['hr_probability'] = ensemble.predict_proba(X_today_scaled)[:,1]
 
-    # === APPLY GAME DAY OVERLAYS POST-PREDICTION ===
-    st.write("Auto-integrating enriched game day overlays (post-prediction)...")
-    overlay_cols = [col for col in ["park_hr_rate", "temp", "wind_mph", "wind_dir_string", "humidity", "park_altitude"] if col in today_df.columns]
-    if overlay_cols:
-        st.success(f"Overlays present for today: {overlay_cols}")
+    # ==== APPLY OVERLAY SCORING ====
+    st.write("Applying post-prediction game day overlay scoring (weather, park, etc)...")
+    if 'hr_probability' in today_df.columns:
+        today_df['overlay_multiplier'] = today_df.apply(overlay_multiplier, axis=1)
+        today_df['final_hr_probability'] = (today_df['hr_probability'] * today_df['overlay_multiplier']).clip(0, 1)
     else:
-        st.warning("No overlays found for today — final_hr_probability == hr_probability.")
+        today_df['final_hr_probability'] = today_df['hr_probability']
 
-    today_df['overlay_multiplier'] = today_df.apply(overlay_multiplier, axis=1)
-    today_df['final_hr_probability'] = (today_df['hr_probability'] * today_df['overlay_multiplier']).clip(0, 1)
-
-    # ==== Leaderboard: Top 30 Only ====
-    out_cols = []
+    leaderboard_cols = []
     if "player_name" in today_df.columns:
-        out_cols.append("player_name")
-    out_cols += ["final_hr_probability"] + overlay_cols
-    leaderboard = today_df[out_cols].sort_values("final_hr_probability", ascending=False).reset_index(drop=True).head(30)
+        leaderboard_cols.append("player_name")
+    leaderboard_cols += ["final_hr_probability"]
+    leaderboard = today_df[leaderboard_cols].sort_values("final_hr_probability", ascending=False).reset_index(drop=True).head(30)
     leaderboard["final_hr_probability"] = leaderboard["final_hr_probability"].round(4)
 
-    st.markdown("### 🏆 **Today's HR Probability — Top 30 (with Game Day Overlay)**")
+    st.markdown("### 🏆 **Today's HR Probability (With Overlays) — Top 30**")
     st.dataframe(leaderboard, use_container_width=True)
-    st.download_button("⬇️ Download Full Prediction CSV (with overlay)", data=today_df.to_csv(index=False), file_name="today_hr_predictions_with_overlay.csv")
+    st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
 else:
     st.warning("Upload both event-level and today CSVs (CSV or Parquet) to begin.")
