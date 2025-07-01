@@ -299,14 +299,17 @@ if event_file is not None and today_file is not None:
     else:
         today_df['final_hr_probability'] = today_df['hr_probability']
 
+    # ==== SHOW LEADERBOARD WITH ALL COLUMNS ====
     leaderboard_cols = []
     if "player_name" in today_df.columns:
         leaderboard_cols.append("player_name")
-    leaderboard_cols += ["final_hr_probability"]
+    leaderboard_cols += ["hr_probability", "overlay_multiplier", "final_hr_probability"]
     leaderboard = today_df[leaderboard_cols].sort_values("final_hr_probability", ascending=False).reset_index(drop=True).head(30)
+    leaderboard["hr_probability"] = leaderboard["hr_probability"].round(4)
     leaderboard["final_hr_probability"] = leaderboard["final_hr_probability"].round(4)
+    leaderboard["overlay_multiplier"] = leaderboard["overlay_multiplier"].round(3)
 
-    st.markdown("### 🏆 **Today's HR Probability (With Overlays) — Top 30**")
+    st.markdown("### 🏆 **Today's HR Probabilities & Overlay Multipliers — Top 30**")
     st.dataframe(leaderboard, use_container_width=True)
     st.download_button("⬇️ Download Full Prediction CSV", data=today_df.to_csv(index=False), file_name="today_hr_predictions.csv")
 
