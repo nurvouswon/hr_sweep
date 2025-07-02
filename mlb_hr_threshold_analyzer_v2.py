@@ -182,7 +182,12 @@ with tab1:
         st.info("Upload two event-level Parquet files to combine.")
 
 # ---------------------- TAB 2: Generate TODAY CSV ----------------------
-if run_btn and p_event and lineup_csv:
+with tab2:
+    st.header("Generate TODAY CSV From Parquet + Lineups")
+    p_event = st.file_uploader("Upload Event-Level Parquet", type=["parquet"], key="event_parquet")
+    lineup_csv = st.file_uploader("Upload Today's Matchups CSV", type=["csv"], key="lineup_csv")
+    run_btn = st.button("Generate TODAY CSV", key="run_btn")
+    if run_btn and p_event and lineup_csv:
         df = pd.read_parquet(p_event)
         st.write("[Diagnostics] Loaded event-level shape:", df.shape)
         st.write("[Diagnostics] Columns:", list(df.columns))
