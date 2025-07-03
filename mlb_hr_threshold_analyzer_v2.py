@@ -209,7 +209,7 @@ with tab2:
         st.write("[Diagnostics] Loaded event-level shape:", df.shape)
         st.write("[Diagnostics] Columns:", list(df.columns))
 
-        # --- ADD RECENT HR ROLLING FEATURES (NEW) ---
+        # --- ADD RECENT HR ROLLING FEATURES (DEEP RESEARCH UPGRADE) ---
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
             df = add_rolling_hr_features(df, id_col='batter_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='b_')
@@ -264,20 +264,9 @@ with tab2:
                 lineup_df.loc[idx, 'pitcher_id'] = opp_sp
 
         # ========== BUILD TODAY CSV ==============
-        # Include all rolling HRs, barrel/hard-hit spikes, context, and weather
-        rolling_feature_cols = [col for col in df.columns if (
-            (col.startswith('b_') or col.startswith('p_')) and (
-                any(str(w) in col for w in roll_windows) and (
-                    'hr_count_' in col or 'hr_rate_' in col or
-                    'barrel_rate_' in col or 'hard_hit_rate_' in col or
-                    'avg_exit_velo_' in col or 'fb_rate_' in col or
-                    'sweet_spot_rate_' in col or 'pull_rate_' in col or
-                    'hit_dist_avg_' in col or 'hard_contact_rate_' in col or
-                    'slg_' in col or 'spray_angle_avg_' in col or 'spray_angle_std_' in col
-                )
-            )
-        )]
-
+        # Columns: ALL event-level stats/features available for this day
+        all_event_cols = list(df.columns)
+        # Also include weather/context/park columns from lineup
         extra_context_cols = [
             'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status', 'city',
             'batter_hand', 'pitcher_hand',
@@ -287,7 +276,12 @@ with tab2:
         today_cols = [
             'game_date', 'batter_id', 'player_name', 'pitcher_id',
             'temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition', 'stand'
-        ] + extra_context_cols + rolling_feature_cols
+        ] + extra_context_cols
+        # add all rolling & advanced features
+        rolling_feature_cols = [col for col in all_event_cols if (
+            (col.startswith('b_') or col.startswith('p_')) or ('rolling_' in col) or ('barrel_rate' in col) or ('hard_hit_rate' in col)
+        )]
+        today_cols += [c for c in all_event_cols if c not in today_cols and c in rolling_feature_cols]
 
         pitcher_hand_map = {}
         if 'pitcher_id' in df.columns and 'pitcher_hand' in df.columns:
@@ -322,14 +316,14 @@ with tab2:
                     'city', 'pitcher_hand',
                     'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
                     'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
-                ]}
+                ] if c in all_event_cols or c in extra_context_cols}
             else:
                 row_out = {c: np.nan for c in rolling_feature_cols + [
                     'batter_hand', 'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status',
                     'city', 'pitcher_hand',
                     'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
                     'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
-                ]}
+                ] if c in all_event_cols or c in extra_context_cols}
 
             batter_hand = row.get('stand', row_out.get('batter_hand', np.nan))
             pitcher_hand = pitcher_hand_map.get(pitcher_id, np.nan)
@@ -394,14 +388,22 @@ with tab2:
                 "pitcher_park_hr_pct_rhp": pitcher_park_hr_pct_rhp,
                 "pitcher_park_hr_pct_lhp": pitcher_park_hr_pct_lhp,
                 "pitcher_park_hr_pct_hand": pitcher_park_hr_pct_hand,
-            })
+                })
+            # Weather fields
             for c in ['temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition']:
                 row_out[c] = row.get(c, np.nan)
             today_rows.append(row_out)
 
-        today_df = pd.DataFrame(today_rows, columns=today_cols)
+        today_df = pd.DataFrame(today_rows)
+
+        # Deduplicate columns just in case (robust)
         today_df = dedup_columns(today_df)
         today_df = downcast_numeric(today_df)
+
+        # Ensure columns are sorted as in event-level if possible, for perfect sync
+        event_col_set = set(df.columns)
+        today_ordered_cols = [col for col in df.columns if col in today_df.columns] + [col for col in today_df.columns if col not in df.columns]
+        today_df = today_df[today_ordered_cols]
 
         # Show and offer downloads
         st.write("TODAY CSV (sample):", today_df.head(20))
@@ -424,3 +426,5 @@ with tab2:
         )
         st.success("All files and debug outputs ready.")
         gc.collect()
+    else:
+        st.info("Upload both event-level Parquet and lineup CSV, then click 'Generate TODAY CSV'.")
