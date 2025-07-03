@@ -156,6 +156,23 @@ def parse_custom_weather_string_v2(s):
     return pd.Series([temp, wind_vector, wind_field_dir, wind_mph, humidity, condition, wind_dir_string],
                      index=['temp','wind_vector','wind_field_dir','wind_mph','humidity','condition','wind_dir_string'])
 
+def add_rolling_hr_features(df, id_col, date_col, outcome_col='hr_outcome', windows=[3, 5, 7, 14, 20, 30, 60], prefix=""):
+    """Add rolling HR count and HR rate columns for each id_col (batter or pitcher) over several window sizes."""
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    df = df.sort_values([id_col, date_col])
+    results = []
+    for name, group in df.groupby(id_col):
+        group = group.sort_values(date_col)
+        for w in windows:
+            col_count = f"{prefix}hr_count_{w}"
+            col_rate = f"{prefix}hr_rate_{w}"
+            group[col_count] = group[outcome_col].rolling(w, min_periods=1).sum()
+            group[col_rate] = group[outcome_col].rolling(w, min_periods=1).mean()
+        results.append(group)
+    df = pd.concat(results)
+    return df
+
 # ========================= STREAMLIT APP =========================
 
 tab1, tab2 = st.tabs(["1️⃣ Combine Parquet Files", "2️⃣ Generate TODAY CSV"])
@@ -191,6 +208,12 @@ with tab2:
         df = pd.read_parquet(p_event)
         st.write("[Diagnostics] Loaded event-level shape:", df.shape)
         st.write("[Diagnostics] Columns:", list(df.columns))
+
+        # --- ADD RECENT HR ROLLING FEATURES (NEW) ---
+        roll_windows = [3, 5, 7, 14, 20, 30, 60]
+        if 'hr_outcome' in df.columns:
+            df = add_rolling_hr_features(df, id_col='batter_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='b_')
+            df = add_rolling_hr_features(df, id_col='pitcher_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='p_')
 
         lineup_df = pd.read_csv(lineup_csv)
         lineup_df.columns = [str(c).strip().lower().replace(" ", "_") for c in lineup_df.columns]
@@ -241,10 +264,19 @@ with tab2:
                 lineup_df.loc[idx, 'pitcher_id'] = opp_sp
 
         # ========== BUILD TODAY CSV ==============
-        roll_windows = [3, 5, 7, 14, 20, 30, 60]
+        # Include all rolling HRs, barrel/hard-hit spikes, context, and weather
         rolling_feature_cols = [col for col in df.columns if (
-            col.startswith('b_') or col.startswith('p_')
-        ) and any(str(w) in col for w in roll_windows)]
+            (col.startswith('b_') or col.startswith('p_')) and (
+                any(str(w) in col for w in roll_windows) and (
+                    'hr_count_' in col or 'hr_rate_' in col or
+                    'barrel_rate_' in col or 'hard_hit_rate_' in col or
+                    'avg_exit_velo_' in col or 'fb_rate_' in col or
+                    'sweet_spot_rate_' in col or 'pull_rate_' in col or
+                    'hit_dist_avg_' in col or 'hard_contact_rate_' in col or
+                    'slg_' in col or 'spray_angle_avg_' in col or 'spray_angle_std_' in col
+                )
+            )
+        )]
 
         extra_context_cols = [
             'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status', 'city',
@@ -371,6 +403,7 @@ with tab2:
         today_df = dedup_columns(today_df)
         today_df = downcast_numeric(today_df)
 
+        # Show and offer downloads
         st.write("TODAY CSV (sample):", today_df.head(20))
         st.markdown("#### Download TODAY CSV / Parquet (1 row per batter, matchup, rolling features & weather):")
         st.dataframe(today_df.head(20), use_container_width=True)
