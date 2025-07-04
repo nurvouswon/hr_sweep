@@ -246,7 +246,7 @@ with tab2:
 
         # ==== Assign Opposing SP for Each Batter ====
         lineup_df['pitcher_id'] = np.nan
-        grouped = lineup_df.groupby(['game_date', 'park', 'time']) if 'time' in lineup_df.columns else lineup_df.groupby(['game_date', 'park'])
+        grouped = lineup_df.groupby(['game_date', 'park'])
         for group_key, group in grouped:
             if 'team_code' not in group.columns: continue
             teams = group['team_code'].unique()
