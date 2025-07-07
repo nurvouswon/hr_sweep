@@ -134,24 +134,35 @@ def downcast_numeric(df):
     return df
 
 def parse_custom_weather_string_v2(s):
+    # Ex: "89 O LF 5-5 0% outdoor"
     if pd.isna(s):
         return pd.Series([np.nan]*7, index=['temp','wind_vector','wind_field_dir','wind_mph','humidity','condition','wind_dir_string'])
     s = str(s)
+    # Temp
     temp_match = re.search(r'(\d{2,3})\s*[OI°]?\s', s)
     temp = int(temp_match.group(1)) if temp_match else np.nan
+    # Wind vector and field dir
     wind_vector_match = re.search(r'\d{2,3}\s*([OI])\s', s)
     wind_vector = wind_vector_match.group(1) if wind_vector_match else np.nan
-    wind_field_dir_match = re.search(r'\s([A-Z]{2})\s*\d', s)
+    wind_field_dir_match = re.search(r'\b(OI|O|I|LF|RF|CF|L|R|C)\b', s)
     wind_field_dir = wind_field_dir_match.group(1) if wind_field_dir_match else np.nan
-    mph = re.search(r'(\d{1,3})\s*-\s*(\d{1,3})', s)
+    # Wind mph, try to handle "5-5" or "12-15" etc, else single value
+    mph = re.search(r'(\d{1,3})-(\d{1,3})', s)
     if mph:
         wind_mph = (int(mph.group(1)) + int(mph.group(2))) / 2
     else:
-        mph = re.search(r'([1-9][0-9]?)\s*(?:mph)?', s)
-        wind_mph = int(mph.group(1)) if mph else np.nan
+        mph_single = re.search(r'(\d{1,3})\s*(?:mph)?', s)
+        wind_mph = int(mph_single.group(1)) if mph_single else np.nan
+    # Humidity
     humidity_match = re.search(r'(\d{1,3})%', s)
     humidity = int(humidity_match.group(1)) if humidity_match else np.nan
-    condition = "outdoor" if "outdoor" in s.lower() else ("indoor" if "indoor" in s.lower() else np.nan)
+    # Condition
+    if "outdoor" in s.lower():
+        condition = "outdoor"
+    elif "indoor" in s.lower():
+        condition = "indoor"
+    else:
+        condition = np.nan
     wind_dir_string = f"{wind_vector} {wind_field_dir}".strip()
     return pd.Series([temp, wind_vector, wind_field_dir, wind_mph, humidity, condition, wind_dir_string],
                      index=['temp','wind_vector','wind_field_dir','wind_mph','humidity','condition','wind_dir_string'])
@@ -244,37 +255,42 @@ with tab2:
             wx_parsed = lineup_df['weather'].apply(parse_custom_weather_string_v2)
             lineup_df = pd.concat([lineup_df, wx_parsed], axis=1)
 
-        # ==== Assign Opposing SP for Each Batter ====
+        # ==== Assign Opposing SP for Each Batter and store SP Name ====
         lineup_df['pitcher_id'] = np.nan
+        lineup_df['opp_pitcher_name'] = np.nan
         grouped = lineup_df.groupby(['game_date', 'park'])
         for group_key, group in grouped:
             if 'team_code' not in group.columns: continue
             teams = group['team_code'].unique()
             if len(teams) < 2: continue
             team_sps = {}
+            team_spnames = {}
             for team in teams:
                 sp_row = group[(group['team_code'] == team) & (group['batting_order'] == "SP")]
                 if not sp_row.empty:
                     team_sps[team] = str(sp_row.iloc[0]['batter_id'])
+                    team_spnames[team] = sp_row.iloc[0]['player_name']
             for team in teams:
                 opp_teams = [t for t in teams if t != team]
                 if not opp_teams: continue
                 opp_sp = team_sps.get(opp_teams[0], np.nan)
+                opp_spname = team_spnames.get(opp_teams[0], np.nan)
                 idx = group[group['team_code'] == team].index
                 lineup_df.loc[idx, 'pitcher_id'] = opp_sp
+                lineup_df.loc[idx, 'opp_pitcher_name'] = opp_spname
 
         # ========== BUILD TODAY CSV ==============
         # Columns: ALL event-level stats/features available for this day
         all_event_cols = list(df.columns)
-        # Also include weather/context/park columns from lineup
         extra_context_cols = [
             'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status', 'city',
             'batter_hand', 'pitcher_hand',
             'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
-            'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
+            'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand',
+            'opp_pitcher_name' # new column for opposing pitcher name
         ]
         today_cols = [
-            'game_date', 'batter_id', 'player_name', 'pitcher_id',
+            'game_date', 'batter_id', 'player_name', 'pitcher_id', 'opp_pitcher_name',
             'temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition', 'stand'
         ] + extra_context_cols
         # add all rolling & advanced features
@@ -306,6 +322,7 @@ with tab2:
             team_code = row.get("team_code", np.nan)
             game_date = row.get("game_date", np.nan)
             pitcher_id = str(row.get("pitcher_id", np.nan))
+            opp_pitcher_name = row.get("opp_pitcher_name", np.nan)
             player_name = row.get("player_name", np.nan)
             stand = row.get("stand", np.nan)
             filter_df = df[df['batter_id'].astype(str).str.split('.').str[0] == this_batter_id]
@@ -370,6 +387,7 @@ with tab2:
                 "batter_id": this_batter_id,
                 "player_name": player_name,
                 "pitcher_id": pitcher_id,
+                "opp_pitcher_name": opp_pitcher_name,
                 "park": park,
                 "park_hr_rate": park_hr_rate_map.get(str(park).lower(), 1.0) if not pd.isna(park) else 1.0,
                 "park_hand_hr_rate": park_hand_rate,
@@ -388,7 +406,7 @@ with tab2:
                 "pitcher_park_hr_pct_rhp": pitcher_park_hr_pct_rhp,
                 "pitcher_park_hr_pct_lhp": pitcher_park_hr_pct_lhp,
                 "pitcher_park_hr_pct_hand": pitcher_park_hr_pct_hand,
-                })
+            })
             # Weather fields
             for c in ['temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition']:
                 row_out[c] = row.get(c, np.nan)
@@ -402,7 +420,8 @@ with tab2:
 
         # Ensure columns are sorted as in event-level if possible, for perfect sync
         event_col_set = set(df.columns)
-        today_ordered_cols = [col for col in df.columns if col in today_df.columns] + [col for col in today_df.columns if col not in df.columns]
+        today_ordered_cols = [col for col in df.columns if col in today_df.columns] + \
+                             [col for col in today_df.columns if col not in df.columns]
         today_df = today_df[today_ordered_cols]
 
         # Show and offer downloads
