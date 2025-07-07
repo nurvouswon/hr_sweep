@@ -1,67 +1,66 @@
 import streamlit as st
 import pandas as pd
 
-st.title("MLB HR Feature File Diagnostic")
+st.title("MLB HR Feature Debugger & Safe Merger")
 
-# Uploaders
-event_file = st.file_uploader("Upload event-level Parquet file", type=["parquet"])
-today_file = st.file_uploader("Upload TODAY CSV", type=["csv"])
+# --- Uploaders ---
+event_file = st.file_uploader("Upload Event-Level Parquet", type="parquet")
+today_file = st.file_uploader("Upload TODAY CSV", type="csv")
 
 if event_file and today_file:
-    # Load files
     df_event = pd.read_parquet(event_file)
     df_today = pd.read_csv(today_file)
 
-    # Merge keys
-    merge_keys = ['game_date', 'batter_id']
-
-    st.write("### File Shapes")
     st.write(f"Event-level shape: {df_event.shape}")
     st.write(f"TODAY shape: {df_today.shape}")
 
-    # Key detection
-    key_status = []
-    for k in merge_keys:
-        if k not in df_event.columns or k not in df_today.columns:
-            key_status.append(f"WARNING: Key column '{k}' not found in both dataframes.")
-    if key_status:
-        st.write("#### Merge Key Warnings")
-        for msg in key_status:
-            st.warning(msg)
+    # --- Diagnose duplicate keys ---
+    merge_keys = ['game_date', 'batter_id']
+    event_dups = df_event.duplicated(subset=merge_keys, keep=False)
+    today_dups = df_today.duplicated(subset=merge_keys, keep=False)
 
-    # Columns in TODAY not in EVENT
-    cols_today_not_event = [col for col in df_today.columns if col not in df_event.columns]
-    st.write("### Columns in TODAY but NOT in EVENT-level:")
-    st.code(cols_today_not_event)
+    st.write("Event-level duplicates on [game_date, batter_id]:", int(event_dups.sum()))
+    st.write("TODAY duplicates on [game_date, batter_id]:", int(today_dups.sum()))
 
-    # Columns in EVENT not in TODAY
-    cols_event_not_today = [col for col in df_event.columns if col not in df_today.columns]
-    st.write(f"### Columns in EVENT but NOT in TODAY: (showing first 100 of {len(cols_event_not_today)})")
-    st.code(cols_event_not_today[:100])
+    if event_dups.any():
+        st.warning("Duplicate rows in EVENT detected for (game_date, batter_id)! Aggregating...")
+        st.write(df_event.loc[event_dups, merge_keys].head(10))
+        # --- Aggregate: Take first row per key. (Customize this as needed for your use-case!)
+        df_event_grouped = df_event.groupby(merge_keys).first().reset_index()
+        st.success(f"Aggregated event-level shape: {df_event_grouped.shape}")
+    else:
+        df_event_grouped = df_event
 
-    # Columns present in BOTH
-    cols_both = [col for col in df_today.columns if col in df_event.columns]
-    st.write(f"### Columns present in BOTH: (showing first 100 of {len(cols_both)})")
-    st.code(cols_both[:100])
+    # --- Show columns present in TODAY but not in Event-level, and vice versa ---
+    cols_today = set(df_today.columns)
+    cols_event = set(df_event_grouped.columns)
+    only_in_today = sorted(cols_today - cols_event)
+    only_in_event = sorted(cols_event - cols_today)
+    in_both = sorted(cols_today & cols_event)
 
-    # Merge diagnostic
-    st.write("### Checking merge key uniqueness...")
-    dups_event = df_event.duplicated(subset=merge_keys).sum()
-    dups_today = df_today.duplicated(subset=merge_keys).sum()
-    st.write(f"Event-level dups by key: {dups_event}")
-    st.write(f"TODAY dups by key: {dups_today}")
+    st.write("Columns in TODAY but NOT in Event-level:", only_in_today)
+    st.write("Columns in Event-level but NOT in TODAY:", only_in_event)
+    st.write("Columns in BOTH (sample):", in_both[:10])
 
-    if dups_event > 0:
-        st.warning("WARNING: Duplicate keys found in EVENT. Aggregation recommended.")
-
-    # Merge and check nulls
+    # --- Merge and report nulls ---
     merged = df_today.merge(
-        df_event[merge_keys + cols_both],
-        on=merge_keys,
-        how='left',
-        suffixes=('', '_event')
+        df_event_grouped, on=merge_keys, how='left', suffixes=('', '_event')
     )
+    st.write("Merged shape:", merged.shape)
 
-    all_null_cols = [col for col in cols_both if merged[col].isnull().all()]
-    st.write("### Columns in TODAY that are ALL NULL after merge:")
-    st.code(all_null_cols)
+    # Null diagnostics
+    nulls = merged.isnull().sum()
+    all_null_cols = nulls[nulls == merged.shape[0]].index.tolist()
+    st.write("Columns ALL NULL after merge:", all_null_cols[:20])
+    st.write(f"Total columns all-null: {len(all_null_cols)}")
+
+    st.write("Sample merged rows:")
+    st.dataframe(merged.head())
+
+    # Download merged result
+    st.download_button(
+        "Download merged CSV", merged.to_csv(index=False).encode(),
+        file_name="merged_today_event.csv", mime="text/csv"
+    )
+else:
+    st.info("Please upload both Event-level and TODAY files.")
