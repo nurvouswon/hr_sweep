@@ -177,28 +177,6 @@ def add_rolling_hr_features(df, id_col, date_col, outcome_col='hr_outcome', wind
 
 tab1, tab2 = st.tabs(["1️⃣ Combine Parquet Files", "2️⃣ Generate TODAY CSV"])
 
-# ---------------------- TAB 1: Combine Parquet Files ----------------------
-with tab1:
-    st.header("Combine Two Event-Level Parquet Files")
-    p1 = st.file_uploader("Upload First Event-Level Parquet", type="parquet", key="p1")
-    p2 = st.file_uploader("Upload Second Event-Level Parquet", type="parquet", key="p2")
-    if p1 and p2:
-        df1 = pd.read_parquet(p1)
-        df2 = pd.read_parquet(p2)
-        st.write("[Diagnostics] First file shape:", df1.shape)
-        st.write("[Diagnostics] Second file shape:", df2.shape)
-        combined = pd.concat([df1, df2], ignore_index=True)
-        st.write("[Diagnostics] Combined shape:", combined.shape)
-        st.dataframe(combined.head(20), use_container_width=True)
-        # Download combined
-        out_parquet = io.BytesIO()
-        combined.to_parquet(out_parquet, index=False)
-        st.download_button("⬇️ Download Combined Parquet", data=out_parquet.getvalue(),
-                           file_name="event_level_combined.parquet", mime="application/octet-stream")
-    else:
-        st.info("Upload two event-level Parquet files to combine.")
-
-# ---------------------- TAB 2: Generate TODAY CSV ----------------------
 with tab2:
     st.header("Generate TODAY CSV From Parquet + Lineups")
     p_event = st.file_uploader("Upload Event-Level Parquet", type=["parquet"], key="event_parquet")
@@ -207,8 +185,9 @@ with tab2:
     if run_btn and p_event and lineup_csv:
         df = pd.read_parquet(p_event)
         st.write("[Diagnostics] Loaded event-level shape:", df.shape)
+        st.write("[Diagnostics] Columns:", list(df.columns))
 
-        # Rolling HR features
+        # --- ADD RECENT HR ROLLING FEATURES (DEEP RESEARCH UPGRADE) ---
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
             df = add_rolling_hr_features(df, id_col='batter_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='b_')
@@ -216,7 +195,30 @@ with tab2:
 
         lineup_df = pd.read_csv(lineup_csv)
         lineup_df.columns = [str(c).strip().lower().replace(" ", "_") for c in lineup_df.columns]
-        # Standardize team_code and game_time
+        if "park" in lineup_df.columns:
+            lineup_df["park"] = lineup_df["park"].astype(str).str.lower().str.replace(" ", "_")
+        for col in ['mlb_id', 'batter_id']:
+            if col in lineup_df.columns and 'batter_id' not in lineup_df.columns:
+                lineup_df['batter_id'] = lineup_df[col]
+        for col in ['player_name', 'player name', 'name']:
+            if col in lineup_df.columns and 'player_name' not in lineup_df.columns:
+                lineup_df['player_name'] = lineup_df[col]
+        if 'game_date' not in lineup_df.columns:
+            for date_col in ['game_date', 'game date']:
+                if date_col in lineup_df.columns:
+                    lineup_df['game_date'] = lineup_df[date_col]
+        if 'game_date' in lineup_df.columns:
+            lineup_df['game_date'] = pd.to_datetime(lineup_df['game_date'], errors='coerce').dt.strftime("%Y-%m-%d")
+        if 'batting_order' in lineup_df.columns:
+            lineup_df['batting_order'] = lineup_df['batting_order'].astype(str).str.upper().str.strip()
+        if 'team_code' in lineup_df.columns:
+            lineup_df['team_code'] = lineup_df['team_code'].astype(str).str.strip().str.upper()
+        if 'game_number' in lineup_df.columns:
+            lineup_df['game_number'] = lineup_df['game_number'].astype(str).str.strip()
+        for col in ['batter_id', 'mlb_id']:
+            if col in lineup_df.columns:
+                lineup_df[col] = lineup_df[col].astype(str).str.replace('.0','',regex=False).str.strip()
+        # ---- ADD: Normalize game_time and team_code (ensure always present for output)
         for col in ['team', 'teamcode', 'tm', 'club']:
             if col in lineup_df.columns and 'team_code' not in lineup_df.columns:
                 lineup_df['team_code'] = lineup_df[col]
@@ -227,15 +229,16 @@ with tab2:
                 lineup_df['game_time'] = lineup_df[col]
         if 'game_time' in lineup_df.columns:
             lineup_df['game_time'] = lineup_df['game_time'].astype(str).str.strip()
-        # Weather
+        # ---- END
         if 'weather' in lineup_df.columns:
             wx_parsed = lineup_df['weather'].apply(parse_custom_weather_string_v2)
             lineup_df = pd.concat([lineup_df, wx_parsed], axis=1)
 
-        # Assign opposing SP for each batter (skip opponent_team)
+        # ==== Assign Opposing SP for Each Batter ====
         lineup_df['pitcher_id'] = np.nan
         grouped = lineup_df.groupby(['game_date', 'park'])
         for group_key, group in grouped:
+            if 'team_code' not in group.columns: continue
             teams = group['team_code'].unique()
             if len(teams) < 2: continue
             team_sps = {}
@@ -245,9 +248,42 @@ with tab2:
                     team_sps[team] = str(sp_row.iloc[0]['batter_id'])
             for team in teams:
                 opp_teams = [t for t in teams if t != team]
+                if not opp_teams: continue
                 opp_sp = team_sps.get(opp_teams[0], np.nan)
                 idx = group[group['team_code'] == team].index
                 lineup_df.loc[idx, 'pitcher_id'] = opp_sp
+
+        # ========== BUILD TODAY CSV ==============
+        all_event_cols = list(df.columns)
+        extra_context_cols = [
+            'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status', 'city',
+            'batter_hand', 'pitcher_hand',
+            'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
+            'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
+        ]
+        today_cols = [
+            'game_date', 'game_time', 'team_code', 'batter_id', 'player_name', 'pitcher_id',
+            'temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition', 'stand'
+        ] + extra_context_cols
+        rolling_feature_cols = [col for col in all_event_cols if (
+            (col.startswith('b_') or col.startswith('p_')) or ('rolling_' in col) or ('barrel_rate' in col) or ('hard_hit_rate' in col)
+        )]
+        today_cols += [c for c in all_event_cols if c not in today_cols and c in rolling_feature_cols]
+
+        pitcher_hand_map = {}
+        if 'pitcher_id' in df.columns and 'pitcher_hand' in df.columns:
+            pitcher_hand_statcast = df[['pitcher_id', 'pitcher_hand']].drop_duplicates().dropna()
+            for _, row_p in pitcher_hand_statcast.iterrows():
+                pid = str(row_p['pitcher_id'])
+                hand = row_p['pitcher_hand']
+                if pid not in pitcher_hand_map and pd.notna(hand):
+                    pitcher_hand_map[pid] = hand
+        if 'pitcher_id' in lineup_df.columns:
+            for _, row_p in lineup_df.dropna(subset=['pitcher_id']).drop_duplicates(['pitcher_id']).iterrows():
+                pid = str(row_p['pitcher_id'])
+                hand = row_p.get('p_throws') or row_p.get('stand') or row_p.get('pitcher_hand')
+                if pid not in pitcher_hand_map and pd.notna(hand):
+                    pitcher_hand_map[pid] = hand
 
         today_rows = []
         for idx, row in lineup_df.iterrows():
@@ -263,11 +299,60 @@ with tab2:
             filter_df = df[df['batter_id'].astype(str).str.split('.').str[0] == this_batter_id]
             if not filter_df.empty:
                 last_row = filter_df.iloc[-1]
-                row_out = last_row.to_dict()
+                row_out = {c: last_row.get(c, np.nan) for c in rolling_feature_cols + [
+                    'batter_hand', 'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status',
+                    'city', 'pitcher_hand',
+                    'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
+                    'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
+                ] if c in all_event_cols or c in extra_context_cols}
             else:
-                row_out = {}
+                row_out = {c: np.nan for c in rolling_feature_cols + [
+                    'batter_hand', 'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status',
+                    'city', 'pitcher_hand',
+                    'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
+                    'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
+                ] if c in all_event_cols or c in extra_context_cols}
 
-            # Always fill meta/context columns
+            batter_hand = row.get('stand', row_out.get('batter_hand', np.nan))
+            pitcher_hand = pitcher_hand_map.get(pitcher_id, np.nan)
+            park_hand_rate = 1.0
+            if not pd.isna(park) and not pd.isna(batter_hand):
+                park_hand_rate = park_hand_hr_rate_map.get(str(park).lower(), {}).get(str(batter_hand).upper(), 1.0)
+            if not pd.isna(team_code):
+                park_hr_pct_all = park_hr_percent_map_all.get(team_code, 1.0)
+                park_hr_pct_rhb = park_hr_percent_map_rhb.get(team_code, 1.0)
+                park_hr_pct_lhb = park_hr_percent_map_lhb.get(team_code, 1.0)
+                if str(batter_hand).upper() == "R":
+                    park_hr_pct_hand = park_hr_pct_rhb
+                elif str(batter_hand).upper() == "L":
+                    park_hr_pct_hand = park_hr_pct_lhb
+                else:
+                    park_hr_pct_hand = park_hr_pct_all
+            else:
+                park_hr_pct_all = park_hr_pct_rhb = park_hr_pct_lhb = park_hr_pct_hand = 1.0
+
+            pitcher_team_code = row.get("pitcher_team_code", np.nan)
+            if pd.isna(pitcher_team_code):
+                if 'pitcher_team_code' in row_out and pd.notna(row_out['pitcher_team_code']):
+                    pitcher_team_code = row_out['pitcher_team_code']
+                elif 'team_code' in row and pd.notna(row['team_code']):
+                    pitcher_team_code = row['team_code']
+                else:
+                    pitcher_team_code = np.nan
+            pitcher_hand_val = str(pitcher_hand).upper() if pd.notna(pitcher_hand) else ""
+            if not pd.isna(pitcher_team_code):
+                pitcher_park_hr_pct_all = park_hr_percent_map_pitcher_all.get(pitcher_team_code, 1.0)
+                pitcher_park_hr_pct_rhp = park_hr_percent_map_rhp.get(pitcher_team_code, 1.0)
+                pitcher_park_hr_pct_lhp = park_hr_percent_map_lhp.get(pitcher_team_code, 1.0)
+                if pitcher_hand_val == "R":
+                    pitcher_park_hr_pct_hand = pitcher_park_hr_pct_rhp
+                elif pitcher_hand_val == "L":
+                    pitcher_park_hr_pct_hand = pitcher_park_hr_pct_lhp
+                else:
+                    pitcher_park_hr_pct_hand = pitcher_park_hr_pct_all
+            else:
+                pitcher_park_hr_pct_all = pitcher_park_hr_pct_rhp = pitcher_park_hr_pct_lhp = pitcher_park_hr_pct_hand = 1.0
+
             row_out.update({
                 "game_date": game_date,
                 "game_time": game_time,
@@ -276,24 +361,52 @@ with tab2:
                 "player_name": player_name,
                 "pitcher_id": pitcher_id,
                 "park": park,
+                "park_hr_rate": park_hr_rate_map.get(str(park).lower(), 1.0) if not pd.isna(park) else 1.0,
+                "park_hand_hr_rate": park_hand_rate,
+                "park_altitude": park_altitude_map.get(str(park).lower(), 0) if not pd.isna(park) else 0,
+                "roof_status": roof_status_map.get(str(park).lower(), "open") if not pd.isna(park) else "open",
                 "city": city if not pd.isna(city) else mlb_team_city_map.get(team_code, ""),
-                "stand": stand,
-                "batter_hand": row.get("stand", np.nan),
-                "pitcher_hand": row.get("p_throws", np.nan) if pd.notna(row.get("p_throws", np.nan)) else row.get("pitcher_hand", np.nan),
-            })
+                "stand": batter_hand,
+                "batter_hand": batter_hand,
+                "pitcher_hand": pitcher_hand,
+                "park_hr_pct_all": park_hr_pct_all,
+                "park_hr_pct_rhb": park_hr_pct_rhb,
+                "park_hr_pct_lhb": park_hr_pct_lhb,
+                "park_hr_pct_hand": park_hr_pct_hand,
+                "pitcher_team_code": pitcher_team_code,
+                "pitcher_park_hr_pct_all": pitcher_park_hr_pct_all,
+                "pitcher_park_hr_pct_rhp": pitcher_park_hr_pct_rhp,
+                "pitcher_park_hr_pct_lhp": pitcher_park_hr_pct_lhp,
+                "pitcher_park_hr_pct_hand": pitcher_park_hr_pct_hand,
+                })
+            # Weather fields
             for c in ['temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition']:
                 row_out[c] = row.get(c, np.nan)
             today_rows.append(row_out)
 
         today_df = pd.DataFrame(today_rows)
+
+        # Deduplicate columns just in case (robust)
         today_df = dedup_columns(today_df)
         today_df = downcast_numeric(today_df)
-        # Always have these up front
-        first_cols = ["game_date", "game_time", "team_code", "batter_id", "player_name", "pitcher_id", "park", "city", "stand", "batter_hand", "pitcher_hand", "temp", "humidity", "wind_mph", "wind_dir_string", "condition"]
-        out_cols = first_cols + [col for col in today_df.columns if col not in first_cols]
-        today_df = today_df[out_cols]
 
+        # === DEBUG/DIAGNOSTICS FOR MISSING DATA ===
+        st.write("Null Count Per Column (TODAY CSV):")
+        nulls = today_df.isnull().sum()
+        st.dataframe(nulls[nulls > 0].sort_values(ascending=False))
+        empty_cols = nulls[nulls == len(today_df)].index.tolist()
+        if empty_cols:
+            st.warning(f"Columns with all missing values: {empty_cols}")
+        # === END DIAGNOSTICS ===
+
+        # Ensure columns are sorted as in event-level if possible, for perfect sync
+        event_col_set = set(df.columns)
+        today_ordered_cols = [col for col in df.columns if col in today_df.columns] + [col for col in today_df.columns if col not in df.columns]
+        today_df = today_df[today_ordered_cols]
+
+        # Show and offer downloads
         st.write("TODAY CSV (sample):", today_df.head(20))
+        st.markdown("#### Download TODAY CSV / Parquet (1 row per batter, matchup, rolling features & weather):")
         st.dataframe(today_df.head(20), use_container_width=True)
         st.download_button(
             "⬇️ Download TODAY CSV",
