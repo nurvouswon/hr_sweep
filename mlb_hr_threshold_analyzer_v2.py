@@ -1,67 +1,38 @@
+import streamlit as st
 import pandas as pd
 
-# ==== LOAD DATA ====
-df_event = pd.read_parquet("3_19_7_5.parquet")      # Adjust filename if needed
-df_today = pd.read_csv("today_hr_features7_6.csv")  # Adjust filename if needed
+st.header("MLB HR Feature Debugger")
 
-print("Event-level shape:", df_event.shape)
-print("TODAY shape:", df_today.shape)
+event_file = st.file_uploader("Upload Event-Level Parquet", type=["parquet"])
+today_file = st.file_uploader("Upload TODAY CSV", type=["csv"])
 
-# ==== PICK AN ALL-NULL COLUMN TO CHECK ====
-TARGET_COL = "b_ff_avg_exit_velo_3"  # Change to any feature that is all-null in TODAY
+if event_file and today_file:
+    df_event = pd.read_parquet(event_file)
+    df_today = pd.read_csv(today_file)
 
-# ==== CHECK UNIQUE KEYS AND DTYPE ====
-print("\nTODAY unique batter_ids:", df_today['batter_id'].nunique())
-print("EVENT unique batter_ids:", df_event['batter_id'].nunique())
-print("\ndf_event dtypes:")
-print(df_event[['game_date', 'batter_id']].dtypes)
-print("\ndf_today dtypes:")
-print(df_today[['game_date', 'batter_id']].dtypes)
+    st.write("Event-level shape:", df_event.shape)
+    st.write("TODAY shape:", df_today.shape)
 
-# If dtypes mismatch, fix here (optional):
-df_event['batter_id'] = df_event['batter_id'].astype(str)
-df_today['batter_id'] = df_today['batter_id'].astype(str)
-# (Do this for any other key columns as well)
+    TARGET_COL = st.selectbox("Pick column to debug (from TODAY)", df_today.columns)
+    
+    # Print non-null counts
+    st.write(f"Non-null in EVENT for `{TARGET_COL}`:", df_event.get(TARGET_COL, pd.Series(dtype=float)).notnull().sum() if TARGET_COL in df_event else "N/A")
+    st.write(f"Non-null in TODAY for `{TARGET_COL}`:", df_today[TARGET_COL].notnull().sum())
 
-# ==== CHECK PRESENCE OF TARGET COLUMN DATA ====
-print("\nNon-null in EVENT for this column:", df_event[TARGET_COL].notnull().sum())
-print("Non-null in TODAY for this column:", df_today[TARGET_COL].notnull().sum())
+    # Print sample batter_ids
+    key = st.selectbox("Key column", ["batter_id", "batter", "player_name"])
+    if TARGET_COL in df_event:
+        st.write("Sample EVENT rows with data for", TARGET_COL)
+        st.dataframe(df_event.loc[df_event[TARGET_COL].notnull(), [key, TARGET_COL]].head())
+    st.write("Sample TODAY rows for", TARGET_COL)
+    st.dataframe(df_today[[key, TARGET_COL]].head())
 
-# Print a few sample batter_ids with values in event-level
-print("\nSample EVENT batter_ids with data for", TARGET_COL)
-print(df_event.loc[df_event[TARGET_COL].notnull(), ['batter_id', TARGET_COL]].head())
-
-# Print a few sample batter_ids in TODAY
-print("\nSample TODAY batter_ids:")
-print(df_today[['batter_id', TARGET_COL]].head())
-
-# ==== OPTIONAL: TRY A MERGE TO SEE IF IT WORKS ====
-# You may want to simulate the merge/groupby logic that should fill in these features
-merge_cols = ['game_date', 'batter_id']  # Adjust if you join on more keys!
-sample_cols = [TARGET_COL]  # Or all the feature columns you expect
-
-# Suppose you want to see if a left-merge would join the right data
-tmp_event = df_event[merge_cols + sample_cols].drop_duplicates(subset=merge_cols)
-test_merge = df_today.merge(tmp_event, on=merge_cols, how='left', suffixes=('', '_event'))
-
-print("\nChecking post-merge, is TARGET_COL_event filled?")
-print(test_merge[[TARGET_COL, f"{TARGET_COL}_event"]].head(10))
-
-# ==== UTILITY: FAST CHECKER FUNCTION ====
-def debug_null_column(df_event, df_today, col, key='batter_id'):
-    print(f"\n=== Debug: {col} ===")
-    print("Event-level, non-null:", df_event[col].notnull().sum())
-    print("TODAY, non-null:", df_today[col].notnull().sum())
-    print("Sample EVENT ids with data:", df_event.loc[df_event[col].notnull(), key].unique()[:5])
-    print("Sample TODAY ids:", df_today[key].unique()[:5])
-    print("-"*40)
-
-# ==== USAGE: CHECK ANY COLUMN ====
-debug_null_column(df_event, df_today, "b_ff_avg_exit_velo_3", key="batter_id")
-debug_null_column(df_event, df_today, "b_sl_avg_exit_velo_3", key="batter_id")  # Or any other column
-
-# ==== SUMMARY: WHAT TO LOOK FOR ====
-# - If EVENT has data and TODAY is null -> merge/groupby/key mismatch
-# - If EVENT is all null, feature logic is broken or not computed
-# - If dtypes for keys mismatch, fix with astype(str) or astype(int) as appropriate
-# - Use the test_merge block to experiment with different merge keys and confirm join logic
+    # Optional: Test merge logic
+    merge_cols = ['game_date', key]  # adjust as needed
+    if (TARGET_COL in df_event) and (key in df_event.columns and key in df_today.columns):
+        tmp_event = df_event[merge_cols + [TARGET_COL]].drop_duplicates(subset=merge_cols)
+        test_merge = df_today.merge(tmp_event, on=merge_cols, how='left', suffixes=('', '_event'))
+        st.write("Merge check (TODAY vs EVENT):")
+        st.dataframe(test_merge[[TARGET_COL, f"{TARGET_COL}_event"]].head(10))
+else:
+    st.info("Upload both files to begin.")
