@@ -370,6 +370,8 @@ with tab2:
                 "batter_id": this_batter_id,
                 "player_name": player_name,
                 "pitcher_id": pitcher_id,
+                "team_code": team_code,
+                "game_time": row.get("game_time", row.get("time", np.nan)),  # handles both 'game_time' and 'time'
                 "park": park,
                 "park_hr_rate": park_hr_rate_map.get(str(park).lower(), 1.0) if not pd.isna(park) else 1.0,
                 "park_hand_hr_rate": park_hand_rate,
