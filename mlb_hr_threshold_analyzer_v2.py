@@ -1,267 +1,41 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import re
 import io
-import gc
 
-st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
+st.set_page_config("🟣 Parquet Reader", layout="wide")
 
-# ===================== CONTEXT MAPS & RATES =====================
-park_hr_rate_map = {
-    'angels_stadium': 1.05, 'angel_stadium': 1.05, 'minute_maid_park': 1.06, 'coors_field': 1.30,
-    'yankee_stadium': 1.19, 'fenway_park': 0.97, 'rogers_centre': 1.10, 'tropicana_field': 0.85,
-    'camden_yards': 1.13, 'guaranteed_rate_field': 1.18, 'progressive_field': 1.01,
-    'comerica_park': 0.96, 'kauffman_stadium': 0.98, 'globe_life_field': 1.00, 'dodger_stadium': 1.10,
-    'oakland_coliseum': 0.82, 't-mobile_park': 0.86, 'tmobile_park': 0.86, 'oracle_park': 0.82,
-    'wrigley_field': 1.12, 'great_american_ball_park': 1.26, 'american_family_field': 1.17,
-    'pnc_park': 0.87, 'busch_stadium': 0.87, 'truist_park': 1.06, 'loan_depot_park': 0.86,
-    'loandepot_park': 0.86, 'citi_field': 1.05, 'nationals_park': 1.05, 'petco_park': 0.85,
-    'chase_field': 1.06, 'citizens_bank_park': 1.19, 'sutter_health_park': 1.12, 'target_field': 1.05
-}
-park_altitude_map = {
-    'coors_field': 5280, 'chase_field': 1100, 'dodger_stadium': 338, 'minute_maid_park': 50,
-    'fenway_park': 19, 'wrigley_field': 594, 'great_american_ball_park': 489, 'oracle_park': 10,
-    'petco_park': 62, 'yankee_stadium': 55, 'citizens_bank_park': 30, 'kauffman_stadium': 750,
-    'guaranteed_rate_field': 600, 'progressive_field': 650, 'busch_stadium': 466, 'camden_yards': 40,
-    'rogers_centre': 250, 'angel_stadium': 160, 'tropicana_field': 3, 'citi_field': 3,
-    'oakland_coliseum': 50, 'globe_life_field': 560, 'pnc_park': 725, 'loan_depot_park': 7,
-    'loandepot_park': 7, 'nationals_park': 25, 'american_family_field': 633, 'sutter_health_park': 20,
-    'target_field': 830
-}
-roof_status_map = {
-    'rogers_centre': 'closed', 'chase_field': 'open', 'minute_maid_park': 'open',
-    'loan_depot_park': 'closed', 'loandepot_park': 'closed', 'globe_life_field': 'open',
-    'tropicana_field': 'closed', 'american_family_field': 'open'
-}
-team_code_to_park = {
-    'PHI': 'citizens_bank_park', 'ATL': 'truist_park', 'NYM': 'citi_field',
-    'BOS': 'fenway_park', 'NYY': 'yankee_stadium', 'CHC': 'wrigley_field',
-    'LAD': 'dodger_stadium', 'OAK': 'sutter_health_park', 'ATH': 'sutter_health_park',
-    'CIN': 'great_american_ball_park', 'DET': 'comerica_park', 'HOU': 'minute_maid_park',
-    'MIA': 'loandepot_park', 'TB': 'tropicana_field', 'MIL': 'american_family_field',
-    'SD': 'petco_park', 'SF': 'oracle_park', 'TOR': 'rogers_centre', 'CLE': 'progressive_field',
-    'MIN': 'target_field', 'KC': 'kauffman_stadium', 'CWS': 'guaranteed_rate_field',
-    'CHW': 'guaranteed_rate_field', 'LAA': 'angel_stadium', 'SEA': 't-mobile_park',
-    'TEX': 'globe_life_field', 'ARI': 'chase_field', 'AZ': 'chase_field', 'COL': 'coors_field', 'PIT': 'pnc_park',
-    'STL': 'busch_stadium', 'BAL': 'camden_yards', 'WSH': 'nationals_park', 'WAS': 'nationals_park'
-}
-mlb_team_city_map = {
-    'ANA': 'Anaheim', 'ARI': 'Phoenix', 'AZ': 'Phoenix', 'ATL': 'Atlanta', 'BAL': 'Baltimore', 'BOS': 'Boston',
-    'CHC': 'Chicago', 'CIN': 'Cincinnati', 'CLE': 'Cleveland', 'COL': 'Denver', 'CWS': 'Chicago',
-    'CHW': 'Chicago', 'DET': 'Detroit', 'HOU': 'Houston', 'KC': 'Kansas City', 'LAA': 'Anaheim',
-    'LAD': 'Los Angeles', 'MIA': 'Miami', 'MIL': 'Milwaukee', 'MIN': 'Minneapolis', 'NYM': 'New York',
-    'NYY': 'New York', 'OAK': 'Oakland', 'ATH': 'Oakland', 'PHI': 'Philadelphia', 'PIT': 'Pittsburgh',
-    'SD': 'San Diego', 'SEA': 'Seattle', 'SF': 'San Francisco', 'STL': 'St. Louis', 'TB': 'St. Petersburg',
-    'TEX': 'Arlington', 'TOR': 'Toronto', 'WSH': 'Washington', 'WAS': 'Washington'
-}
-park_hand_hr_rate_map = {
-    'angels_stadium': {'L': 1.09, 'R': 1.02}, 'angel_stadium': {'L': 1.09, 'R': 1.02},
-    'minute_maid_park': {'L': 1.13, 'R': 1.06}, 'coors_field': {'L': 1.38, 'R': 1.24},
-    'yankee_stadium': {'L': 1.47, 'R': 0.98}, 'fenway_park': {'L': 1.04, 'R': 0.97},
-    'rogers_centre': {'L': 1.08, 'R': 1.12}, 'tropicana_field': {'L': 0.84, 'R': 0.89},
-    'camden_yards': {'L': 0.98, 'R': 1.27}, 'guaranteed_rate_field': {'L': 1.25, 'R': 1.11},
-    'progressive_field': {'L': 0.99, 'R': 1.02}, 'comerica_park': {'L': 1.10, 'R': 0.91},
-    'kauffman_stadium': {'L': 0.90, 'R': 1.03}, 'globe_life_field': {'L': 1.01, 'R': 0.98},
-    'dodger_stadium': {'L': 1.02, 'R': 1.18}, 'oakland_coliseum': {'L': 0.81, 'R': 0.85},
-    't-mobile_park': {'L': 0.81, 'R': 0.92}, 'tmobile_park': {'L': 0.81, 'R': 0.92},
-    'oracle_park': {'L': 0.67, 'R': 0.99}, 'wrigley_field': {'L': 1.10, 'R': 1.16},
-    'great_american_ball_park': {'L': 1.30, 'R': 1.23}, 'american_family_field': {'L': 1.25, 'R': 1.13},
-    'pnc_park': {'L': 0.76, 'R': 0.92}, 'busch_stadium': {'L': 0.78, 'R': 0.91},
-    'truist_park': {'L': 1.00, 'R': 1.09}, 'loan_depot_park': {'L': 0.83, 'R': 0.91},
-    'loandepot_park': {'L': 0.83, 'R': 0.91}, 'citi_field': {'L': 1.11, 'R': 0.98},
-    'nationals_park': {'L': 1.04, 'R': 1.06}, 'petco_park': {'L': 0.90, 'R': 0.88},
-    'chase_field': {'L': 1.16, 'R': 1.05}, 'citizens_bank_park': {'L': 1.22, 'R': 1.20},
-    'sutter_health_park': {'L': 1.12, 'R': 1.12}, 'target_field': {'L': 1.09, 'R': 1.01}
-}
-# ========== DEEP RESEARCH HR MULTIPLIERS: BATTER SIDE ===============
-park_hr_percent_map_all = {
-    'ARI': 0.98, 'AZ': 0.98, 'ATL': 0.95, 'BAL': 1.11, 'BOS': 0.84, 'CHC': 1.03, 'CHW': 1.25, 'CWS': 1.25,
-    'CIN': 1.27, 'CLE': 0.96, 'COL': 1.06, 'DET': 0.96, 'HOU': 1.10, 'KC': 0.83, 'LAA': 1.01, 'LAD': 1.11,
-    'MIA': 0.85, 'MIL': 1.14, 'MIN': 0.94, 'NYM': 1.07, 'NYY': 1.20, 'OAK': 0.90, 'ATH': 0.90,
-    'PHI': 1.18, 'PIT': 0.83, 'SD': 1.02, 'SEA': 1.00, 'SF': 0.75, 'STL': 0.86, 'TB': 0.96, 'TEX': 1.07, 'TOR': 1.09,
-    'WAS': 1.00, 'WSH': 1.00
-}
-park_hr_percent_map_rhb = {
-    'ARI': 1.00, 'AZ': 1.00, 'ATL': 0.93, 'BAL': 1.09, 'BOS': 0.90, 'CHC': 1.09, 'CHW': 1.26, 'CWS': 1.26,
-    'CIN': 1.27, 'CLE': 0.91, 'COL': 1.05, 'DET': 0.96, 'HOU': 1.10, 'KC': 0.83, 'LAA': 1.01, 'LAD': 1.11,
-    'MIA': 0.84, 'MIL': 1.12, 'MIN': 0.95, 'NYM': 1.11, 'NYY': 1.15, 'OAK': 0.91, 'ATH': 0.91,
-    'PHI': 1.18, 'PIT': 0.80, 'SD': 1.02, 'SEA': 1.03, 'SF': 0.76, 'STL': 0.84, 'TB': 0.94, 'TEX': 1.06, 'TOR': 1.11,
-    'WAS': 1.02, 'WSH': 1.02
-}
-park_hr_percent_map_lhb = {
-    'ARI': 0.98, 'AZ': 0.98, 'ATL': 0.99, 'BAL': 1.13, 'BOS': 0.75, 'CHC': 0.93, 'CHW': 1.23, 'CWS': 1.23,
-    'CIN': 1.29, 'CLE': 1.01, 'COL': 1.07, 'DET': 0.96, 'HOU': 1.09, 'KC': 0.81, 'LAA': 1.00, 'LAD': 1.12,
-    'MIA': 0.87, 'MIL': 1.19, 'MIN': 0.91, 'NYM': 1.06, 'NYY': 1.28, 'OAK': 0.87, 'ATH': 0.87,
-    'PHI': 1.19, 'PIT': 0.90, 'SD': 0.98, 'SEA': 0.96, 'SF': 0.73, 'STL': 0.90, 'TB': 0.99, 'TEX': 1.11, 'TOR': 1.05,
-    'WAS': 0.96, 'WSH': 0.96
-}
-# ========== DEEP RESEARCH HR MULTIPLIERS: PITCHER SIDE ===============
-park_hr_percent_map_pitcher_all = {
-    'ARI': 0.98, 'AZ': 0.98, 'ATL': 0.95, 'BAL': 1.11, 'BOS': 0.84, 'CHC': 1.03, 'CHW': 1.25, 'CWS': 1.25,
-    'CIN': 1.27, 'CLE': 0.96, 'COL': 1.06, 'DET': 0.96, 'HOU': 1.10, 'KC': 0.83, 'LAA': 1.01, 'LAD': 1.11,
-    'MIA': 0.85, 'MIL': 1.14, 'MIN': 0.94, 'NYM': 1.07, 'NYY': 1.20, 'OAK': 0.90, 'ATH': 0.90,
-    'PHI': 1.18, 'PIT': 0.83, 'SD': 1.02, 'SEA': 1.00, 'SF': 0.75, 'STL': 0.86, 'TB': 0.96, 'TEX': 1.07, 'TOR': 1.09,
-    'WAS': 1.00, 'WSH': 1.00
-}
-park_hr_percent_map_rhp = {
-    'ARI': 0.97, 'AZ': 0.97, 'ATL': 1.01, 'BAL': 1.16, 'BOS': 0.84, 'CHC': 1.02, 'CHW': 1.28, 'CWS': 1.28,
-    'CIN': 1.27, 'CLE': 0.98, 'COL': 1.06, 'DET': 0.95, 'HOU': 1.11, 'KC': 0.84, 'LAA': 1.01, 'LAD': 1.11,
-    'MIA': 0.84, 'MIL': 1.14, 'MIN': 0.96, 'NYM': 1.07, 'NYY': 1.24, 'OAK': 0.90, 'ATH': 0.90,
-    'PHI': 1.19, 'PIT': 0.85, 'SD': 1.02, 'SEA': 1.01, 'SF': 0.73, 'STL': 0.84, 'TB': 0.97, 'TEX': 1.10, 'TOR': 1.11,
-    'WAS': 1.03, 'WSH': 1.03
-}
-park_hr_percent_map_lhp = {
-    'ARI': 0.99, 'AZ': 0.99, 'ATL': 0.79, 'BAL': 0.97, 'BOS': 0.83, 'CHC': 1.03, 'CHW': 1.18, 'CWS': 1.18,
-    'CIN': 1.27, 'CLE': 0.89, 'COL': 1.05, 'DET': 0.97, 'HOU': 1.07, 'KC': 0.79, 'LAA': 1.01, 'LAD': 1.11,
-    'MIA': 0.90, 'MIL': 1.14, 'MIN': 0.89, 'NYM': 1.05, 'NYY': 1.12, 'OAK': 0.89, 'ATH': 0.89,
-    'PHI': 1.16, 'PIT': 0.78, 'SD': 1.02, 'SEA': 0.97, 'SF': 0.82, 'STL': 0.96, 'TB': 0.94, 'TEX': 1.01, 'TOR': 1.06,
-    'WAS': 0.90, 'WSH': 0.90
-}
+st.title("🟣 Parquet File Reader & Inspector")
 
-# ========================= UTILITY FUNCTIONS =========================
+# --- Parquet File Upload ---
+parquet_file = st.file_uploader("Upload a Parquet file", type=["parquet"])
 
-def dedup_columns(df):
-    """Remove duplicate columns after merging."""
-    return df.loc[:, ~df.columns.duplicated()]
+if parquet_file is not None:
+    st.info("⚡ [DEBUG] About to read uploaded Parquet...")
+    try:
+        df = pd.read_parquet(parquet_file)
+        st.success(f"[DEBUG] Successfully loaded Parquet! Shape: {df.shape}")
+        
+        # Show diagnostic info
+        st.write("**[Diagnostics] DataFrame Info:**")
+        buffer = io.StringIO()
+        df.info(buf=buffer)
+        st.text(buffer.getvalue())
 
-def downcast_numeric(df):
-    """Downcast numeric columns to save memory."""
-    for col in df.select_dtypes(include=['float']):
-        df[col] = pd.to_numeric(df[col], downcast='float')
-    for col in df.select_dtypes(include=['int']):
-        df[col] = pd.to_numeric(df[col], downcast='integer')
-    return df
+        st.write("**[Diagnostics] First 20 rows:**")
+        st.dataframe(df.head(20), use_container_width=True)
+        
+        # Download sample as CSV
+        sample_csv = df.head(100).to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Download Top 100 as CSV", sample_csv, file_name="sample_top100.csv")
+        
+        # Show all columns, chunked by 50
+        st.write("**[Diagnostics] Column List:**")
+        col_chunks = [df.columns[i:i+50] for i in range(0, len(df.columns), 50)]
+        for i, chunk in enumerate(col_chunks):
+            st.text(f"[Columns {i*50}-{i*50 + len(chunk) - 1}]: " + ", ".join(chunk))
+            
+    except Exception as e:
+        st.error(f"[ERROR] Could not load Parquet file: {e}")
 
-def parse_custom_weather_string_v2(s):
-    if pd.isna(s):
-        return pd.Series([np.nan]*7, index=['temp','wind_vector','wind_field_dir','wind_mph','humidity','condition','wind_dir_string'])
-    s = str(s)
-    temp_match = re.search(r'(\d{2,3})\s*[OI°]?\s', s)
-    temp = int(temp_match.group(1)) if temp_match else np.nan
-    wind_vector_match = re.search(r'\d{2,3}\s*([OI])\s', s)
-    wind_vector = wind_vector_match.group(1) if wind_vector_match else np.nan
-    wind_field_dir_match = re.search(r'\s([A-Z]{2})\s*\d', s)
-    wind_field_dir = wind_field_dir_match.group(1) if wind_field_dir_match else np.nan
-    mph = re.search(r'(\d{1,3})\s*-\s*(\d{1,3})', s)
-    if mph:
-        wind_mph = (int(mph.group(1)) + int(mph.group(2))) / 2
-    else:
-        mph = re.search(r'([1-9][0-9]?)\s*(?:mph)?', s)
-        wind_mph = int(mph.group(1)) if mph else np.nan
-    humidity_match = re.search(r'(\d{1,3})%', s)
-    humidity = int(humidity_match.group(1)) if humidity_match else np.nan
-    condition = "outdoor" if "outdoor" in s.lower() else ("indoor" if "indoor" in s.lower() else np.nan)
-    wind_dir_string = f"{wind_vector} {wind_field_dir}".strip()
-    return pd.Series([temp, wind_vector, wind_field_dir, wind_mph, humidity, condition, wind_dir_string],
-                     index=['temp','wind_vector','wind_field_dir','wind_mph','humidity','condition','wind_dir_string'])
-
-def add_rolling_hr_features(df, id_col, date_col, outcome_col='hr_outcome', windows=[3, 5, 7, 14, 20, 30, 60], prefix=""):
-    """Add rolling HR count and HR rate columns for each id_col (batter or pitcher) over several window sizes."""
-    df = df.copy()
-    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-    df = df.sort_values([id_col, date_col])
-    results = []
-    for name, group in df.groupby(id_col):
-        group = group.sort_values(date_col)
-        for w in windows:
-            col_count = f"{prefix}hr_count_{w}"
-            col_rate = f"{prefix}hr_rate_{w}"
-            group[col_count] = group[outcome_col].rolling(w, min_periods=1).sum()
-            group[col_rate] = group[outcome_col].rolling(w, min_periods=1).mean()
-        results.append(group)
-    df = pd.concat(results)
-    return df
-
-# ========================= STREAMLIT APP =========================
-
-tab1, tab2 = st.tabs(["1️⃣ Combine Parquet Files", "2️⃣ Generate TODAY CSV"])
-
-# ---------------------- TAB 1: Combine Parquet Files ----------------------
-with tab1:
-    st.header("Combine Two Event-Level Parquet Files")
-    p1 = st.file_uploader("Upload First Event-Level Parquet", type="parquet", key="p1")
-    p2 = st.file_uploader("Upload Second Event-Level Parquet", type="parquet", key="p2")
-    if p1 and p2:
-        df1 = pd.read_parquet(p1)
-        df2 = pd.read_parquet(p2)
-        st.write("[Diagnostics] First file shape:", df1.shape)
-        st.write("[Diagnostics] Second file shape:", df2.shape)
-        combined = pd.concat([df1, df2], ignore_index=True)
-        st.write("[Diagnostics] Combined shape:", combined.shape)
-        st.dataframe(combined.head(20), use_container_width=True)
-        # Download combined
-        out_parquet = io.BytesIO()
-        combined.to_parquet(out_parquet, index=False)
-        st.download_button("⬇️ Download Combined Parquet", data=out_parquet.getvalue(),
-                           file_name="event_level_combined.parquet", mime="application/octet-stream")
-    else:
-        st.info("Upload two event-level Parquet files to combine.")
-
-# ---------------------- TAB 2: Generate TODAY CSV ----------------------
-with tab2:
-    st.header("Generate TODAY CSV From Parquet + Lineups")
-    p_event = st.file_uploader("Upload Event-Level Parquet", type=["parquet"], key="event_parquet")
-    lineup_csv = st.file_uploader("Upload Today's Matchups CSV", type=["csv"], key="lineup_csv")
-    run_btn = st.button("Generate TODAY CSV", key="run_btn")
-    if run_btn and p_event and lineup_csv:
-        try:
-            st.write("⚡ [DEBUG] About to load event-level Parquet...")
-            df = pd.read_parquet(p_event)
-            st.write("[Diagnostics] Loaded event-level shape:", df.shape)
-            st.write("[Diagnostics] Event columns:", list(df.columns))
-
-            st.write("⚡ [DEBUG] About to add rolling HR features (if present)...")
-            roll_windows = [3, 5, 7, 14, 20, 30, 60]
-            if 'hr_outcome' in df.columns:
-                df = add_rolling_hr_features(df, id_col='batter_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='b_')
-                df = add_rolling_hr_features(df, id_col='pitcher_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='p_')
-
-            st.write("⚡ [DEBUG] About to load lineup CSV...")
-            lineup_df = pd.read_csv(lineup_csv)
-            st.write("[Diagnostics] Loaded lineup shape:", lineup_df.shape)
-            st.write("[Diagnostics] Lineup columns (pre-rename):", list(lineup_df.columns))
-
-            lineup_df.columns = [str(c).strip().lower().replace(" ", "_") for c in lineup_df.columns]
-            st.write("[Diagnostics] Lineup columns (post-rename):", list(lineup_df.columns))
-
-            # All your existing standardization block...
-            st.write("⚡ [DEBUG] Pre-merge checks: unique batter_ids:", lineup_df['batter_id'].unique()[:10])
-            st.write("⚡ [DEBUG] Sample lineup row:", lineup_df.iloc[0].to_dict())
-
-            # (your park and pitcher assignment logic here...)
-
-            st.write("⚡ [DEBUG] About to build today_rows...")
-            today_rows = []
-            for idx, row in lineup_df.iterrows():
-                if idx % 25 == 0:  # Print progress every 25 rows
-                    st.write(f"⚡ [DEBUG] Processing lineup row {idx}/{len(lineup_df)}: batter_id={row.get('batter_id')}, team_code={row.get('team_code')}, player_name={row.get('player_name')}")
-                # (build your row_out as before...)
-                # ... (the rest of your for-loop unchanged)
-
-            st.write("⚡ [DEBUG] Finished today_rows. Total rows:", len(today_rows))
-            today_df = pd.DataFrame(today_rows)
-            st.write("[Diagnostics] Today DataFrame shape:", today_df.shape)
-            st.write("[Diagnostics] Today DataFrame columns:", today_df.columns.tolist())
-            st.write("[Diagnostics] Today DataFrame head:", today_df.head(3))
-
-            # Deduplicate columns and downcast
-            st.write("⚡ [DEBUG] Deduplicating columns...")
-            today_df = dedup_columns(today_df)
-            st.write("⚡ [DEBUG] Downcasting numeric columns...")
-            today_df = downcast_numeric(today_df)
-            st.write("⚡ [DEBUG] Ensuring column order to match event-level...")
-            event_col_set = set(df.columns)
-            today_ordered_cols = [col for col in df.columns if col in today_df.columns] + [col for col in today_df.columns if col not in df.columns]
-            today_df = today_df[today_ordered_cols]
-            st.write("[Diagnostics] Final TODAY CSV columns:", today_df.columns.tolist())
-            st.write("[Diagnostics] Final TODAY CSV sample row:", today_df.iloc[0].to_dict())
-
-            # (existing output/download code unchanged...)
-
-        except Exception as e:
-            import traceback
-            st.error(f"🚨 CRASH! Error message: {e}")
-            st.code(traceback.format_exc())
-    else:
-        st.info("Upload both event-level Parquet and lineup CSV, then click 'Generate TODAY CSV'.")
+else:
+    st.info("Upload a Parquet file to inspect its structure.")
