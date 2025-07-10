@@ -275,6 +275,7 @@ with tab2:
         ]
         today_cols = [
             'game_date', 'batter_id', 'player_name', 'pitcher_id',
+            'team_code', 'time',      # <--- HERE: Add these two columns!
             'temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition', 'stand'
         ] + extra_context_cols
         # add all rolling & advanced features
