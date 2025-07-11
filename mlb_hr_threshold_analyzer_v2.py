@@ -51,7 +51,7 @@ mlb_team_city_map = {
     'CHC': 'Chicago', 'CIN': 'Cincinnati', 'CLE': 'Cleveland', 'COL': 'Denver', 'CWS': 'Chicago',
     'CHW': 'Chicago', 'DET': 'Detroit', 'HOU': 'Houston', 'KC': 'Kansas City', 'LAA': 'Anaheim',
     'LAD': 'Los Angeles', 'MIA': 'Miami', 'MIL': 'Milwaukee', 'MIN': 'Minneapolis', 'NYM': 'New York',
-    'NYY': 'New York', 'OAK': 'Oakland', 'ATH': 'Oakland', 'PHI': 'Philadelphia', 'PIT': 'Pittsburgh',
+    'NYY': 'New York', 'OAK': 'West Sacramento', 'ATH': 'West Sacramento', 'PHI': 'Philadelphia', 'PIT': 'Pittsburgh',
     'SD': 'San Diego', 'SEA': 'Seattle', 'SF': 'San Francisco', 'STL': 'St. Louis', 'TB': 'St. Petersburg',
     'TEX': 'Arlington', 'TOR': 'Toronto', 'WSH': 'Washington', 'WAS': 'Washington'
 }
@@ -119,14 +119,11 @@ park_hr_percent_map_lhp = {
     'WAS': 0.90, 'WSH': 0.90
 }
 
-# ========================= UTILITY FUNCTIONS =========================
-
+# ========== UTILITY FUNCTIONS ==========
 def dedup_columns(df):
-    """Remove duplicate columns after merging."""
     return df.loc[:, ~df.columns.duplicated()]
 
 def downcast_numeric(df):
-    """Downcast numeric columns to save memory."""
     for col in df.select_dtypes(include=['float']):
         df[col] = pd.to_numeric(df[col], downcast='float')
     for col in df.select_dtypes(include=['int']):
@@ -157,7 +154,6 @@ def parse_custom_weather_string_v2(s):
                      index=['temp','wind_vector','wind_field_dir','wind_mph','humidity','condition','wind_dir_string'])
 
 def add_rolling_hr_features(df, id_col, date_col, outcome_col='hr_outcome', windows=[3, 5, 7, 14, 20, 30, 60], prefix=""):
-    """Add rolling HR count and HR rate columns for each id_col (batter or pitcher) over several window sizes."""
     df = df.copy()
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
     df = df.sort_values([id_col, date_col])
@@ -173,11 +169,10 @@ def add_rolling_hr_features(df, id_col, date_col, outcome_col='hr_outcome', wind
     df = pd.concat(results)
     return df
 
-# ========================= STREAMLIT APP =========================
-
+# ========== STREAMLIT APP ==========
 tab1, tab2 = st.tabs(["1️⃣ Combine Parquet Files", "2️⃣ Generate TODAY CSV"])
 
-# ---------------------- TAB 1: Combine Parquet Files ----------------------
+# ---------------- TAB 1: Combine Parquet Files ----------------
 with tab1:
     st.header("Combine Two Event-Level Parquet Files")
     p1 = st.file_uploader("Upload First Event-Level Parquet", type="parquet", key="p1")
@@ -198,7 +193,7 @@ with tab1:
     else:
         st.info("Upload two event-level Parquet files to combine.")
 
-# ---------------------- TAB 2: Generate TODAY CSV ----------------------
+# ---------------- TAB 2: Generate TODAY CSV ----------------
 with tab2:
     st.header("Generate TODAY CSV From Parquet + Lineups")
     p_event = st.file_uploader("Upload Event-Level Parquet", type=["parquet"], key="event_parquet")
@@ -209,14 +204,25 @@ with tab2:
         st.write("[Diagnostics] Loaded event-level shape:", df.shape)
         st.write("[Diagnostics] Columns:", list(df.columns))
 
-        # --- ADD RECENT HR ROLLING FEATURES (DEEP RESEARCH UPGRADE) ---
+        # --- ADD RECENT HR ROLLING FEATURES ---
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
             df = add_rolling_hr_features(df, id_col='batter_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='b_')
             df = add_rolling_hr_features(df, id_col='pitcher_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='p_')
 
         lineup_df = pd.read_csv(lineup_csv)
+        # Normalize column headers, this will turn "team code" -> "team_code" and "time" -> "time"
         lineup_df.columns = [str(c).strip().lower().replace(" ", "_") for c in lineup_df.columns]
+
+        # Sanity check for both required columns
+        if 'team_code' not in lineup_df.columns:
+            st.error("Missing 'team code' column in your matchup CSV.")
+            st.stop()
+        if 'time' not in lineup_df.columns:
+            st.error("Missing 'time' column in your matchup CSV.")
+            st.stop()
+
+        # Standard ID and info fixing as in your code
         if "park" in lineup_df.columns:
             lineup_df["park"] = lineup_df["park"].astype(str).str.lower().str.replace(" ", "_")
         for col in ['mlb_id', 'batter_id']:
@@ -264,9 +270,7 @@ with tab2:
                 lineup_df.loc[idx, 'pitcher_id'] = opp_sp
 
         # ========== BUILD TODAY CSV ==============
-        # Columns: ALL event-level stats/features available for this day
         all_event_cols = list(df.columns)
-        # Also include weather/context/park columns from lineup
         extra_context_cols = [
             'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status', 'city',
             'batter_hand', 'pitcher_hand',
@@ -275,8 +279,10 @@ with tab2:
         ]
         today_cols = [
             'game_date', 'batter_id', 'player_name', 'pitcher_id',
-            'temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition', 'stand'
+            'temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition', 'stand',
+            'team_code', 'time'  # <--- now guaranteed present!
         ] + extra_context_cols
+
         # add all rolling & advanced features
         rolling_feature_cols = [col for col in all_event_cols if (
             (col.startswith('b_') or col.startswith('p_')) or ('rolling_' in col) or ('barrel_rate' in col) or ('hard_hit_rate' in col)
@@ -388,7 +394,9 @@ with tab2:
                 "pitcher_park_hr_pct_rhp": pitcher_park_hr_pct_rhp,
                 "pitcher_park_hr_pct_lhp": pitcher_park_hr_pct_lhp,
                 "pitcher_park_hr_pct_hand": pitcher_park_hr_pct_hand,
-                })
+                "team_code": team_code,       # <-- team_code from your lineup
+                "time": row.get("time", np.nan)  # <-- time from your lineup
+            })
             # Weather fields
             for c in ['temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition']:
                 row_out[c] = row.get(c, np.nan)
@@ -396,13 +404,18 @@ with tab2:
 
         today_df = pd.DataFrame(today_rows)
 
-        # Deduplicate columns just in case (robust)
+        # Deduplicate columns (robust)
         today_df = dedup_columns(today_df)
         today_df = downcast_numeric(today_df)
 
         # Ensure columns are sorted as in event-level if possible, for perfect sync
         event_col_set = set(df.columns)
         today_ordered_cols = [col for col in df.columns if col in today_df.columns] + [col for col in today_df.columns if col not in df.columns]
+        # Guarantee team_code and time are present and in order
+        if "team_code" not in today_ordered_cols:
+            today_ordered_cols.append("team_code")
+        if "time" not in today_ordered_cols:
+            today_ordered_cols.append("time")
         today_df = today_df[today_ordered_cols]
 
         # Show and offer downloads
