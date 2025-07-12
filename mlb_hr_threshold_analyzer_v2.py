@@ -388,7 +388,7 @@ with tab2:
                 row_out = {c: last_row.get(c, np.nan) for c in rolling_feature_cols + [
                     'batter_hand', 'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status',
                     'city', 'pitcher_hand',
-                    'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', ''park_hr_pct_hand',
+                    'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
                     'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp',
                     'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
                 ] if c in all_event_cols or c in extra_context_cols}
