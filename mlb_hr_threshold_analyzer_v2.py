@@ -118,7 +118,6 @@ park_hr_percent_map_lhp = {
     'PHI': 1.16, 'PIT': 0.78, 'SD': 1.02, 'SEA': 0.97, 'SF': 0.82, 'STL': 0.96, 'TB': 0.94, 'TEX': 1.01, 'TOR': 1.06,
     'WAS': 0.90, 'WSH': 0.90
 }
-# ========== UTILITY FUNCTIONS ==========
 def dedup_columns(df):
     return df.loc[:, ~df.columns.duplicated()]
 
@@ -168,41 +167,35 @@ def add_rolling_hr_features(df, id_col, date_col, outcome_col='hr_outcome', wind
     df = pd.concat(results)
     return df
 
-# =================== OVERLAY MULTIPLIER/CONTEXT EDGE =======================
 def get_wind_edge(row, batter_profile, pitcher_profile):
-    # Robust: treat nans as neutral, only apply boost/fade if clear directionality
     wind_dir = str(row.get('wind_dir_string', '')).lower()
     batter_id = str(row.get('batter_id', ''))
     pitcher_id = str(row.get('pitcher_id', ''))
 
-    # Pull/oppo/FB rates (from profile CSVs)
     b_pull = batter_profile.get(batter_id, {}).get('pull_rate', np.nan)
     b_oppo = batter_profile.get(batter_id, {}).get('oppo_rate', np.nan)
     b_fb = batter_profile.get(batter_id, {}).get('fb_rate', np.nan)
     p_gb = pitcher_profile.get(pitcher_id, {}).get('gb_rate', np.nan)
     p_fb = pitcher_profile.get(pitcher_id, {}).get('fb_rate', np.nan)
 
-    # Always use batter hand if available, fallback to 'stand'
     hand = str(row.get('stand', row.get('batter_hand', ''))).upper()
 
-    # Decide wind edge:
     edge = 1.0
     if not isinstance(wind_dir, str) or wind_dir.strip() == "" or wind_dir == "nan":
-        return edge  # neutral
+        return edge
 
-    # Example logic (customize if you like):
-    if "out" in wind_dir or "o" in wind_dir:    # wind blowing out
+    if "out" in wind_dir or "o" in wind_dir:
         if "rf" in wind_dir and b_oppo is not np.nan and hand == "R" and b_oppo > 0.28:
-            edge *= 1.07  # oppo RHH + wind out RF
+            edge *= 1.07
         if "lf" in wind_dir and b_pull is not np.nan and hand == "R" and b_pull > 0.37:
-            edge *= 1.10  # pull RHH + wind out LF
+            edge *= 1.10
         if "cf" in wind_dir and b_fb is not np.nan and b_fb > 0.23:
-            edge *= 1.05  # high FB, wind out CF
+            edge *= 1.05
         if "rf" in wind_dir and b_pull is not np.nan and hand == "L" and b_pull > 0.37:
-            edge *= 1.10  # pull LHH + wind out RF
+            edge *= 1.10
         if "lf" in wind_dir and b_oppo is not np.nan and hand == "L" and b_oppo > 0.28:
-            edge *= 1.07  # oppo LHH + wind out LF
-    elif "in" in wind_dir or "i" in wind_dir:    # wind blowing in
+            edge *= 1.07
+    elif "in" in wind_dir or "i" in wind_dir:
         if "rf" in wind_dir and b_oppo is not np.nan and hand == "R" and b_oppo > 0.28:
             edge *= 0.93
         if "lf" in wind_dir and b_pull is not np.nan and hand == "R" and b_pull > 0.37:
@@ -214,18 +207,16 @@ def get_wind_edge(row, batter_profile, pitcher_profile):
         if "lf" in wind_dir and b_oppo is not np.nan and hand == "L" and b_oppo > 0.28:
             edge *= 0.93
 
-    # Flyball pitcher gets a boost in wind out, fade in wind in
     if p_fb is not np.nan and p_fb > 0.24:
         if "out" in wind_dir or "o" in wind_dir:
             edge *= 1.05
         elif "in" in wind_dir or "i" in wind_dir:
             edge *= 0.97
     if p_gb is not np.nan and p_gb > 0.49:
-        edge *= 0.97  # fade for heavy GB pitcher
+        edge *= 0.97
 
     return edge
 
-# ====================== STREAMLIT APP ===========================
 tab1, tab2 = st.tabs(["1️⃣ Combine Parquet Files", "2️⃣ Generate TODAY CSV + Batted Ball Profile Overlay"])
 
 # ---------------- TAB 1: Combine Parquet Files ----------------
@@ -241,11 +232,14 @@ with tab1:
         combined = pd.concat([df1, df2], ignore_index=True)
         st.write("[Diagnostics] Combined shape:", combined.shape)
         st.dataframe(combined.head(20), use_container_width=True)
-        # Download combined
         out_parquet = io.BytesIO()
         combined.to_parquet(out_parquet, index=False)
-        st.download_button("⬇️ Download Combined Parquet", data=out_parquet.getvalue(),
-                           file_name="event_level_combined.parquet", mime="application/octet-stream")
+        st.download_button(
+            "⬇️ Download Combined Parquet",
+            data=out_parquet.getvalue(),
+            file_name="event_level_combined.parquet",
+            mime="application/octet-stream"
+        )
     else:
         st.info("Upload two event-level Parquet files to combine.")
 
@@ -262,7 +256,6 @@ with tab2:
         st.write("[Diagnostics] Loaded event-level shape:", df.shape)
         st.write("[Diagnostics] Columns:", list(df.columns))
 
-        # --- ADD RECENT HR ROLLING FEATURES ---
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
             df = add_rolling_hr_features(df, id_col='batter_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='b_')
@@ -305,7 +298,6 @@ with tab2:
             wx_parsed = lineup_df['weather'].apply(parse_custom_weather_string_v2)
             lineup_df = pd.concat([lineup_df, wx_parsed], axis=1)
 
-        # ==== Assign Opposing SP for Each Batter ====
         lineup_df['pitcher_id'] = np.nan
         grouped = lineup_df.groupby(['game_date', 'park'])
         for group_key, group in grouped:
@@ -324,7 +316,6 @@ with tab2:
                 idx = group[group['team_code'] == team].index
                 lineup_df.loc[idx, 'pitcher_id'] = opp_sp
 
-        # ===================== BATTER/PITCHER BATTED BALL PROFILES ====================
         batter_profile = {}
         if bb_batter_csv:
             bb_bat = pd.read_csv(bb_batter_csv)
@@ -338,7 +329,6 @@ with tab2:
                 pid = str(row['pitcher_id']) if 'pitcher_id' in row else str(row.get('player_id', ''))
                 pitcher_profile[pid] = row.to_dict()
 
-        # ========== BUILD TODAY CSV ==============
         all_event_cols = list(df.columns)
         extra_context_cols = [
             'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status', 'city',
