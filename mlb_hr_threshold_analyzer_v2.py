@@ -118,7 +118,6 @@ park_hr_percent_map_lhp = {
     'PHI': 1.16, 'PIT': 0.78, 'SD': 1.02, 'SEA': 0.97, 'SF': 0.82, 'STL': 0.96, 'TB': 0.94, 'TEX': 1.01, 'TOR': 1.06,
     'WAS': 0.90, 'WSH': 0.90
 }
-
 # ========== UTILITY FUNCTIONS ==========
 def dedup_columns(df):
     return df.loc[:, ~df.columns.duplicated()]
@@ -169,8 +168,65 @@ def add_rolling_hr_features(df, id_col, date_col, outcome_col='hr_outcome', wind
     df = pd.concat(results)
     return df
 
-# ========== STREAMLIT APP ==========
-tab1, tab2 = st.tabs(["1️⃣ Combine Parquet Files", "2️⃣ Generate TODAY CSV"])
+# =================== OVERLAY MULTIPLIER/CONTEXT EDGE =======================
+def get_wind_edge(row, batter_profile, pitcher_profile):
+    # Robust: treat nans as neutral, only apply boost/fade if clear directionality
+    wind_dir = str(row.get('wind_dir_string', '')).lower()
+    batter_id = str(row.get('batter_id', ''))
+    pitcher_id = str(row.get('pitcher_id', ''))
+
+    # Pull/oppo/FB rates (from profile CSVs)
+    b_pull = batter_profile.get(batter_id, {}).get('pull_rate', np.nan)
+    b_oppo = batter_profile.get(batter_id, {}).get('oppo_rate', np.nan)
+    b_fb = batter_profile.get(batter_id, {}).get('fb_rate', np.nan)
+    p_gb = pitcher_profile.get(pitcher_id, {}).get('gb_rate', np.nan)
+    p_fb = pitcher_profile.get(pitcher_id, {}).get('fb_rate', np.nan)
+
+    # Always use batter hand if available, fallback to 'stand'
+    hand = str(row.get('stand', row.get('batter_hand', ''))).upper()
+
+    # Decide wind edge:
+    edge = 1.0
+    if not isinstance(wind_dir, str) or wind_dir.strip() == "" or wind_dir == "nan":
+        return edge  # neutral
+
+    # Example logic (customize if you like):
+    if "out" in wind_dir or "o" in wind_dir:    # wind blowing out
+        if "rf" in wind_dir and b_oppo is not np.nan and hand == "R" and b_oppo > 0.28:
+            edge *= 1.07  # oppo RHH + wind out RF
+        if "lf" in wind_dir and b_pull is not np.nan and hand == "R" and b_pull > 0.37:
+            edge *= 1.10  # pull RHH + wind out LF
+        if "cf" in wind_dir and b_fb is not np.nan and b_fb > 0.23:
+            edge *= 1.05  # high FB, wind out CF
+        if "rf" in wind_dir and b_pull is not np.nan and hand == "L" and b_pull > 0.37:
+            edge *= 1.10  # pull LHH + wind out RF
+        if "lf" in wind_dir and b_oppo is not np.nan and hand == "L" and b_oppo > 0.28:
+            edge *= 1.07  # oppo LHH + wind out LF
+    elif "in" in wind_dir or "i" in wind_dir:    # wind blowing in
+        if "rf" in wind_dir and b_oppo is not np.nan and hand == "R" and b_oppo > 0.28:
+            edge *= 0.93
+        if "lf" in wind_dir and b_pull is not np.nan and hand == "R" and b_pull > 0.37:
+            edge *= 0.90
+        if "cf" in wind_dir and b_fb is not np.nan and b_fb > 0.23:
+            edge *= 0.94
+        if "rf" in wind_dir and b_pull is not np.nan and hand == "L" and b_pull > 0.37:
+            edge *= 0.90
+        if "lf" in wind_dir and b_oppo is not np.nan and hand == "L" and b_oppo > 0.28:
+            edge *= 0.93
+
+    # Flyball pitcher gets a boost in wind out, fade in wind in
+    if p_fb is not np.nan and p_fb > 0.24:
+        if "out" in wind_dir or "o" in wind_dir:
+            edge *= 1.05
+        elif "in" in wind_dir or "i" in wind_dir:
+            edge *= 0.97
+    if p_gb is not np.nan and p_gb > 0.49:
+        edge *= 0.97  # fade for heavy GB pitcher
+
+    return edge
+
+# ====================== STREAMLIT APP ===========================
+tab1, tab2 = st.tabs(["1️⃣ Combine Parquet Files", "2️⃣ Generate TODAY CSV + Batted Ball Profile Overlay"])
 
 # ---------------- TAB 1: Combine Parquet Files ----------------
 with tab1:
@@ -193,11 +249,13 @@ with tab1:
     else:
         st.info("Upload two event-level Parquet files to combine.")
 
-# ---------------- TAB 2: Generate TODAY CSV ----------------
+# ---------------- TAB 2: Generate TODAY CSV + Overlay ----------------
 with tab2:
-    st.header("Generate TODAY CSV From Parquet + Lineups")
+    st.header("Generate TODAY CSV with Weather, Context, & Batted Ball Overlay")
     p_event = st.file_uploader("Upload Event-Level Parquet", type=["parquet"], key="event_parquet")
     lineup_csv = st.file_uploader("Upload Today's Matchups CSV", type=["csv"], key="lineup_csv")
+    bb_batter_csv = st.file_uploader("Upload Batter Batted Ball Profiles CSV (optional)", type=["csv"], key="bb_batter_csv")
+    bb_pitcher_csv = st.file_uploader("Upload Pitcher Batted Ball Profiles CSV (optional)", type=["csv"], key="bb_pitcher_csv")
     run_btn = st.button("Generate TODAY CSV", key="run_btn")
     if run_btn and p_event and lineup_csv:
         df = pd.read_parquet(p_event)
@@ -211,10 +269,8 @@ with tab2:
             df = add_rolling_hr_features(df, id_col='pitcher_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='p_')
 
         lineup_df = pd.read_csv(lineup_csv)
-        # Normalize column headers, this will turn "team code" -> "team_code" and "time" -> "time"
         lineup_df.columns = [str(c).strip().lower().replace(" ", "_") for c in lineup_df.columns]
 
-        # Sanity check for both required columns
         if 'team_code' not in lineup_df.columns:
             st.error("Missing 'team code' column in your matchup CSV.")
             st.stop()
@@ -222,7 +278,6 @@ with tab2:
             st.error("Missing 'time' column in your matchup CSV.")
             st.stop()
 
-        # Standard ID and info fixing as in your code
         if "park" in lineup_df.columns:
             lineup_df["park"] = lineup_df["park"].astype(str).str.lower().str.replace(" ", "_")
         for col in ['mlb_id', 'batter_id']:
@@ -269,6 +324,20 @@ with tab2:
                 idx = group[group['team_code'] == team].index
                 lineup_df.loc[idx, 'pitcher_id'] = opp_sp
 
+        # ===================== BATTER/PITCHER BATTED BALL PROFILES ====================
+        batter_profile = {}
+        if bb_batter_csv:
+            bb_bat = pd.read_csv(bb_batter_csv)
+            for _, row in bb_bat.iterrows():
+                pid = str(row['batter_id']) if 'batter_id' in row else str(row.get('player_id', ''))
+                batter_profile[pid] = row.to_dict()
+        pitcher_profile = {}
+        if bb_pitcher_csv:
+            bb_pitch = pd.read_csv(bb_pitcher_csv)
+            for _, row in bb_pitch.iterrows():
+                pid = str(row['pitcher_id']) if 'pitcher_id' in row else str(row.get('player_id', ''))
+                pitcher_profile[pid] = row.to_dict()
+
         # ========== BUILD TODAY CSV ==============
         all_event_cols = list(df.columns)
         extra_context_cols = [
@@ -280,10 +349,9 @@ with tab2:
         today_cols = [
             'game_date', 'batter_id', 'player_name', 'pitcher_id',
             'temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition', 'stand',
-            'team_code', 'time'  # <--- now guaranteed present!
+            'team_code', 'time'
         ] + extra_context_cols
 
-        # add all rolling & advanced features
         rolling_feature_cols = [col for col in all_event_cols if (
             (col.startswith('b_') or col.startswith('p_')) or ('rolling_' in col) or ('barrel_rate' in col) or ('hard_hit_rate' in col)
         )]
@@ -320,15 +388,17 @@ with tab2:
                 row_out = {c: last_row.get(c, np.nan) for c in rolling_feature_cols + [
                     'batter_hand', 'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status',
                     'city', 'pitcher_hand',
-                    'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
-                    'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
+                    'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', ''park_hr_pct_hand',
+                    'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp',
+                    'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
                 ] if c in all_event_cols or c in extra_context_cols}
             else:
                 row_out = {c: np.nan for c in rolling_feature_cols + [
                     'batter_hand', 'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status',
                     'city', 'pitcher_hand',
                     'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
-                    'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
+                    'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp',
+                    'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
                 ] if c in all_event_cols or c in extra_context_cols}
 
             batter_hand = row.get('stand', row_out.get('batter_hand', np.nan))
@@ -371,6 +441,14 @@ with tab2:
             else:
                 pitcher_park_hr_pct_all = pitcher_park_hr_pct_rhp = pitcher_park_hr_pct_lhp = pitcher_park_hr_pct_hand = 1.0
 
+            # --------- Overlay Multiplier Calculation (Wind/Batted Ball Profile Edge) ----------
+            try:
+                overlay_multiplier = get_wind_edge(
+                    row, batter_profile, pitcher_profile
+                )
+            except Exception:
+                overlay_multiplier = 1.0
+
             row_out.update({
                 "game_date": game_date,
                 "batter_id": this_batter_id,
@@ -394,28 +472,30 @@ with tab2:
                 "pitcher_park_hr_pct_rhp": pitcher_park_hr_pct_rhp,
                 "pitcher_park_hr_pct_lhp": pitcher_park_hr_pct_lhp,
                 "pitcher_park_hr_pct_hand": pitcher_park_hr_pct_hand,
-                "team_code": team_code,       # <-- team_code from your lineup
-                "time": row.get("time", np.nan)  # <-- time from your lineup
+                "team_code": team_code,
+                "time": row.get("time", np.nan),
+                "temp": row.get("temp", np.nan),
+                "humidity": row.get("humidity", np.nan),
+                "wind_mph": row.get("wind_mph", np.nan),
+                "wind_dir_string": row.get("wind_dir_string", np.nan),
+                "condition": row.get("condition", np.nan),
+                "overlay_multiplier": overlay_multiplier
             })
-            # Weather fields
-            for c in ['temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition']:
-                row_out[c] = row.get(c, np.nan)
             today_rows.append(row_out)
 
         today_df = pd.DataFrame(today_rows)
-
-        # Deduplicate columns (robust)
         today_df = dedup_columns(today_df)
         today_df = downcast_numeric(today_df)
 
-        # Ensure columns are sorted as in event-level if possible, for perfect sync
+        # Ensure columns are sorted as in event-level if possible
         event_col_set = set(df.columns)
         today_ordered_cols = [col for col in df.columns if col in today_df.columns] + [col for col in today_df.columns if col not in df.columns]
-        # Guarantee team_code and time are present and in order
         if "team_code" not in today_ordered_cols:
             today_ordered_cols.append("team_code")
         if "time" not in today_ordered_cols:
             today_ordered_cols.append("time")
+        if "overlay_multiplier" not in today_ordered_cols:
+            today_ordered_cols.append("overlay_multiplier")
         today_df = today_df[today_ordered_cols]
 
         # Show and offer downloads
@@ -440,4 +520,4 @@ with tab2:
         st.success("All files and debug outputs ready.")
         gc.collect()
     else:
-        st.info("Upload both event-level Parquet and lineup CSV, then click 'Generate TODAY CSV'.")
+        st.info("Upload event-level Parquet, lineup CSV, and (optionally) batted ball profiles, then click 'Generate TODAY CSV'.")
