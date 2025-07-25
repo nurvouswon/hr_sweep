@@ -4,4 +4,3 @@ numpy
 pyarrow
 fastparquet
 scipy
-snowflake-connector-python
