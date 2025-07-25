@@ -8,7 +8,7 @@ import gc
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
 
 # ===================== CONTEXT MAPS & RATES =====================
-ark_hr_rate_map = {
+park_hr_rate_map = {
     'angels_stadium': 1.05, 'angel_stadium': 1.05, 'minute_maid_park': 1.06, 'coors_field': 1.30,
     'yankee_stadium': 1.19, 'fenway_park': 0.97, 'rogers_centre': 1.10, 'tropicana_field': 0.85,
     'camden_yards': 1.13, 'guaranteed_rate_field': 1.18, 'progressive_field': 1.01,
