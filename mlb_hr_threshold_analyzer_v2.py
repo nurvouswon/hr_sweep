@@ -1,26 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import snowflake.connector
 import re
 import io
 import gc
 
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
 
-# Pull from Streamlit secrets
-sf_creds = st.secrets["snowflake"]
-
-# Connect to Snowflake
-conn = snowflake.connector.connect(
-    user=sf_creds["user"],
-    password=sf_creds["password"],
-    account=sf_creds["account"],
-    warehouse=sf_creds["warehouse"],
-    database=sf_creds["database"],
-    schema=sf_creds["schema"],
-    role=sf_creds.get("role", None),
-)
 # ===================== CONTEXT MAPS & RATES =====================
 park_hr_rate_map = {
     'angels_stadium': 1.05, 'angel_stadium': 1.05, 'minute_maid_park': 1.06, 'coors_field': 1.30,
