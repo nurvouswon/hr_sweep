@@ -28,17 +28,21 @@ batted14_file = st.file_uploader("Upload 14-Day Batted Ball CSV", type=["csv"])
 # ----------------- Upload to Snowflake -----------------
 def upload_df_to_snowflake(df, table_name):
     if df is not None and not df.empty:
-        success, nchunks, nrows, _ = write_pandas(
-            conn=conn,
-            df=df,
-            table_name=table_name,
-            quote_identifiers=True
-        )
-        if success:
-            st.success(f"Uploaded {nrows} rows to {table_name}.")
-        else:
-            st.error(f"Failed to upload data to {table_name}.")
-
+        st.write(f"Uploading to {table_name} with columns:")
+        st.write(df.columns.tolist())
+        try:
+            success, nchunks, nrows, _ = write_pandas(
+                conn=conn,
+                df=df,
+                table_name=table_name,
+                quote_identifiers=True
+            )
+            if success:
+                st.success(f"Uploaded {nrows} rows to {table_name}.")
+            else:
+                st.error(f"Failed to upload data to {table_name}.")
+        except Exception as e:
+            st.error(f"Error uploading {table_name}: {e}")
 # Upload triggers only if ALL files are uploaded and button is pressed
 if st.button("Upload All to Snowflake"):
     if parquet_file and matchup_file and batted7_file and batted14_file:
