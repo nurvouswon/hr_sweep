@@ -18,6 +18,7 @@ conn = snowflake.connector.connect(
     schema=st.secrets["snowflake"]["schema"]
 )
 cursor = conn.cursor()
+st.write("Snowflake secrets loaded:", st.secrets.get("snowflake", {}))
 
 # ----------------- File Upload Interface -----------------
 df_hr, df_matchups, df_7, df_14 = None, None, None, None
