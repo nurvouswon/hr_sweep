@@ -1,31 +1,71 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import re
-import io
-import gc
-import snowflake.connector
+import streamlit as st import pandas as pd import numpy as np import snowflake.connector import io import gc
 
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
 
-# Connect to Snowflake using Streamlit secrets
-conn = snowflake.connector.connect(
-    user=st.secrets["snowflake"]["user"],
-    password=st.secrets["snowflake"]["password"],
-    account=st.secrets["snowflake"]["account"],
-    warehouse=st.secrets["snowflake"]["warehouse"],
-    database=st.secrets["snowflake"]["database"],
-    schema=st.secrets["snowflake"]["schema"]
-)
+-----------------------------------
 
-# Load DataFrame to Snowflake
-cursor = conn.cursor()
-df = pd.read_csv("your_file.csv")
-for _, row in df.iterrows():
-    cursor.execute(
-        "INSERT INTO your_table VALUES (%s, %s, %s)",  # match column count
-        tuple(row)
-    )
+Snowflake Connection
+
+-----------------------------------
+
+conn = snowflake.connector.connect( user=st.secrets["snowflake"]["user"], password=st.secrets["snowflake"]["password"], account=st.secrets["snowflake"]["account"], warehouse=st.secrets["snowflake"]["warehouse"], database=st.secrets["snowflake"]["database"], schema=st.secrets["snowflake"]["schema"] ) cursor = conn.cursor()
+
+-----------------------------------
+
+File Upload Interface
+
+-----------------------------------
+
+df_hr, df_matchups, df_7, df_14 = None, None, None, None
+
+st.header("Upload Daily Files")
+
+parquet_file = st.file_uploader("Upload Parquet File (daily HR data)", type=["parquet"]) matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"]) batted7_file = st.file_uploader("Upload 7-Day Batted Ball CSV", type=["csv"]) batted14_file = st.file_uploader("Upload 14-Day Batted Ball CSV", type=["csv"])
+
+if parquet_file is not None: df_hr = pd.read_parquet(parquet_file) if matchup_file is not None: df_matchups = pd.read_csv(matchup_file) if batted7_file is not None: df_7 = pd.read_csv(batted7_file) if batted14_file is not None: df_14 = pd.read_csv(batted14_file)
+
+-----------------------------------
+
+Snowflake Table Upload Function
+
+-----------------------------------
+
+def upload_df_to_snowflake(df, table_name): if df is not None and not df.empty: placeholders = ", ".join(["%s"] * len(df.columns)) col_names = ", ".join([f'"{col}"' for col in df.columns]) for _, row in df.iterrows(): cursor.execute( f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})", tuple(row) ) conn.commit()
+
+Upload to Snowflake tables
+
+if st.button("Upload All to Snowflake"): if df_hr is not None: upload_df_to_snowflake(df_hr, "daily_hr_data") if df_matchups is not None: upload_df_to_snowflake(df_matchups, "matchups") if df_7 is not None: upload_df_to_snowflake(df_7, "batted_7") if df_14 is not None: upload_df_to_snowflake(df_14, "batted_14") st.success("All files uploaded to Snowflake successfully.")
+
+-----------------------------------
+
+Load From Snowflake and Merge
+
+-----------------------------------
+
+@st.cache_data def load_snowflake_table(table_name): return pd.read_sql(f"SELECT * FROM {table_name}", conn)
+
+if st.button("Load and Merge Data"): df_hr = load_snowflake_table("daily_hr_data") df_matchups = load_snowflake_table("matchups") df_7 = load_snowflake_table("batted_7") df_14 = load_snowflake_table("batted_14")
+
+# Merge step
+df = df_hr.merge(df_matchups, on="batter_id", how="left")
+df = df.merge(df_7, on="batter_id", how="left")
+df = df.merge(df_14, on="batter_id", how="left")
+
+# Final memory cleanup
+gc.collect()
+
+# Show preview
+st.subheader("Merged Data Preview")
+st.dataframe(df.head(50))
+
+# You can now run any scoring/model logic on df below
+# Placeholder for model logic:
+# df["hr_score"] = model_score(df)
+
+# Display final results (sorted by score or any criteria)
+# st.dataframe(df.sort_values("hr_score", ascending=False).head(10))
+
+
 
 # ===================== CONTEXT MAPS & RATES =====================
 park_hr_rate_map = {
