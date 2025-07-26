@@ -5,6 +5,7 @@ import snowflake.connector
 import io
 import gc
 import re
+from snowflake.connector.pandas_tools import write_pandas
 
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
 
@@ -38,17 +39,18 @@ if batted7_file is not None:
 if batted14_file is not None:
     df_14 = pd.read_csv(batted14_file)
 
-# ----------------- Snowflake Table Upload Function -----------------
 def upload_df_to_snowflake(df, table_name):
     if df is not None and not df.empty:
-        placeholders = ", ".join(["%s"] * len(df.columns))
-        col_names = ", ".join([f'"{col}"' for col in df.columns])
-        for _, row in df.iterrows():
-            cursor.execute(
-                f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})",
-                tuple(row)
-            )
-        conn.commit()
+        success, nchunks, nrows, _ = write_pandas(
+            conn=conn,
+            df=df,
+            table_name=table_name,
+            quote_identifiers=True
+        )
+        if success:
+            st.success(f"Uploaded {nrows} rows to {table_name} in {nchunks} chunk(s).")
+        else:
+            st.error(f"Failed to upload data to {table_name}.")
 
 # Upload to Snowflake tables
 if st.button("Upload All to Snowflake"):
