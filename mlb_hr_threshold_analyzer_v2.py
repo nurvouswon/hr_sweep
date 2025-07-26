@@ -21,8 +21,6 @@ conn = snowflake.connector.connect(
 cursor = conn.cursor()
 
 # ----------------- File Upload Interface -----------------
-df_hr, df_matchups, df_7, df_14 = None, None, None, None
-
 st.header("Upload Daily Files")
 
 parquet_file = st.file_uploader("Upload Parquet File (daily HR data)", type=["parquet"])
@@ -30,14 +28,8 @@ matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"])
 batted7_file = st.file_uploader("Upload 7-Day Batted Ball CSV", type=["csv"])
 batted14_file = st.file_uploader("Upload 14-Day Batted Ball CSV", type=["csv"])
 
-if parquet_file is not None:
-    df_hr = pd.read_parquet(parquet_file)
-if matchup_file is not None:
-    df_matchups = pd.read_csv(matchup_file)
-if batted7_file is not None:
-    df_7 = pd.read_csv(batted7_file)
-if batted14_file is not None:
-    df_14 = pd.read_csv(batted14_file)
+# ----------------- Upload to Snowflake -----------------
+from snowflake.connector.pandas_tools import write_pandas
 
 def upload_df_to_snowflake(df, table_name):
     if df is not None and not df.empty:
@@ -48,9 +40,28 @@ def upload_df_to_snowflake(df, table_name):
             quote_identifiers=True
         )
         if success:
-            st.success(f"Uploaded {nrows} rows to {table_name} in {nchunks} chunk(s).")
+            st.success(f"Uploaded {nrows} rows to {table_name}.")
         else:
             st.error(f"Failed to upload data to {table_name}.")
+
+# 🔘 Upload logic only triggers if ALL 4 are uploaded and button is pressed
+if st.button("Upload All to Snowflake"):
+    if parquet_file and matchup_file and batted7_file and batted14_file:
+        # Read all files at once here
+        df_hr = pd.read_parquet(parquet_file)
+        df_matchups = pd.read_csv(matchup_file)
+        df_7 = pd.read_csv(batted7_file)
+        df_14 = pd.read_csv(batted14_file)
+
+        # Upload each DataFrame
+        upload_df_to_snowflake(df_hr, "daily_hr_data")
+        upload_df_to_snowflake(df_matchups, "matchups")
+        upload_df_to_snowflake(df_7, "batted_7")
+        upload_df_to_snowflake(df_14, "batted_14")
+
+        st.success("✅ All files uploaded to Snowflake successfully.")
+    else:
+        st.warning("⚠️ Please upload **all 4 files** before clicking upload.")
 
 # Upload to Snowflake tables
 if st.button("Upload All to Snowflake"):
