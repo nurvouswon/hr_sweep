@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import snowflake.connector
+import numpy as np
 import gc
+import io
 from snowflake.connector.pandas_tools import write_pandas
 
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
@@ -16,74 +18,6 @@ conn = snowflake.connector.connect(
     schema=st.secrets["snowflake"]["schema"]
 )
 cursor = conn.cursor()
-
-# ----------------- File Upload Interface -----------------
-st.header("Upload Daily Files")
-
-parquet_file = st.file_uploader("Upload Parquet File (daily HR data)", type=["parquet"])
-matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"])
-battedhitter_file = st.file_uploader("Upload Hitter Batted Ball CSV", type=["csv"])
-battedpitcher_file = st.file_uploader("Upload Pitcher Batted Ball CSV", type=["csv"])
-
-# ----------------- Upload to Snowflake -----------------
-def upload_df_to_snowflake(df, table_name):
-    if df is not None and not df.empty:
-        st.write(f"Uploading to {table_name} with columns:")
-        st.write(df.columns.tolist())
-        try:
-            success, nchunks, nrows, _ = write_pandas(
-                conn=conn,
-                df=df,
-                table_name=table_name,
-                quote_identifiers=True
-            )
-            if success:
-                st.success(f"Uploaded {nrows} rows to {table_name}.")
-            else:
-                st.error(f"Failed to upload data to {table_name}.")
-        except Exception as e:
-            st.error(f"Error uploading {table_name}: {e}")
-# Upload triggers only if ALL files are uploaded and button is pressed
-if st.button("Upload All to Snowflake"):
-    if parquet_file and matchup_file and battedhitter_file and battedpitcher_file:
-        # Read all files
-        df_hr = pd.read_parquet(parquet_file)
-        df_matchups = pd.read_csv(matchup_file)
-        df_hitter = pd.read_csv(battedhitter_file)
-        df_pitcher = pd.read_csv(battedpitcher_file)
-
-        # Upload each DataFrame
-        upload_df_to_snowflake(df_hr, "daily_hr_data")
-        upload_df_to_snowflake(df_matchups, "matchups")
-        upload_df_to_snowflake(df_hitter, "batted_hitter")
-        upload_df_to_snowflake(df_pitcher, "batted_pitcher")
-
-        st.success("✅ All files uploaded to Snowflake successfully.")
-    else:
-        st.warning("⚠️ Please upload **all 4 files** before clicking upload.")
-
-# ----------------- Load From Snowflake and Merge -----------------
-@st.cache_data
-def load_snowflake_table(table_name):
-    return pd.read_sql(f"SELECT * FROM {table_name}", conn)
-
-if st.button("Load and Merge Data"):
-    df_hr = load_snowflake_table("daily_hr_data")
-    df_matchups = load_snowflake_table("matchups")
-    df_hitter = load_snowflake_table("batted_hitter")
-    df_pitcher = load_snowflake_table("batted_pitcher")
-
-    # Merge on batter_id
-    df = df_hr.merge(df_matchups, on="batter_id", how="left")
-    df = df.merge(df_hitter, on="batter_id", how="left")
-    df = df.merge(df_pitcher, on="batter_id", how="left")
-
-    # Cleanup
-    gc.collect()
-
-    # Show preview
-    st.subheader("Merged Data Preview")
-    st.dataframe(df.head(50))
 
 # ===================== CONTEXT MAPS & RATES =====================
 park_hr_rate_map = {
@@ -335,12 +269,79 @@ with tab1:
 
 # ---------------- TAB 2: Generate TODAY CSV + Overlay ----------------
 with tab2:
-    st.header("Generate TODAY CSV with Weather, Context, & Batted Ball Overlay")
-    p_event = st.file_uploader("Upload Event-Level Parquet", type=["parquet"], key="event_parquet")
-    lineup_csv = st.file_uploader("Upload Today's Matchups CSV", type=["csv"], key="lineup_csv")
-    bb_batter_csv = st.file_uploader("Upload Batter Batted Ball Profiles CSV (optional)", type=["csv"], key="bb_batter_csv")
-    bb_pitcher_csv = st.file_uploader("Upload Pitcher Batted Ball Profiles CSV (optional)", type=["csv"], key="bb_pitcher_csv")
-    run_btn = st.button("Generate TODAY CSV", key="run_btn")
+    
+conn = snowflake.connector.connect(
+    user=st.secrets["snowflake"]["user"],
+    password=st.secrets["snowflake"]["password"],
+    account=st.secrets["snowflake"]["account"],
+    warehouse=st.secrets["snowflake"]["warehouse"],
+    database=st.secrets["snowflake"]["database"],
+    schema=st.secrets["snowflake"]["schema"]
+)
+cursor = conn.cursor()
+
+# ----------------- File Upload Interface -----------------
+st.header("Upload Daily Files")
+
+parquet_file = st.file_uploader("Upload Parquet File (daily HR data)", type=["parquet"])
+matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"])
+battedhitter_file = st.file_uploader("Upload Hitter Batted Ball CSV", type=["csv"])
+battedpitcher_file = st.file_uploader("Upload Pitcher Batted Ball CSV", type=["csv"])
+
+# ----------------- Upload to Snowflake -----------------
+def upload_df_to_snowflake(df, table_name):
+    if df is not None and not df.empty:
+        st.write(f"Uploading to {table_name} with columns:")
+        st.write(df.columns.tolist())
+        try:
+            success, nchunks, nrows, _ = write_pandas(
+                conn=conn,
+                df=df,
+                table_name=table_name,
+                quote_identifiers=True
+            )
+            if success:
+                st.success(f"Uploaded {nrows} rows to {table_name}.")
+            else:
+                st.error(f"Failed to upload data to {table_name}.")
+        except Exception as e:
+            st.error(f"Error uploading {table_name}: {e}")
+
+if st.button("Upload All to Snowflake"):
+    if parquet_file and matchup_file and battedhitter_file and battedpitcher_file:
+        df_hr = pd.read_parquet(parquet_file)
+        df_matchups = pd.read_csv(matchup_file)
+        df_hitter = pd.read_csv(battedhitter_file)
+        df_pitcher = pd.read_csv(battedpitcher_file)
+
+        upload_df_to_snowflake(df_hr, "daily_hr_data")
+        upload_df_to_snowflake(df_matchups, "matchups")
+        upload_df_to_snowflake(df_hitter, "batted_hitter")
+        upload_df_to_snowflake(df_pitcher, "batted_pitcher")
+
+        st.success("✅ All files uploaded to Snowflake successfully.")
+    else:
+        st.warning("⚠️ Please upload **all 4 files** before clicking upload.")
+
+# ----------------- Load From Snowflake and Merge -----------------
+@st.cache_data
+def load_snowflake_table(table_name):
+    return pd.read_sql(f"SELECT * FROM {table_name}", conn)
+
+if st.button("Load and Merge Data"):
+    df_hr = load_snowflake_table("daily_hr_data")
+    df_matchups = load_snowflake_table("matchups")
+    df_hitter = load_snowflake_table("batted_hitter")
+    df_pitcher = load_snowflake_table("batted_pitcher")
+
+    df = df_hr.merge(df_matchups, on="batter_id", how="left")
+    df = df.merge(df_hitter, on="batter_id", how="left")
+    df = df.merge(df_pitcher, on="batter_id", how="left")
+
+    gc.collect()
+
+    st.subheader("Merged Data Preview")
+    st.dataframe(df.head(50))
     
     if run_btn and p_event and lineup_csv:
         df = pd.read_parquet(p_event)
