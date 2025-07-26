@@ -22,8 +22,8 @@ st.header("Upload Daily Files")
 
 parquet_file = st.file_uploader("Upload Parquet File (daily HR data)", type=["parquet"])
 matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"])
-batted7_file = st.file_uploader("Upload 7-Day Batted Ball CSV", type=["csv"])
-batted14_file = st.file_uploader("Upload 14-Day Batted Ball CSV", type=["csv"])
+battedhitter_file = st.file_uploader("Upload Hitter Batted Ball CSV", type=["csv"])
+battedpitcher_file = st.file_uploader("Upload Pitcher Batted Ball CSV", type=["csv"])
 
 # ----------------- Upload to Snowflake -----------------
 def upload_df_to_snowflake(df, table_name):
@@ -45,18 +45,18 @@ def upload_df_to_snowflake(df, table_name):
             st.error(f"Error uploading {table_name}: {e}")
 # Upload triggers only if ALL files are uploaded and button is pressed
 if st.button("Upload All to Snowflake"):
-    if parquet_file and matchup_file and batted7_file and batted14_file:
+    if parquet_file and matchup_file and battedhitter_file and battedpitcher_file:
         # Read all files
         df_hr = pd.read_parquet(parquet_file)
         df_matchups = pd.read_csv(matchup_file)
-        df_7 = pd.read_csv(batted7_file)
-        df_14 = pd.read_csv(batted14_file)
+        df_hitter = pd.read_csv(battedhitter_file)
+        df_pitcher = pd.read_csv(battedpitcher_file)
 
         # Upload each DataFrame
         upload_df_to_snowflake(df_hr, "daily_hr_data")
         upload_df_to_snowflake(df_matchups, "matchups")
-        upload_df_to_snowflake(df_7, "batted_7")
-        upload_df_to_snowflake(df_14, "batted_14")
+        upload_df_to_snowflake(df_hitter, "batted_hitter")
+        upload_df_to_snowflake(df_pitcher, "batted_pitcher")
 
         st.success("✅ All files uploaded to Snowflake successfully.")
     else:
@@ -70,13 +70,13 @@ def load_snowflake_table(table_name):
 if st.button("Load and Merge Data"):
     df_hr = load_snowflake_table("daily_hr_data")
     df_matchups = load_snowflake_table("matchups")
-    df_7 = load_snowflake_table("batted_7")
-    df_14 = load_snowflake_table("batted_14")
+    df_hitter = load_snowflake_table("batted_hitter")
+    df_pitcher = load_snowflake_table("batted_pitcher")
 
     # Merge on batter_id
     df = df_hr.merge(df_matchups, on="batter_id", how="left")
-    df = df.merge(df_7, on="batter_id", how="left")
-    df = df.merge(df_14, on="batter_id", how="left")
+    df = df.merge(df_hitter, on="batter_id", how="left")
+    df = df.merge(df_pitcher, on="batter_id", how="left")
 
     # Cleanup
     gc.collect()
