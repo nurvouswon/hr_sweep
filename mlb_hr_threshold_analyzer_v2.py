@@ -1,10 +1,7 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import snowflake.connector
-import io
 import gc
-import re
 from snowflake.connector.pandas_tools import write_pandas
 
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
@@ -29,8 +26,6 @@ batted7_file = st.file_uploader("Upload 7-Day Batted Ball CSV", type=["csv"])
 batted14_file = st.file_uploader("Upload 14-Day Batted Ball CSV", type=["csv"])
 
 # ----------------- Upload to Snowflake -----------------
-from snowflake.connector.pandas_tools import write_pandas
-
 def upload_df_to_snowflake(df, table_name):
     if df is not None and not df.empty:
         success, nchunks, nrows, _ = write_pandas(
@@ -44,10 +39,10 @@ def upload_df_to_snowflake(df, table_name):
         else:
             st.error(f"Failed to upload data to {table_name}.")
 
-# 🔘 Upload logic only triggers if ALL 4 are uploaded and button is pressed
+# Upload triggers only if ALL files are uploaded and button is pressed
 if st.button("Upload All to Snowflake"):
     if parquet_file and matchup_file and batted7_file and batted14_file:
-        # Read all files at once here
+        # Read all files
         df_hr = pd.read_parquet(parquet_file)
         df_matchups = pd.read_csv(matchup_file)
         df_7 = pd.read_csv(batted7_file)
@@ -63,18 +58,6 @@ if st.button("Upload All to Snowflake"):
     else:
         st.warning("⚠️ Please upload **all 4 files** before clicking upload.")
 
-# Upload to Snowflake tables
-if st.button("Upload All to Snowflake"):
-    if df_hr is not None:
-        upload_df_to_snowflake(df_hr, "daily_hr_data")
-    if df_matchups is not None:
-        upload_df_to_snowflake(df_matchups, "matchups")
-    if df_7 is not None:
-        upload_df_to_snowflake(df_7, "batted_7")
-    if df_14 is not None:
-        upload_df_to_snowflake(df_14, "batted_14")
-    st.success("All files uploaded to Snowflake successfully.")
-
 # ----------------- Load From Snowflake and Merge -----------------
 @st.cache_data
 def load_snowflake_table(table_name):
@@ -86,12 +69,12 @@ if st.button("Load and Merge Data"):
     df_7 = load_snowflake_table("batted_7")
     df_14 = load_snowflake_table("batted_14")
 
-    # Merge step
+    # Merge on batter_id
     df = df_hr.merge(df_matchups, on="batter_id", how="left")
     df = df.merge(df_7, on="batter_id", how="left")
     df = df.merge(df_14, on="batter_id", how="left")
 
-    # Final memory cleanup
+    # Cleanup
     gc.collect()
 
     # Show preview
