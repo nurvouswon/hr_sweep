@@ -270,16 +270,6 @@ with tab1:
 # ---------------- TAB 2: Generate TODAY CSV + Overlay ----------------
 with tab2:
     
-    conn = snowflake.connector.connect(
-        user=st.secrets["snowflake"]["user"],
-        password=st.secrets["snowflake"]["password"],
-        account=st.secrets["snowflake"]["account"],
-        warehouse=st.secrets["snowflake"]["warehouse"],
-        database=st.secrets["snowflake"]["database"],
-        schema=st.secrets["snowflake"]["schema"]
-    )
-    cursor = conn.cursor()
-
     # ----------------- File Upload Interface -----------------
     st.header("Upload Daily Files")
 
@@ -342,11 +332,6 @@ with tab2:
 
         st.subheader("Merged Data Preview")
         st.dataframe(df.head(50))
-    
-    if run_btn and p_event and lineup_csv:
-        df = pd.read_parquet(p_event)
-        st.write("[Diagnostics] Loaded event-level shape:", df.shape)
-        st.write("[Diagnostics] Columns:", list(df.columns))
 
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
