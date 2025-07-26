@@ -1,71 +1,89 @@
-import streamlit as st import pandas as pd import numpy as np import snowflake.connector import io import gc
+import streamlit as st
+import pandas as pd
+import numpy as np
+import snowflake.connector
+import io
+import gc
+import re
 
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
 
------------------------------------
+# ----------------- Snowflake Connection -----------------
+conn = snowflake.connector.connect(
+    user=st.secrets["snowflake"]["user"],
+    password=st.secrets["snowflake"]["password"],
+    account=st.secrets["snowflake"]["account"],
+    warehouse=st.secrets["snowflake"]["warehouse"],
+    database=st.secrets["snowflake"]["database"],
+    schema=st.secrets["snowflake"]["schema"]
+)
+cursor = conn.cursor()
 
-Snowflake Connection
-
------------------------------------
-
-conn = snowflake.connector.connect( user=st.secrets["snowflake"]["user"], password=st.secrets["snowflake"]["password"], account=st.secrets["snowflake"]["account"], warehouse=st.secrets["snowflake"]["warehouse"], database=st.secrets["snowflake"]["database"], schema=st.secrets["snowflake"]["schema"] ) cursor = conn.cursor()
-
------------------------------------
-
-File Upload Interface
-
------------------------------------
-
+# ----------------- File Upload Interface -----------------
 df_hr, df_matchups, df_7, df_14 = None, None, None, None
 
 st.header("Upload Daily Files")
 
-parquet_file = st.file_uploader("Upload Parquet File (daily HR data)", type=["parquet"]) matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"]) batted7_file = st.file_uploader("Upload 7-Day Batted Ball CSV", type=["csv"]) batted14_file = st.file_uploader("Upload 14-Day Batted Ball CSV", type=["csv"])
+parquet_file = st.file_uploader("Upload Parquet File (daily HR data)", type=["parquet"])
+matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"])
+batted7_file = st.file_uploader("Upload 7-Day Batted Ball CSV", type=["csv"])
+batted14_file = st.file_uploader("Upload 14-Day Batted Ball CSV", type=["csv"])
 
-if parquet_file is not None: df_hr = pd.read_parquet(parquet_file) if matchup_file is not None: df_matchups = pd.read_csv(matchup_file) if batted7_file is not None: df_7 = pd.read_csv(batted7_file) if batted14_file is not None: df_14 = pd.read_csv(batted14_file)
+if parquet_file is not None:
+    df_hr = pd.read_parquet(parquet_file)
+if matchup_file is not None:
+    df_matchups = pd.read_csv(matchup_file)
+if batted7_file is not None:
+    df_7 = pd.read_csv(batted7_file)
+if batted14_file is not None:
+    df_14 = pd.read_csv(batted14_file)
 
------------------------------------
+# ----------------- Snowflake Table Upload Function -----------------
+def upload_df_to_snowflake(df, table_name):
+    if df is not None and not df.empty:
+        placeholders = ", ".join(["%s"] * len(df.columns))
+        col_names = ", ".join([f'"{col}"' for col in df.columns])
+        for _, row in df.iterrows():
+            cursor.execute(
+                f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})",
+                tuple(row)
+            )
+        conn.commit()
 
-Snowflake Table Upload Function
+# Upload to Snowflake tables
+if st.button("Upload All to Snowflake"):
+    if df_hr is not None:
+        upload_df_to_snowflake(df_hr, "daily_hr_data")
+    if df_matchups is not None:
+        upload_df_to_snowflake(df_matchups, "matchups")
+    if df_7 is not None:
+        upload_df_to_snowflake(df_7, "batted_7")
+    if df_14 is not None:
+        upload_df_to_snowflake(df_14, "batted_14")
+    st.success("All files uploaded to Snowflake successfully.")
 
------------------------------------
+# ----------------- Load From Snowflake and Merge -----------------
+@st.cache_data
+def load_snowflake_table(table_name):
+    return pd.read_sql(f"SELECT * FROM {table_name}", conn)
 
-def upload_df_to_snowflake(df, table_name): if df is not None and not df.empty: placeholders = ", ".join(["%s"] * len(df.columns)) col_names = ", ".join([f'"{col}"' for col in df.columns]) for _, row in df.iterrows(): cursor.execute( f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})", tuple(row) ) conn.commit()
+if st.button("Load and Merge Data"):
+    df_hr = load_snowflake_table("daily_hr_data")
+    df_matchups = load_snowflake_table("matchups")
+    df_7 = load_snowflake_table("batted_7")
+    df_14 = load_snowflake_table("batted_14")
 
-Upload to Snowflake tables
+    # Merge step
+    df = df_hr.merge(df_matchups, on="batter_id", how="left")
+    df = df.merge(df_7, on="batter_id", how="left")
+    df = df.merge(df_14, on="batter_id", how="left")
 
-if st.button("Upload All to Snowflake"): if df_hr is not None: upload_df_to_snowflake(df_hr, "daily_hr_data") if df_matchups is not None: upload_df_to_snowflake(df_matchups, "matchups") if df_7 is not None: upload_df_to_snowflake(df_7, "batted_7") if df_14 is not None: upload_df_to_snowflake(df_14, "batted_14") st.success("All files uploaded to Snowflake successfully.")
+    # Final memory cleanup
+    gc.collect()
 
------------------------------------
-
-Load From Snowflake and Merge
-
------------------------------------
-
-@st.cache_data def load_snowflake_table(table_name): return pd.read_sql(f"SELECT * FROM {table_name}", conn)
-
-if st.button("Load and Merge Data"): df_hr = load_snowflake_table("daily_hr_data") df_matchups = load_snowflake_table("matchups") df_7 = load_snowflake_table("batted_7") df_14 = load_snowflake_table("batted_14")
-
-# Merge step
-df = df_hr.merge(df_matchups, on="batter_id", how="left")
-df = df.merge(df_7, on="batter_id", how="left")
-df = df.merge(df_14, on="batter_id", how="left")
-
-# Final memory cleanup
-gc.collect()
-
-# Show preview
-st.subheader("Merged Data Preview")
-st.dataframe(df.head(50))
-
-# You can now run any scoring/model logic on df below
-# Placeholder for model logic:
-# df["hr_score"] = model_score(df)
-
-# Display final results (sorted by score or any criteria)
-# st.dataframe(df.sort_values("hr_score", ascending=False).head(10))
-
-
+    # Show preview
+    st.subheader("Merged Data Preview")
+    st.dataframe(df.head(50))
 
 # ===================== CONTEXT MAPS & RATES =====================
 park_hr_rate_map = {
@@ -79,6 +97,7 @@ park_hr_rate_map = {
     'loandepot_park': 0.86, 'citi_field': 1.05, 'nationals_park': 1.05, 'petco_park': 0.85,
     'chase_field': 1.06, 'citizens_bank_park': 1.19, 'sutter_health_park': 1.12, 'target_field': 1.05
 }
+
 park_altitude_map = {
     'coors_field': 5280, 'chase_field': 1100, 'dodger_stadium': 338, 'minute_maid_park': 50,
     'fenway_park': 19, 'wrigley_field': 594, 'great_american_ball_park': 489, 'oracle_park': 10,
@@ -89,11 +108,13 @@ park_altitude_map = {
     'loandepot_park': 7, 'nationals_park': 25, 'american_family_field': 633, 'sutter_health_park': 20,
     'target_field': 830
 }
+
 roof_status_map = {
     'rogers_centre': 'closed', 'chase_field': 'open', 'minute_maid_park': 'open',
     'loan_depot_park': 'closed', 'loandepot_park': 'closed', 'globe_life_field': 'open',
     'tropicana_field': 'closed', 'american_family_field': 'open'
 }
+
 team_code_to_park = {
     'PHI': 'citizens_bank_park', 'ATL': 'truist_park', 'NYM': 'citi_field',
     'BOS': 'fenway_park', 'NYY': 'yankee_stadium', 'CHC': 'wrigley_field',
@@ -106,6 +127,7 @@ team_code_to_park = {
     'TEX': 'globe_life_field', 'ARI': 'chase_field', 'AZ': 'chase_field', 'COL': 'coors_field', 'PIT': 'pnc_park',
     'STL': 'busch_stadium', 'BAL': 'camden_yards', 'WSH': 'nationals_park', 'WAS': 'nationals_park'
 }
+
 mlb_team_city_map = {
     'ANA': 'Anaheim', 'ARI': 'Phoenix', 'AZ': 'Phoenix', 'ATL': 'Atlanta', 'BAL': 'Baltimore', 'BOS': 'Boston',
     'CHC': 'Chicago', 'CIN': 'Cincinnati', 'CLE': 'Cleveland', 'COL': 'Denver', 'CWS': 'Chicago',
@@ -115,6 +137,7 @@ mlb_team_city_map = {
     'SD': 'San Diego', 'SEA': 'Seattle', 'SF': 'San Francisco', 'STL': 'St. Louis', 'TB': 'St. Petersburg',
     'TEX': 'Arlington', 'TOR': 'Toronto', 'WSH': 'Washington', 'WAS': 'Washington'
 }
+
 park_hand_hr_rate_map = {
     'angels_stadium': {'L': 1.09, 'R': 1.02}, 'angel_stadium': {'L': 1.09, 'R': 1.02},
     'minute_maid_park': {'L': 1.13, 'R': 1.06}, 'coors_field': {'L': 1.38, 'R': 1.24},
@@ -134,6 +157,7 @@ park_hand_hr_rate_map = {
     'chase_field': {'L': 1.16, 'R': 1.05}, 'citizens_bank_park': {'L': 1.22, 'R': 1.20},
     'sutter_health_park': {'L': 1.12, 'R': 1.12}, 'target_field': {'L': 1.09, 'R': 1.01}
 }
+
 # ========== DEEP RESEARCH HR MULTIPLIERS: BATTER SIDE ===============
 park_hr_percent_map_all = {
     'ARI': 0.98, 'AZ': 0.98, 'ATL': 0.95, 'BAL': 1.11, 'BOS': 0.84, 'CHC': 1.03, 'CHW': 1.25, 'CWS': 1.25,
@@ -142,6 +166,7 @@ park_hr_percent_map_all = {
     'PHI': 1.18, 'PIT': 0.83, 'SD': 1.02, 'SEA': 1.00, 'SF': 0.75, 'STL': 0.86, 'TB': 0.96, 'TEX': 1.07, 'TOR': 1.09,
     'WAS': 1.00, 'WSH': 1.00
 }
+
 park_hr_percent_map_rhb = {
     'ARI': 1.00, 'AZ': 1.00, 'ATL': 0.93, 'BAL': 1.09, 'BOS': 0.90, 'CHC': 1.09, 'CHW': 1.26, 'CWS': 1.26,
     'CIN': 1.27, 'CLE': 0.91, 'COL': 1.05, 'DET': 0.96, 'HOU': 1.10, 'KC': 0.83, 'LAA': 1.01, 'LAD': 1.11,
@@ -149,6 +174,7 @@ park_hr_percent_map_rhb = {
     'PHI': 1.18, 'PIT': 0.80, 'SD': 1.02, 'SEA': 1.03, 'SF': 0.76, 'STL': 0.84, 'TB': 0.94, 'TEX': 1.06, 'TOR': 1.11,
     'WAS': 1.02, 'WSH': 1.02
 }
+
 park_hr_percent_map_lhb = {
     'ARI': 0.98, 'AZ': 0.98, 'ATL': 0.99, 'BAL': 1.13, 'BOS': 0.75, 'CHC': 0.93, 'CHW': 1.23, 'CWS': 1.23,
     'CIN': 1.29, 'CLE': 1.01, 'COL': 1.07, 'DET': 0.96, 'HOU': 1.09, 'KC': 0.81, 'LAA': 1.00, 'LAD': 1.12,
@@ -156,6 +182,7 @@ park_hr_percent_map_lhb = {
     'PHI': 1.19, 'PIT': 0.90, 'SD': 0.98, 'SEA': 0.96, 'SF': 0.73, 'STL': 0.90, 'TB': 0.99, 'TEX': 1.11, 'TOR': 1.05,
     'WAS': 0.96, 'WSH': 0.96
 }
+
 # ========== DEEP RESEARCH HR MULTIPLIERS: PITCHER SIDE ===============
 park_hr_percent_map_pitcher_all = {
     'ARI': 0.98, 'AZ': 0.98, 'ATL': 0.95, 'BAL': 1.11, 'BOS': 0.84, 'CHC': 1.03, 'CHW': 1.25, 'CWS': 1.25,
@@ -164,6 +191,7 @@ park_hr_percent_map_pitcher_all = {
     'PHI': 1.18, 'PIT': 0.83, 'SD': 1.02, 'SEA': 1.00, 'SF': 0.75, 'STL': 0.86, 'TB': 0.96, 'TEX': 1.07, 'TOR': 1.09,
     'WAS': 1.00, 'WSH': 1.00
 }
+
 park_hr_percent_map_rhp = {
     'ARI': 0.97, 'AZ': 0.97, 'ATL': 1.01, 'BAL': 1.16, 'BOS': 0.84, 'CHC': 1.02, 'CHW': 1.28, 'CWS': 1.28,
     'CIN': 1.27, 'CLE': 0.98, 'COL': 1.06, 'DET': 0.95, 'HOU': 1.11, 'KC': 0.84, 'LAA': 1.01, 'LAD': 1.11,
@@ -171,6 +199,7 @@ park_hr_percent_map_rhp = {
     'PHI': 1.19, 'PIT': 0.85, 'SD': 1.02, 'SEA': 1.01, 'SF': 0.73, 'STL': 0.84, 'TB': 0.97, 'TEX': 1.10, 'TOR': 1.11,
     'WAS': 1.03, 'WSH': 1.03
 }
+
 park_hr_percent_map_lhp = {
     'ARI': 0.99, 'AZ': 0.99, 'ATL': 0.79, 'BAL': 0.97, 'BOS': 0.83, 'CHC': 1.03, 'CHW': 1.18, 'CWS': 1.18,
     'CIN': 1.27, 'CLE': 0.89, 'COL': 1.05, 'DET': 0.97, 'HOU': 1.07, 'KC': 0.79, 'LAA': 1.01, 'LAD': 1.11,
@@ -178,6 +207,7 @@ park_hr_percent_map_lhp = {
     'PHI': 1.16, 'PIT': 0.78, 'SD': 1.02, 'SEA': 0.97, 'SF': 0.82, 'STL': 0.96, 'TB': 0.94, 'TEX': 1.01, 'TOR': 1.06,
     'WAS': 0.90, 'WSH': 0.90
 }
+
 def dedup_columns(df):
     return df.loc[:, ~df.columns.duplicated()]
 
@@ -311,6 +341,7 @@ with tab2:
     bb_batter_csv = st.file_uploader("Upload Batter Batted Ball Profiles CSV (optional)", type=["csv"], key="bb_batter_csv")
     bb_pitcher_csv = st.file_uploader("Upload Pitcher Batted Ball Profiles CSV (optional)", type=["csv"], key="bb_pitcher_csv")
     run_btn = st.button("Generate TODAY CSV", key="run_btn")
+    
     if run_btn and p_event and lineup_csv:
         df = pd.read_parquet(p_event)
         st.write("[Diagnostics] Loaded event-level shape:", df.shape)
@@ -380,194 +411,37 @@ with tab2:
         if bb_batter_csv:
             bb_bat = pd.read_csv(bb_batter_csv)
             for _, row in bb_bat.iterrows():
-                pid = str(row['batter_id']) if 'batter_id' in row else str(row.get('player_id', ''))
-                batter_profile[pid] = row.to_dict()
-        pitcher_profile = {}
-        if bb_pitcher_csv:
-            bb_pitch = pd.read_csv(bb_pitcher_csv)
-            for _, row in bb_pitch.iterrows():
-                pid = str(row['pitcher_id']) if 'pitcher_id' in row else str(row.get('player_id', ''))
-                pitcher_profile[pid] = row.to_dict()
-
-        all_event_cols = list(df.columns)
-        extra_context_cols = [
-            'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status', 'city',
-            'batter_hand', 'pitcher_hand',
-            'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
-            'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp', 'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
-        ]
-        today_cols = [
-            'game_date', 'batter_id', 'player_name', 'pitcher_id',
-            'temp', 'humidity', 'wind_mph', 'wind_dir_string', 'condition', 'stand',
-            'team_code', 'time'
-        ] + extra_context_cols
-
-        rolling_feature_cols = [col for col in all_event_cols if (
-            (col.startswith('b_') or col.startswith('p_')) or ('rolling_' in col) or ('barrel_rate' in col) or ('hard_hit_rate' in col)
-        )]
-        today_cols += [c for c in all_event_cols if c not in today_cols and c in rolling_feature_cols]
-
-        pitcher_hand_map = {}
-        if 'pitcher_id' in df.columns and 'pitcher_hand' in df.columns:
-            pitcher_hand_statcast = df[['pitcher_id', 'pitcher_hand']].drop_duplicates().dropna()
-            for _, row_p in pitcher_hand_statcast.iterrows():
-                pid = str(row_p['pitcher_id'])
-                hand = row_p['pitcher_hand']
-                if pid not in pitcher_hand_map and pd.notna(hand):
-                    pitcher_hand_map[pid] = hand
-        if 'pitcher_id' in lineup_df.columns:
-            for _, row_p in lineup_df.dropna(subset=['pitcher_id']).drop_duplicates(['pitcher_id']).iterrows():
-                pid = str(row_p['pitcher_id'])
-                hand = row_p.get('p_throws') or row_p.get('stand') or row_p.get('pitcher_hand')
-                if pid not in pitcher_hand_map and pd.notna(hand):
-                    pitcher_hand_map[pid] = hand
-
-        today_rows = []
-        for idx, row in lineup_df.iterrows():
-            this_batter_id = str(row['batter_id']).split(".")[0]
-            park = row.get("park", np.nan)
-            city = row.get("city", np.nan)
-            team_code = row.get("team_code", np.nan)
-            game_date = row.get("game_date", np.nan)
-            pitcher_id = str(row.get("pitcher_id", np.nan))
-            player_name = row.get("player_name", np.nan)
-            stand = row.get("stand", np.nan)
-            filter_df = df[df['batter_id'].astype(str).str.split('.').str[0] == this_batter_id]
-            if not filter_df.empty:
-                last_row = filter_df.iloc[-1]
-                row_out = {c: last_row.get(c, np.nan) for c in rolling_feature_cols + [
-                    'batter_hand', 'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status',
-                    'city', 'pitcher_hand',
-                    'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
-                    'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp',
-                    'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
-                ] if c in all_event_cols or c in extra_context_cols}
-            else:
-                row_out = {c: np.nan for c in rolling_feature_cols + [
-                    'batter_hand', 'park', 'park_hr_rate', 'park_hand_hr_rate', 'park_altitude', 'roof_status',
-                    'city', 'pitcher_hand',
-                    'park_hr_pct_all', 'park_hr_pct_rhb', 'park_hr_pct_lhb', 'park_hr_pct_hand',
-                    'pitcher_team_code', 'pitcher_park_hr_pct_all', 'pitcher_park_hr_pct_rhp',
-                    'pitcher_park_hr_pct_lhp', 'pitcher_park_hr_pct_hand'
-                ] if c in all_event_cols or c in extra_context_cols}
-
-            batter_hand = row.get('stand', row_out.get('batter_hand', np.nan))
-            pitcher_hand = pitcher_hand_map.get(pitcher_id, np.nan)
-            park_hand_rate = 1.0
-            if not pd.isna(park) and not pd.isna(batter_hand):
-                park_hand_rate = park_hand_hr_rate_map.get(str(park).lower(), {}).get(str(batter_hand).upper(), 1.0)
-            if not pd.isna(team_code):
-                park_hr_pct_all = park_hr_percent_map_all.get(team_code, 1.0)
-                park_hr_pct_rhb = park_hr_percent_map_rhb.get(team_code, 1.0)
-                park_hr_pct_lhb = park_hr_percent_map_lhb.get(team_code, 1.0)
-                if str(batter_hand).upper() == "R":
-                    park_hr_pct_hand = park_hr_pct_rhb
-                elif str(batter_hand).upper() == "L":
-                    park_hr_pct_hand = park_hr_pct_lhb
-                else:
-                    park_hr_pct_hand = park_hr_pct_all
-            else:
-                park_hr_pct_all = park_hr_pct_rhb = park_hr_pct_lhb = park_hr_pct_hand = 1.0
-
-            pitcher_team_code = row.get("pitcher_team_code", np.nan)
-            if pd.isna(pitcher_team_code):
-                if 'pitcher_team_code' in row_out and pd.notna(row_out['pitcher_team_code']):
-                    pitcher_team_code = row_out['pitcher_team_code']
-                elif 'team_code' in row and pd.notna(row['team_code']):
-                    pitcher_team_code = row['team_code']
-                else:
-                    pitcher_team_code = np.nan
-            pitcher_hand_val = str(pitcher_hand).upper() if pd.notna(pitcher_hand) else ""
-            if not pd.isna(pitcher_team_code):
-                pitcher_park_hr_pct_all = park_hr_percent_map_pitcher_all.get(pitcher_team_code, 1.0)
-                pitcher_park_hr_pct_rhp = park_hr_percent_map_rhp.get(pitcher_team_code, 1.0)
-                pitcher_park_hr_pct_lhp = park_hr_percent_map_lhp.get(pitcher_team_code, 1.0)
-                if pitcher_hand_val == "R":
-                    pitcher_park_hr_pct_hand = pitcher_park_hr_pct_rhp
-                elif pitcher_hand_val == "L":
-                    pitcher_park_hr_pct_hand = pitcher_park_hr_pct_lhp
-                else:
-                    pitcher_park_hr_pct_hand = pitcher_park_hr_pct_all
-            else:
-                pitcher_park_hr_pct_all = pitcher_park_hr_pct_rhp = pitcher_park_hr_pct_lhp = pitcher_park_hr_pct_hand = 1.0
-
-            # --------- Overlay Multiplier Calculation (Wind/Batted Ball Profile Edge) ----------
-            try:
-                overlay_multiplier = get_wind_edge(
-                    row, batter_profile, pitcher_profile
-                )
-            except Exception:
-                overlay_multiplier = 1.0
-
-            row_out.update({
-                "game_date": game_date,
-                "batter_id": this_batter_id,
-                "player_name": player_name,
-                "pitcher_id": pitcher_id,
-                "park": park,
-                "park_hr_rate": park_hr_rate_map.get(str(park).lower(), 1.0) if not pd.isna(park) else 1.0,
-                "park_hand_hr_rate": park_hand_rate,
-                "park_altitude": park_altitude_map.get(str(park).lower(), 0) if not pd.isna(park) else 0,
-                "roof_status": roof_status_map.get(str(park).lower(), "open") if not pd.isna(park) else "open",
-                "city": city if not pd.isna(city) else mlb_team_city_map.get(team_code, ""),
-                "stand": batter_hand,
-                "batter_hand": batter_hand,
-                "pitcher_hand": pitcher_hand,
-                "park_hr_pct_all": park_hr_pct_all,
-                "park_hr_pct_rhb": park_hr_pct_rhb,
-                "park_hr_pct_lhb": park_hr_pct_lhb,
-                "park_hr_pct_hand": park_hr_pct_hand,
-                "pitcher_team_code": pitcher_team_code,
-                "pitcher_park_hr_pct_all": pitcher_park_hr_pct_all,
-                "pitcher_park_hr_pct_rhp": pitcher_park_hr_pct_rhp,
-                "pitcher_park_hr_pct_lhp": pitcher_park_hr_pct_lhp,
-                "pitcher_park_hr_pct_hand": pitcher_park_hr_pct_hand,
-                "team_code": team_code,
-                "time": row.get("time", np.nan),
-                "temp": row.get("temp", np.nan),
-                "humidity": row.get("humidity", np.nan),
-                "wind_mph": row.get("wind_mph", np.nan),
-                "wind_dir_string": row.get("wind_dir_string", np.nan),
-                "condition": row.get("condition", np.nan),
-                "overlay_multiplier": overlay_multiplier
-            })
-            today_rows.append(row_out)
-
-        today_df = pd.DataFrame(today_rows)
-        today_df = dedup_columns(today_df)
-        today_df = downcast_numeric(today_df)
-
-        # Ensure columns are sorted as in event-level if possible
-        event_col_set = set(df.columns)
-        today_ordered_cols = [col for col in df.columns if col in today_df.columns] + [col for col in today_df.columns if col not in df.columns]
-        if "team_code" not in today_ordered_cols:
-            today_ordered_cols.append("team_code")
-        if "time" not in today_ordered_cols:
-            today_ordered_cols.append("time")
-        if "overlay_multiplier" not in today_ordered_cols:
-            today_ordered_cols.append("overlay_multiplier")
-        today_df = today_df[today_ordered_cols]
-
-        # Show and offer downloads
-        st.write("TODAY CSV (sample):", today_df.head(20))
-        st.markdown("#### Download TODAY CSV / Parquet (1 row per batter, matchup, rolling features & weather):")
-        st.dataframe(today_df.head(20), use_container_width=True)
-        st.download_button(
-            "⬇️ Download TODAY CSV",
-            data=today_df.to_csv(index=False),
-            file_name="today_hr_features.csv",
-            key="download_today_csv"
-        )
-        today_parquet = io.BytesIO()
-        today_df.to_parquet(today_parquet, index=False)
-        st.download_button(
-            "⬇️ Download TODAY Parquet",
-            data=today_parquet.getvalue(),
-            file_name="today_hr_features.parquet",
-            mime="application/octet-stream",
-            key="download_today_parquet"
-        )
-        st.success("All files and debug outputs ready.")
+                pid = str(row['batter_id']) if 'batter_id' in row else str(row.get('player_id
+                st.success("All files and debug outputs ready.")
         gc.collect()
     else:
         st.info("Upload event-level Parquet, lineup CSV, and (optionally) batted ball profiles, then click 'Generate TODAY CSV'.")
+
+# -------------------- SNOWFLAKE CONNECTION CLEANUP --------------------
+def cleanup():
+    """Ensure Snowflake connection is properly closed"""
+    try:
+        if 'cursor' in globals():
+            cursor.close()
+        if 'conn' in globals():
+            conn.close()
+    except Exception as e:
+        st.warning(f"Cleanup warning: {str(e)}")
+
+# Register cleanup to run when streamlit script ends
+import atexit
+atexit.register(cleanup)
+
+# -------------------- ADDITIONAL SAFETY CHECKS --------------------
+def validate_columns(df, required_cols, df_name):
+    """Check if required columns exist in dataframe"""
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        st.error(f"Missing columns in {df_name}: {', '.join(missing)}")
+        return False
+    return True
+
+# -------------------- MAIN EXECUTION GUARD --------------------
+if __name__ == "__main__":
+    # This ensures the code only runs when executed directly (not when imported)
+    st.write("MLB HR Analyzer is running...")
