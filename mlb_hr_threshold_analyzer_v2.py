@@ -4,8 +4,28 @@ import numpy as np
 import re
 import io
 import gc
+import snowflake.connector
 
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
+
+# Connect to Snowflake using Streamlit secrets
+conn = snowflake.connector.connect(
+    user=st.secrets["snowflake"]["user"],
+    password=st.secrets["snowflake"]["password"],
+    account=st.secrets["snowflake"]["account"],
+    warehouse=st.secrets["snowflake"]["warehouse"],
+    database=st.secrets["snowflake"]["database"],
+    schema=st.secrets["snowflake"]["schema"]
+)
+
+# Load DataFrame to Snowflake
+cursor = conn.cursor()
+df = pd.read_csv("your_file.csv")
+for _, row in df.iterrows():
+    cursor.execute(
+        "INSERT INTO your_table VALUES (%s, %s, %s)",  # match column count
+        tuple(row)
+    )
 
 # ===================== CONTEXT MAPS & RATES =====================
 park_hr_rate_map = {
