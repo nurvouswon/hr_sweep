@@ -5,6 +5,7 @@ import numpy as np
 import gc
 import io
 from snowflake.connector.pandas_tools import write_pandas
+from sqlalchemy import create_engine
 
 st.set_page_config("MLB HR Analyzer – Parquet Tools", layout="wide")
 
@@ -328,8 +329,6 @@ with tab2:
             st.warning("⚠️ Please upload **all 4 files** before clicking upload.")
     # ----------------- Load From Snowflake and Merge -----------------
     @st.cache_data
-    from sqlalchemy import create_engine
-
     def load_snowflake_table(table_name):
         user = st.secrets["snowflake"]["user"]
         password = st.secrets["snowflake"]["password"]
