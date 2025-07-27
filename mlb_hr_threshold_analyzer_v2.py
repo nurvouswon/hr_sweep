@@ -343,14 +343,14 @@ with tab2:
     @st.cache_data
     def load_snowflake_table(table_name):
     # Streamlit UI trigger
-    if st.button("Load and Merge Data"):
-        try:
-            df = load_merged_data()
-            st.success(f"Merged data loaded successfully! Shape: {df.shape}")
-            st.dataframe(df.head(50))
-        except Exception as e:
-            st.error("❌ Failed to load and merge data from Snowflake.")
-            st.exception(e)
+        if st.button("Load and Merge Data"):
+            try:
+                df = load_merged_data()
+                st.success(f"Merged data loaded successfully! Shape: {df.shape}")
+                st.dataframe(df.head(50))
+            except Exception as e:
+                st.error("❌ Failed to load and merge data from Snowflake.")
+                st.exception(e)
         
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
