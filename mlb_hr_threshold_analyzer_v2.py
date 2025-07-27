@@ -144,6 +144,17 @@ park_hr_percent_map_lhp = {
     'WAS': 0.90, 'WSH': 0.90
 }
 
+# Define the query to merge in Snowflake
+def load_merged_data():
+    query = """
+        SELECT *
+        FROM DAILY_HR_DATA hr
+        LEFT JOIN MATCHUPS m ON hr.batter_id = m.batter_id
+        LEFT JOIN BATTED_HITTER h ON hr.batter_id = h.batter_id
+        LEFT JOIN BATTED_PITCHER p ON hr.batter_id = p.batter_id
+    """
+    return pd.read_sql(query, conn)
+
 def dedup_columns(df):
     return df.loc[:, ~df.columns.duplicated()]
 
@@ -331,55 +342,15 @@ with tab2:
     # ----------------- Load From Snowflake and Merge -----------------
     @st.cache_data
     def load_snowflake_table(table_name):
-        try:
-            user = st.secrets["snowflake"]["user"]
-            password = st.secrets["snowflake"]["password"]
-            account = st.secrets["snowflake"]["account"]
-            warehouse = st.secrets["snowflake"]["warehouse"]
-            database = st.secrets["snowflake"]["database"]
-            schema = st.secrets["snowflake"]["schema"]
-
-            engine = create_engine(
-                f'snowflake://{user}:{password}@{account}/{database}/{schema}?warehouse={warehouse}'
-            )
-
-            with engine.connect() as conn:
-                df = pd.read_sql(f'SELECT * FROM {table_name}', conn)
-                st.success(f"✅ Loaded table: {table_name} — {df.shape[0]} rows")
-                return df
-
-        except Exception as e:
-            st.error(f"❌ Error loading table: {table_name}")
-            st.exception(e)
-            st.text(traceback.format_exc())
-            return pd.DataFrame()  # Return empty so app doesn't crash
-
-    # 🔁 Merge with full debug tracing
-    if st.button("Load and Merge Data"):
-        try:
-            df_hr = load_snowflake_table("DAILY_HR_DATA")
-            df_matchups = load_snowflake_table("MATCHUPS")
-            df_hitter = load_snowflake_table("BATTED_HITTER")
-            df_pitcher = load_snowflake_table("BATTED_PITCHER")
-
-            if df_hr.empty or df_matchups.empty or df_hitter.empty or df_pitcher.empty:
-                st.warning("⚠️ One or more dataframes are empty. Skipping merge.")
-            else:
-                st.write("🧩 Merging data...")
-                df = df_hr.merge(df_matchups, on="batter_id", how="left")
-                df = df.merge(df_hitter, on="batter_id", how="left")
-                df = df.merge(df_pitcher, on="batter_id", how="left")
-
-                st.success(f"✅ Merge complete: {df.shape[0]} rows, {df.shape[1]} columns")
-                st.subheader("Merged Data Preview")
-                st.dataframe(df.head(50))
-
-            gc.collect()
-
-        except Exception as e:
-            st.error("❌ Unexpected error during load or merge")
-            st.exception(e)
-            st.text(traceback.format_exc())
+    # Streamlit UI trigger
+if st.button("Load and Merge Data"):
+    try:
+        df = load_merged_data()
+        st.success(f"Merged data loaded successfully! Shape: {df.shape}")
+        st.dataframe(df.head(50))
+    except Exception as e:
+        st.error("❌ Failed to load and merge data from Snowflake.")
+        st.exception(e)
         
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
