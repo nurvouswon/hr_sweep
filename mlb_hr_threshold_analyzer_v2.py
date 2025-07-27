@@ -190,7 +190,11 @@ def add_rolling_hr_features(df, id_col, date_col, outcome_col='hr_outcome', wind
         results.append(group)
     df = pd.concat(results)
     return df
-
+    
+def clean_column_names_upper(df: pd.DataFrame) -> pd.DataFrame:
+    df.columns = [col.strip().upper().replace(" ", "_") for col in df.columns]
+    return df
+    
 def get_wind_edge(row, batter_profile, pitcher_profile):
     wind_dir = str(row.get('wind_dir_string', '')).lower()
     batter_id = str(row.get('batter_id', ''))
@@ -277,7 +281,26 @@ with tab2:
     matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"])
     battedhitter_file = st.file_uploader("Upload Hitter Batted Ball CSV", type=["csv"])
     battedpitcher_file = st.file_uploader("Upload Pitcher Batted Ball CSV", type=["csv"])
+    
+    if st.button("Upload to Snowflake"):
+        df_hr = pd.read_csv("path/to/daily_hr_data.csv")
+        df_matchups = pd.read_csv("path/to/matchups.csv")
+        df_hitter = pd.read_csv("path/to/batted_hitter.csv")
+        df_pitcher = pd.read_csv("path/to/batted_pitcher.csv")
 
+    # Convert all columns to UPPERCASE before uploading
+        df_hr = clean_column_names_upper(df_hr)
+        df_matchups = clean_column_names_upper(df_matchups)
+        df_hitter = clean_column_names_upper(df_hitter)
+        df_pitcher = clean_column_names_upper(df_pitcher)
+
+    # Upload with write_pandas (auto_create_table=False to avoid issues)
+        write_pandas(conn, df_hr, table_name="DAILY_HR_DATA", auto_create_table=False)
+        write_pandas(conn, df_matchups, table_name="MATCHUPS", auto_create_table=False)
+        write_pandas(conn, df_hitter, table_name="BATTED_HITTER", auto_create_table=False)
+        write_pandas(conn, df_pitcher, table_name="BATTED_PITCHER", auto_create_table=False)
+
+        st.success("All tables uploaded successfully!")
     # ----------------- Upload to Snowflake -----------------
     def upload_df_to_snowflake(df, table_name):
         if df is not None and not df.empty:
