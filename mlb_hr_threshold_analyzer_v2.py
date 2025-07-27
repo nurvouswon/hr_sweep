@@ -304,10 +304,10 @@ with tab2:
             df_hitter = pd.read_csv(battedhitter_file)
             df_pitcher = pd.read_csv(battedpitcher_file)
 
-            upload_df_to_snowflake(df_hr, "daily_hr_data")
-            upload_df_to_snowflake(df_matchups, "matchups")
-            upload_df_to_snowflake(df_hitter, "batted_hitter")
-            upload_df_to_snowflake(df_pitcher, "batted_pitcher")
+            upload_df_to_snowflake(df_hr, "DAILY_HR_DATA")
+            upload_df_to_snowflake(df_matchups, "MATCHUPS")
+            upload_df_to_snowflake(df_hitter, "BATTED_HITTER")
+            upload_df_to_snowflake(df_pitcher, "BATTED_PITCHER")
 
             st.success("✅ All files uploaded to Snowflake successfully.")
         else:
