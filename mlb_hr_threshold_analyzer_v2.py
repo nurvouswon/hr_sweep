@@ -328,9 +328,24 @@ with tab2:
             st.warning("⚠️ Please upload **all 4 files** before clicking upload.")
     # ----------------- Load From Snowflake and Merge -----------------
     @st.cache_data
-    def load_snowflake_table(table_name):
-        return pd.read_sql(f"SELECT * FROM {table_name}", conn)
+    from sqlalchemy import create_engine
 
+    def load_snowflake_table(table_name):
+        user = st.secrets["snowflake"]["user"]
+        password = st.secrets["snowflake"]["password"]
+        account = st.secrets["snowflake"]["account"]
+        warehouse = st.secrets["snowflake"]["warehouse"]
+        database = st.secrets["snowflake"]["database"]
+        schema = st.secrets["snowflake"]["schema"]
+
+        engine = create_engine(
+            f'snowflake://{user}:{password}@{account}/{database}/{schema}?warehouse={warehouse}'
+        )
+
+        with engine.connect() as conn:
+            return pd.read_sql(f'SELECT * FROM {table_name}', conn)
+
+    # 👇 This stays the same
     if st.button("Load and Merge Data"):
         df_hr = load_snowflake_table("DAILY_HR_DATA")
         df_matchups = load_snowflake_table("MATCHUPS")
@@ -345,7 +360,7 @@ with tab2:
 
         st.subheader("Merged Data Preview")
         st.dataframe(df.head(50))
-
+        
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
             df = add_rolling_hr_features(df, id_col='batter_id', date_col='game_date', outcome_col='hr_outcome', windows=roll_windows, prefix='b_')
