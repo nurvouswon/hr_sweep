@@ -319,10 +319,10 @@ with tab2:
         return pd.read_sql(f"SELECT * FROM {table_name}", conn)
 
     if st.button("Load and Merge Data"):
-        df_hr = load_snowflake_table("daily_hr_data")
-        df_matchups = load_snowflake_table("matchups")
-        df_hitter = load_snowflake_table("batted_hitter")
-        df_pitcher = load_snowflake_table("batted_pitcher")
+        df_hr = load_snowflake_table("DAILY_HR_DATA")
+        df_matchups = load_snowflake_table("MATCHUPS")
+        df_hitter = load_snowflake_table("BATTED_HITTER")
+        df_pitcher = load_snowflake_table("BATTED_PITCHER")
 
         df = df_hr.merge(df_matchups, on="batter_id", how="left")
         df = df.merge(df_hitter, on="batter_id", how="left")
