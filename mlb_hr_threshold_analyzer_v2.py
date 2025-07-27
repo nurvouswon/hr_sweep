@@ -340,7 +340,6 @@ with tab2:
         else:
             st.warning("⚠️ Please upload **all 4 files** before clicking upload.")
     # ----------------- Load From Snowflake and Merge -----------------
-    @st.cache_data
     def load_snowflake_table(table_name):
     # Streamlit UI trigger
         if st.button("Load and Merge Data"):
