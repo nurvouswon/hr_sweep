@@ -282,12 +282,6 @@ with tab2:
     battedhitter_file = st.file_uploader("Upload Hitter Batted Ball CSV", type=["csv"])
     battedpitcher_file = st.file_uploader("Upload Pitcher Batted Ball CSV", type=["csv"])
     
-    if st.button("Upload to Snowflake"):
-        df_hr = pd.read_csv("path/to/daily_hr_data.csv")
-        df_matchups = pd.read_csv("path/to/matchups.csv")
-        df_hitter = pd.read_csv("path/to/batted_hitter.csv")
-        df_pitcher = pd.read_csv("path/to/batted_pitcher.csv")
-
     # Convert all columns to UPPERCASE before uploading
         df_hr = clean_column_names_upper(df_hr)
         df_matchups = clean_column_names_upper(df_matchups)
