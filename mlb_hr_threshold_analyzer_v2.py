@@ -281,18 +281,18 @@ with tab2:
     matchup_file = st.file_uploader("Upload Matchup CSV", type=["csv"])
     battedhitter_file = st.file_uploader("Upload Hitter Batted Ball CSV", type=["csv"])
     battedpitcher_file = st.file_uploader("Upload Pitcher Batted Ball CSV", type=["csv"])
-    
-    # Convert all columns to UPPERCASE before uploading
-    df_daily_hr_data = clean_column_names_upper(df_daily_hr_data)
-    df_matchups = clean_column_names_upper(df_matchups)
-    df_batted_hitter = clean_column_names_upper(df_batted_hitter)
-    df_batted_pitcher = clean_column_names_upper(df_batted_pitcher)
 
     # Upload with write_pandas (auto_create_table=False to avoid issues)
     write_pandas(conn, df_daily_hr_data, table_name="DAILY_HR_DATA", auto_create_table=False)
     write_pandas(conn, df_matchups, table_name="MATCHUPS", auto_create_table=False)
     write_pandas(conn, df_batted_hitter, table_name="BATTED_HITTER", auto_create_table=False)
     write_pandas(conn, df_batted_pitcher, table_name="BATTED_PITCHER", auto_create_table=False)
+
+    # Convert all columns to UPPERCASE before uploading
+    df_daily_hr_data = clean_column_names_upper(df_daily_hr_data)
+    df_matchups = clean_column_names_upper(df_matchups)
+    df_batted_hitter = clean_column_names_upper(df_batted_hitter)
+    df_batted_pitcher = clean_column_names_upper(df_batted_pitcher)
 
     st.success("All tables uploaded successfully!")
     # ----------------- Upload to Snowflake -----------------
