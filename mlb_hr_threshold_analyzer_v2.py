@@ -331,55 +331,55 @@ with tab2:
     # ----------------- Load From Snowflake and Merge -----------------
     @st.cache_data
     def load_snowflake_table(table_name):
-    try:
-        user = st.secrets["snowflake"]["user"]
-        password = st.secrets["snowflake"]["password"]
-        account = st.secrets["snowflake"]["account"]
-        warehouse = st.secrets["snowflake"]["warehouse"]
-        database = st.secrets["snowflake"]["database"]
-        schema = st.secrets["snowflake"]["schema"]
+        try:
+            user = st.secrets["snowflake"]["user"]
+            password = st.secrets["snowflake"]["password"]
+            account = st.secrets["snowflake"]["account"]
+            warehouse = st.secrets["snowflake"]["warehouse"]
+            database = st.secrets["snowflake"]["database"]
+            schema = st.secrets["snowflake"]["schema"]
 
-        engine = create_engine(
-            f'snowflake://{user}:{password}@{account}/{database}/{schema}?warehouse={warehouse}'
-        )
+            engine = create_engine(
+                f'snowflake://{user}:{password}@{account}/{database}/{schema}?warehouse={warehouse}'
+            )
 
-        with engine.connect() as conn:
-            df = pd.read_sql(f'SELECT * FROM {table_name}', conn)
-            st.success(f"✅ Loaded table: {table_name} — {df.shape[0]} rows")
-            return df
+            with engine.connect() as conn:
+                df = pd.read_sql(f'SELECT * FROM {table_name}', conn)
+                st.success(f"✅ Loaded table: {table_name} — {df.shape[0]} rows")
+                return df
 
-    except Exception as e:
-        st.error(f"❌ Error loading table: {table_name}")
-        st.exception(e)
-        st.text(traceback.format_exc())
-        return pd.DataFrame()  # Return empty so app doesn't crash
+        except Exception as e:
+            st.error(f"❌ Error loading table: {table_name}")
+            st.exception(e)
+            st.text(traceback.format_exc())
+            return pd.DataFrame()  # Return empty so app doesn't crash
 
-# 🔁 Merge with full debug tracing
-if st.button("Load and Merge Data"):
-    try:
-        df_hr = load_snowflake_table("DAILY_HR_DATA")
-        df_matchups = load_snowflake_table("MATCHUPS")
-        df_hitter = load_snowflake_table("BATTED_HITTER")
-        df_pitcher = load_snowflake_table("BATTED_PITCHER")
+    # 🔁 Merge with full debug tracing
+    if st.button("Load and Merge Data"):
+        try:
+            df_hr = load_snowflake_table("DAILY_HR_DATA")
+            df_matchups = load_snowflake_table("MATCHUPS")
+            df_hitter = load_snowflake_table("BATTED_HITTER")
+            df_pitcher = load_snowflake_table("BATTED_PITCHER")
 
-        if df_hr.empty or df_matchups.empty or df_hitter.empty or df_pitcher.empty:
-            st.warning("⚠️ One or more dataframes are empty. Skipping merge.")
-        else:
-            st.write("🧩 Merging data...")
-            df = df_hr.merge(df_matchups, on="batter_id", how="left")
-            df = df.merge(df_hitter, on="batter_id", how="left")
-            df = df.merge(df_pitcher, on="batter_id", how="left")
+            if df_hr.empty or df_matchups.empty or df_hitter.empty or df_pitcher.empty:
+                st.warning("⚠️ One or more dataframes are empty. Skipping merge.")
+            else:
+                st.write("🧩 Merging data...")
+                df = df_hr.merge(df_matchups, on="batter_id", how="left")
+                df = df.merge(df_hitter, on="batter_id", how="left")
+                df = df.merge(df_pitcher, on="batter_id", how="left")
 
-            st.success(f"✅ Merge complete: {df.shape[0]} rows, {df.shape[1]} columns")
-            st.subheader("Merged Data Preview")
-            st.dataframe(df.head(50))
+                st.success(f"✅ Merge complete: {df.shape[0]} rows, {df.shape[1]} columns")
+                st.subheader("Merged Data Preview")
+                st.dataframe(df.head(50))
 
-        gc.collect()
+            gc.collect()
 
-    except Exception as e:
-        st.error("❌ Unexpected error during load or merge")
-        st.exception(e)
-        st.text(traceback.format_exc())
+        except Exception as e:
+            st.error("❌ Unexpected error during load or merge")
+            st.exception(e)
+            st.text(traceback.format_exc())
         
         roll_windows = [3, 5, 7, 14, 20, 30, 60]
         if 'hr_outcome' in df.columns:
