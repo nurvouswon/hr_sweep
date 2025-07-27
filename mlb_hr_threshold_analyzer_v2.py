@@ -282,20 +282,7 @@ with tab2:
     battedhitter_file = st.file_uploader("Upload Hitter Batted Ball CSV", type=["csv"])
     battedpitcher_file = st.file_uploader("Upload Pitcher Batted Ball CSV", type=["csv"])
 
-    # Upload with write_pandas (auto_create_table=False to avoid issues)
-    write_pandas(conn, df_daily_hr_data, table_name="DAILY_HR_DATA", auto_create_table=False)
-    write_pandas(conn, df_matchups, table_name="MATCHUPS", auto_create_table=False)
-    write_pandas(conn, df_batted_hitter, table_name="BATTED_HITTER", auto_create_table=False)
-    write_pandas(conn, df_batted_pitcher, table_name="BATTED_PITCHER", auto_create_table=False)
-
-    # Convert all columns to UPPERCASE before uploading
-    df_daily_hr_data = clean_column_names_upper(df_daily_hr_data)
-    df_matchups = clean_column_names_upper(df_matchups)
-    df_batted_hitter = clean_column_names_upper(df_batted_hitter)
-    df_batted_pitcher = clean_column_names_upper(df_batted_pitcher)
-
-    st.success("All tables uploaded successfully!")
-    # ----------------- Upload to Snowflake -----------------
+    # Function to upload to Snowflake
     def upload_df_to_snowflake(df, table_name):
         if df is not None and not df.empty:
             st.write(f"Uploading to {table_name} with columns:")
@@ -305,7 +292,8 @@ with tab2:
                     conn=conn,
                     df=df,
                     table_name=table_name,
-                    quote_identifiers=True
+                    quote_identifiers=True,
+                    auto_create_table=False
                 )
                 if success:
                     st.success(f"Uploaded {nrows} rows to {table_name}.")
@@ -314,13 +302,22 @@ with tab2:
             except Exception as e:
                 st.error(f"Error uploading {table_name}: {e}")
 
+    # Upload button
     if st.button("Upload All to Snowflake"):
         if parquet_file and matchup_file and battedhitter_file and battedpitcher_file:
+        # Read files
             df_hr = pd.read_parquet(parquet_file)
             df_matchups = pd.read_csv(matchup_file)
             df_hitter = pd.read_csv(battedhitter_file)
             df_pitcher = pd.read_csv(battedpitcher_file)
 
+        # Clean column names to UPPERCASE before uploading
+            df_hr = clean_column_names_upper(df_hr)
+            df_matchups = clean_column_names_upper(df_matchups)
+            df_hitter = clean_column_names_upper(df_hitter)
+            df_pitcher = clean_column_names_upper(df_pitcher)
+
+        # Upload to Snowflake
             upload_df_to_snowflake(df_hr, "DAILY_HR_DATA")
             upload_df_to_snowflake(df_matchups, "MATCHUPS")
             upload_df_to_snowflake(df_hitter, "BATTED_HITTER")
@@ -329,7 +326,6 @@ with tab2:
             st.success("✅ All files uploaded to Snowflake successfully.")
         else:
             st.warning("⚠️ Please upload **all 4 files** before clicking upload.")
-
     # ----------------- Load From Snowflake and Merge -----------------
     @st.cache_data
     def load_snowflake_table(table_name):
